@@ -15,12 +15,12 @@ FILE_INGRESS="${FILE_INGRESS:-http://localhost:9200}"      # file-consumer aux
 
 # --- where k6 runs (on the compose network, talking to container names) ---
 DOCKER_NETWORK="${DOCKER_NETWORK:-vrsky-network}"
-K6_IMAGE="${K6_IMAGE:-grafana/k6:latest}"
+K6_IMAGE="${K6_IMAGE:-mirror.gcr.io/grafana/k6:latest}"
 # Container-internal URL k6 uses to reach the webhook ingress.
 WEBHOOK_INGRESS_INTERNAL="${WEBHOOK_INGRESS_INTERNAL:-http://webhook-consumer:9100}"
 # NATS (for the post-run stream purge — see purge_data_stream).
 NATS_INTERNAL="${NATS_INTERNAL:-nats://nats:4222}"
-NATS_BOX_IMAGE="${NATS_BOX_IMAGE:-natsio/nats-box:latest}"
+NATS_BOX_IMAGE="${NATS_BOX_IMAGE:-mirror.gcr.io/natsio/nats-box:latest}"
 DATA_STREAM="${DATA_STREAM:-VRSKY_DATA}"
 
 # --- load-test account ---

@@ -489,8 +489,9 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// - GET /api/v1/connections/{id}/auto-generator/status
 
 	// Wrap mux with middleware (applied in reverse order — innermost is rightmost).
-	// Audit must sit INSIDE TenantID so it can read the tenant from context,
-	// and OUTSIDE the route mux so it observes every handler.
+	// Audit sits OUTSIDE the route mux so it observes every handler. It files
+	// entries under the workspace the per-route auth checks verified, never
+	// under the X-Tenant-ID that TenantID puts in the context (#695, #719).
 	//   Logging → Metrics → CORS → TenantID → Audit → Routes
 	var handler http.Handler = mux
 	handler = managementapi.AuditMiddleware(repo, logger)(handler)

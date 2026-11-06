@@ -51,7 +51,8 @@ loopback, link-local or cloud-metadata address (`10.0.0.0/8`,
   to `http`, whose path is under the API root is fetched from the configured
   host instead, as picture links already are (on-prem servers often name
   themselves by an internal host). Any other link stops the poll with an
-  error; the watermark stays where it was.
+  error. An incremental poll keeps what it read before the link (see
+  "Incremental polling"); a full poll ends there.
 
 If you have a node with an `http` or private `api_base_url` or `token_url`, it
 stops working after this change and needs a reachable https URL. For local
@@ -66,11 +67,12 @@ A consumer node polls one OData entity on `poll_interval_seconds`, following
 
 A poll follows at most 10 000 pages. If the API is still returning
 `@odata.nextLink` after that, the poll stops with a warning that names the
-connection and the cap. The pages already read stay published, but the
-watermark is not advanced. An incremental poll that hits the cap therefore
-repeats the same pages on every poll and never gets past them, so the records
-beyond them are not delivered, until `page_size` is raised or `filter` is
-narrowed.
+connection and the cap. The pages already read stay published. An incremental
+poll stores how far it got and the next poll continues from there, so a large
+entity is read over several polls (see "Incremental polling"). A poll that is
+not incremental has no watermark: it repeats the same pages on every poll and
+never gets past them, so the records beyond them are not delivered until
+`page_size` is raised or `filter` is narrowed.
 
 - `entity` — the entity to poll (default `items`; e.g. `customers`, `salesOrders`).
 - `filter` — optional OData `$filter` (e.g. `status eq 'Open'`).
@@ -169,8 +171,8 @@ Notes:
   controls. Without `incremental`, every poll checks every record's picture id
   — one small request per record, no download unless it changed.
 - **A failed picture download** fails that poll: the incremental watermark
-  holds, so the next poll sends that page's records again and retries the
-  picture.
+  stops before that page, so the next poll sends that page's records again and
+  retries the picture.
 - **Request cost.** The first poll of a large catalogue is about two extra
   requests per record (picture details, then the image); after that, one
   small request per record polled.
@@ -283,10 +285,48 @@ node sees) is skipped and the converted record is written.
   beginning. It is composed with any configured `filter` rather than replacing
   it: `(your filter) and lastModifiedDateTime gt <watermark>`.
 
-    The watermark only advances once **every** page of a fetch has been
-    published. A fetch that fails halfway resumes from the previous watermark,
-    so its records arrive twice rather than being skipped — the same
-    at-least-once bargain the rest of the pipeline makes.
+    An incremental poll asks for the records in `cursor_field` order
+    (`$orderby=<cursor_field> asc`), so a poll that stops before its last page
+    (the page cap, a next link off the API, a page or publish that failed)
+    knows that every record valued below the last one it read is done. It
+    stores that point and the next poll continues there:
+
+    - For a DateTime field the watermark becomes the largest value read that
+      is strictly below the last value read (and not in the future; see
+      "Records dated in the future" below). Records on the last value may sit
+      on pages the poll never got to, so they come back on the next poll; the
+      ones already sent are remembered (in the checkpoint row, like the
+      future-dated records below) and not sent twice.
+    - For a date field it is the newest date read, as after a full poll. The
+      `ge` filter reads that day again, and the records of it already sent
+      are left out.
+    - Only pages handled in full count: a page whose records or pictures
+      failed to publish comes back whole on the next poll.
+    - More records on one value than a poll reads (10 000 pages of the same
+      timestamp or date) still cannot be passed. For a date field that
+      includes the records dated today or later, which every poll reads
+      again after the watermark day. For a DateTime field, more distinct
+      future-dated records than a poll reads never complete either: they
+      never become the watermark, so every poll starts before all of them. With `lookback_days` the window is read
+      again from its start on every poll, so a window larger than the cap is
+      not passed either. The Warn says so: it reads "was not advanced".
+    - If BC answers 400 to `$orderby` and the same request without it works
+      (a field it cannot sort on), the node logs a Warn and polls without
+      `$orderby` until it restarts; a poll that stops early then does not
+      advance. The same goes for a feed that comes back out of order anyway,
+      which the node checks and logs. The check only sees the pages a poll
+      read: a server that ignored the order and happened to return those
+      pages ascending would not be caught, and older records on the pages it
+      never read could be skipped. Business Central honoured the order in the
+      live check below.
+    - A **Resend everything** that stops early stores the same point and is
+      done; the next polls send the rest. A recovery read past a frozen
+      watermark (see "Records dated in the future") that stops early stores
+      nothing, as before, and starts over on the next poll.
+
+    The live trial (BC 28.5, 2026-11-03) kept its order across 40 pages with
+    no duplicate ids, at about the cost of key order. Watch the poll times on
+    a large tenant.
 
     For a DateTime the comparison is `gt`, so a record written in the same millisecond as the
     watermark but after the fetch read it is not picked up. `ge` would redeliver

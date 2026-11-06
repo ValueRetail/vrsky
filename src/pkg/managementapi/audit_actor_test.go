@@ -254,7 +254,9 @@ func TestAudit_MemberOfMissingTenantFilesNothing(t *testing.T) {
 	}
 }
 
-// An inactive key is not an actor: the request is treated as anonymous.
+// An inactive key is not an actor: the request is treated as anonymous, and
+// since #719 an anonymous request is filed nowhere, not even under the key's
+// own workspace.
 func TestAudit_InactiveKeyIsNotRecorded(t *testing.T) {
 	for _, path := range []string{"/api/v1/connections", "/api/v1/tenant/" + billTenantB + "/data"} {
 		t.Run(path, func(t *testing.T) {
@@ -264,12 +266,8 @@ func TestAudit_InactiveKeyIsNotRecorded(t *testing.T) {
 			if rec.Code < 400 {
 				t.Fatalf("status %d, want a refusal", rec.Code)
 			}
-			// Anonymous refusals keep today's filing under the context
-			// tenant (backlog 186), so there is one entry to inspect.
-			for _, en := range aw.wait(t, 1) {
-				if en.ActorKind == "api_key" || en.ActorLabel != "" || en.UserID != nil {
-					t.Fatalf("inactive key recorded as actor: %+v", en)
-				}
+			if got := aw.settle(); len(got) != 0 {
+				t.Fatalf("a request with an inactive key filed entries: %+v", got)
 			}
 		})
 	}
@@ -332,20 +330,17 @@ func (r *inviteSessionRepo) ValidateSession(_ context.Context, _ string) (*Sessi
 
 // Which workspace an entry is filed under: the route's explicit path
 // override (AuditUnderPathTenant), then the workspace the caller was verified
-// against, then nothing for an authenticated caller, then (anonymous only)
-// the context tenant.
+// against, then nothing, whether the caller authenticated or not (#719).
 func TestAuditBag_TenantPrecedence(t *testing.T) {
 	cases := []struct {
-		name, override, verified, context, want string
-		actor                                   bool
+		name, override, verified, want string
+		actor                          bool
 	}{
-		{"anonymous, context only", "", "", "ctx", "ctx", false},
-		{"verified over context", "", "verified", "ctx", "verified", true},
-		{"override over verified and context", "path", "verified", "ctx", "path", true},
-		{"override over context", "path", "", "ctx", "path", true},
-		{"verified with no context", "", "verified", "", "verified", true},
-		{"authenticated but unverified: not the context", "", "", "ctx", "", true},
-		{"nothing", "", "", "", "", false},
+		{"override over verified", "path", "verified", "path", true},
+		{"override alone", "path", "", "path", true},
+		{"verified", "", "verified", "verified", true},
+		{"authenticated but unverified", "", "", "", true},
+		{"anonymous", "", "", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -353,7 +348,7 @@ func TestAuditBag_TenantPrecedence(t *testing.T) {
 			if c.actor {
 				b.actor = &auditActor{kind: "user", userID: "u", label: "u@example.com"}
 			}
-			if got := b.tenant(c.context); got != c.want {
+			if got := b.tenant(); got != c.want {
 				t.Fatalf("tenant() = %q, want %q", got, c.want)
 			}
 		})

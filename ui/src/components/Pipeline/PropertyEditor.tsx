@@ -3023,7 +3023,7 @@ function BrightpearlConfigEditor({ config, setConfig, nodeType }: ConnEditorProp
   return (
     <div className="space-y-3">
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-        <StyledInput label="Datacenter" placeholder="eu1" value={(c.datacenter as string) || ''} onChange={(v) => update({ datacenter: v })} />
+        <StyledInput label="Datacenter" placeholder="euw1" value={(c.datacenter as string) || ''} onChange={(v) => update({ datacenter: v })} />
         <StyledInput label="Account code" placeholder="youraccount" value={(c.account_code as string) || ''} onChange={(v) => update({ account_code: v })} />
       </div>
       <StyledInput label="App ref (brightpearl-app-ref)" placeholder="yourapp" value={(c.app_ref as string) || ''} onChange={(v) => update({ app_ref: v })} />

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -401,7 +402,7 @@ func TestResend_NextPollSendsEverythingOnce(t *testing.T) {
 	f.mu.Lock()
 	q := f.pageQuery
 	f.mu.Unlock()
-	if !strings.Contains(q, "lastModifiedDateTime") {
+	if !strings.Contains(filterIn(q), "lastModifiedDateTime") {
 		t.Fatalf("second poll was not incremental: %q", q)
 	}
 	mu.Lock()
@@ -419,7 +420,7 @@ func TestResend_NextPollSendsEverythingOnce(t *testing.T) {
 	f.mu.Lock()
 	q = f.pageQuery
 	f.mu.Unlock()
-	if strings.Contains(q, "lastModifiedDateTime") {
+	if strings.Contains(filterIn(q), "lastModifiedDateTime") {
 		t.Errorf("the resend poll still carried the watermark: %q", q)
 	}
 	mu.Lock()
@@ -439,7 +440,7 @@ func TestResend_NextPollSendsEverythingOnce(t *testing.T) {
 	f.mu.Lock()
 	q = f.pageQuery
 	f.mu.Unlock()
-	if !strings.Contains(q, "lastModifiedDateTime") {
+	if !strings.Contains(filterIn(q), "lastModifiedDateTime") {
 		t.Errorf("the poll after a resend was not incremental again: %q", q)
 	}
 }
@@ -719,4 +720,15 @@ func TestPictures_SeenPicturesSurviveRestart(t *testing.T) {
 	if n := len(markers(*got)); n != 1 {
 		t.Fatalf("markers after a removal following a restart = %d, want 1", n)
 	}
+}
+
+// filterIn is the $filter of a page request's query. An incremental poll
+// also names the cursor field in $orderby (#733), so the watermark is looked
+// for in the filter alone.
+func filterIn(rawQuery string) string {
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "unparsable query " + rawQuery
+	}
+	return q.Get("$filter")
 }

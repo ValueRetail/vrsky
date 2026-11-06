@@ -464,8 +464,9 @@ func TestFetch_NextLinkStaysOnTheConfiguredOrigin(t *testing.T) {
 		{"another host, under the API path", func(_, o, _ string) string { return o + entityPath + "?page=2" }, 2, false, false},
 		{"https to http, outside the API path", func(_, _, h string) string { return h + "/collect?page=2" }, 1, true, false},
 		{"https to http, under the API path", func(_, _, h string) string { return h + entityPath + "?page=2" }, 2, false, false},
-		// The poll stops before the watermark is stored, so the next poll
-		// reads the same window again instead of skipping it.
+		// The poll stops on the only value it read, so it has nothing to
+		// advance to (#733): the next poll reads the same window again
+		// instead of skipping it.
 		{"incremental, another host, outside the API path", func(_, o, _ string) string { return o + "/collect?page=2" }, 1, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -505,7 +506,7 @@ func TestFetch_NextLinkStaysOnTheConfiguredOrigin(t *testing.T) {
 			err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger)
 
 			if tc.incremental {
-				if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil {
+				if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil && cp.LastProcessedMessageID != "" {
 					t.Errorf("a watermark was stored (%q) by a poll that stopped", cp.LastProcessedMessageID)
 				}
 			}

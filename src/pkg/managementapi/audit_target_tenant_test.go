@@ -37,7 +37,9 @@ func serveAudited(t *testing.T, h *Handler, aw AuditWriter, method, path, worksp
 	if workspace != "" {
 		req = req.WithContext(ContextWithTenantID(req.Context(), workspace))
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	if bearer != "" { // "" sends no credential at all
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	rec := httptest.NewRecorder()
 	AuditMiddleware(aw, nil)(mux).ServeHTTP(rec, req)
 	return rec

@@ -64,7 +64,7 @@ func TestFetch_UnwrapsResponseAndSendsStaffHeaders(t *testing.T) {
 
 // TestBaseURL derives the datacenter/account URL, and honours an override.
 func TestBaseURL(t *testing.T) {
-	if got := (&BrightpearlConfig{Datacenter: "eu1", AccountCode: "acme"}).baseURL(); got != "https://ws-eu1.brightpearl.com/public-api/acme" {
+	if got := (&BrightpearlConfig{Datacenter: "eu1", AccountCode: "acme"}).baseURL(); got != "https://euw1.brightpearlconnect.com/public-api/acme" {
 		t.Errorf("derived base = %q", got)
 	}
 	if got := (&BrightpearlConfig{BaseURL: "https://x/"}).baseURL(); got != "https://x" {

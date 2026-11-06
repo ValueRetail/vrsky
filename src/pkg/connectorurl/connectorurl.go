@@ -27,9 +27,33 @@ var (
 	brightpearlAccountCode = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
+// BrightpearlBaseURL is the default API root for a datacenter and account
+// code: https://{datacenter}.brightpearlconnect.com/public-api/{account_code}
+// (#732, https://help.brightpearl.com/hc/en-us/articles/212645003-URI-syntax).
+// Configs written for the legacy ws-{code}.brightpearl.com hosts use the old
+// codes: eu1 is euw1 now and use is use1. US West (usw, usw1) has no
+// documented brightpearlconnect.com name, and ws-usw.brightpearl.com still
+// serves the API, so it keeps the legacy host. It returns "" when either part
+// is empty.
+func BrightpearlBaseURL(datacenter, accountCode string) string {
+	if datacenter == "" || accountCode == "" {
+		return ""
+	}
+	dc := strings.ToLower(datacenter)
+	switch dc {
+	case "usw", "usw1":
+		return "https://ws-usw.brightpearl.com/public-api/" + accountCode
+	case "eu1":
+		dc = "euw1"
+	case "use":
+		dc = "use1"
+	}
+	return "https://" + dc + ".brightpearlconnect.com/public-api/" + accountCode
+}
+
 // Brightpearl checks where the staff token goes (#667). A base_url override
 // is checked as a URL. Without one the connector calls
-// https://ws-{datacenter}.brightpearl.com/public-api/{account_code}, so
+// https://{datacenter}.brightpearlconnect.com/public-api/{account_code}, so
 // datacenter must be one host label and account_code one path segment;
 // otherwise "x@10.0.0.1/" as a datacenter moves the host.
 func Brightpearl(baseURL, datacenter, accountCode string, allowPrivate bool) error {
@@ -37,7 +61,7 @@ func Brightpearl(baseURL, datacenter, accountCode string, allowPrivate bool) err
 		return safeurl.CheckBaseURL(baseURL, allowPrivate)
 	}
 	if !brightpearlDatacenter.MatchString(datacenter) {
-		return fmt.Errorf("%s must be a single host label such as eu1 or use1", shown("datacenter", datacenter))
+		return fmt.Errorf("%s must be a single host label such as euw1 or use1", shown("datacenter", datacenter))
 	}
 	if !brightpearlAccountCode.MatchString(accountCode) {
 		return fmt.Errorf("%s may only hold letters, digits, - and _", shown("account_code", accountCode))

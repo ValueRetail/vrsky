@@ -753,7 +753,7 @@ Last updated 2026-10-28.
     `move_prefix`, `file_pattern` and `poll_interval_seconds` are missing.
     Check against `getSFTPConfig`/`getConfig` and the UI property panel.
     Found in #538.
-109. **A done set's changes can be written on a snapshot nobody reads.**
+109. ~~**A done set's changes can be written on a snapshot nobody reads.**~~ (#723)
     `ownsSaved` (`src/pkg/doneset`, and `src/cmd/file-consumer/known.go`)
     reads only the changes row. If another poller's snapshot and changes
     reset land between that read and the changes write, or another poller
@@ -1130,7 +1130,7 @@ Last updated 2026-10-28.
     connection without asking and the webhook URL changes silently. Clear
     the link only on Confirm, or ask again on the next Deploy. Found in #665.
 
-159. **A refused fan-out node redelivers to its healthy siblings.** In the
+159. ~~**A refused fan-out node redelivers to its healthy siblings.**~~ (#730) In the
     HTTP producer's `Deliver`, if one target node fails (now certain for a
     refused private URL) and a sibling succeeds, the whole message is retried
     five times and then dead-lettered, so the healthy sibling gets duplicates,
@@ -1173,7 +1173,7 @@ Last updated 2026-10-28.
     incomplete config should be dead-lettered so it can be replayed, is item
     175. Found in review of #668 and #674.
 
-165. **Check the Brightpearl default host.** The connectors build
+165. ~~**Check the Brightpearl default host.**~~ (#732) The connectors build
     `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`, while
     current third-party docs show `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`.
     Check Brightpearl's own API docs and change the default if it moved.
@@ -1240,7 +1240,7 @@ Last updated 2026-10-28.
     instead. Add their checks to the validator. Found in #667, #677, #678 and
     #686.
 
-174. **Tighten the Docker Hub mirror guard.** `TestDockerfilesPullBaseImagesFromTheMirror`
+174. ~~**Tighten the Docker Hub mirror guard.**~~ (#720) `TestDockerfilesPullBaseImagesFromTheMirror`
     (#692) lets any non-Docker-Hub registry through, so a lookalike host
     (`mirror.gcr.io.example.com/...`) would pass; allowlist `mirror.gcr.io/`,
     `mcr.microsoft.com/`, `ghcr.io/` and `localhost`. It also covers only
@@ -1248,7 +1248,7 @@ Last updated 2026-10-28.
     run` images in workflows and the compose images CI starts can drift back
     to Docker Hub unnoticed. Found in review of #694. Filed as #720.
 
-175. **Ordered resume for Business Central incremental polls.** A poll that
+175. ~~**Ordered resume for Business Central incremental polls.**~~ (#733) A poll that
     hits the 10 000-page cap (#699) keeps its old watermark, so every later
     poll re-reads and re-sends the same pages and never reaches the rest. BC
     requests carry no `$orderby`, so the feed comes in key order and the
@@ -1294,7 +1294,7 @@ Last updated 2026-10-28.
     with `Deliver`, as `file-producer` does (it answers true on a lookup
     error so `Deliver` can retry). Found in #698.
 
-179. **The database destination loses messages quietly (high priority).**
+179. ~~**The database destination loses messages quietly (high priority).**~~ (#705)
     Filed as #705.
     `getTargetConnections` in `db-producer` `continue`s past a target it
     cannot open or ping, so a failed target is lost even when the others
@@ -1315,7 +1315,7 @@ Last updated 2026-10-28.
     ~line 61) asserts `sdk.IsPermanent` and has to be flipped with it. Found
     in #698. Filed as #721.
 
-181. **Salesforce REST writes skip rejected records and ack the message.**
+181. ~~**Salesforce REST writes skip rejected records and ack the message.**~~ (#735)
     `restWrite` logs a `4xx` per record and moves on; the message is acked
     and the rejected records are in no queue. When another record in the same
     message fails transiently, the whole message is retried and the records
@@ -1333,8 +1333,8 @@ Last updated 2026-10-28.
     and Front Systems pages used to promise the hint; #698 removed that. Found
     in #698. Filed as #721.
 
-183. **`docs/connectors/database.md` describes a destination config the code
-    does not read.** The page shows `connection_string_secret_id`, `table` and
+183. ~~**`docs/connectors/database.md` describes a destination config the code
+    does not read.**~~ (#705) The page shows `connection_string_secret_id`, `table` and
     `operation`; `db-producer` reads `database.host`, `port`, `user`,
     `password` (as `password_secret_id`), `database`, `sslmode`, `table` and
     `mode` (`insert`, `upsert` or `create_insert`) and skips a node without
@@ -1343,20 +1343,20 @@ Last updated 2026-10-28.
     the `dead_letter_queue` stream name, who is notified) also predates the
     five-attempt DLQ; check it against `pkg/messaging`. Found in #698. Filed with #705.
 
-184. **SAP sessions are never logged off.** Since #682 every delivery opens
+184. ~~**SAP sessions are never logged off.**~~ (#736) Since #682 every delivery opens
     its own SAP security session (a fresh cookie jar), and nothing logs it
     off, so sessions pile up per technical user until SAP's idle timeout.
     Some SAP setups cap them. Watch the session count on the first real SAP
     tenant; if it matters, log off at the end of a delivery. Found in review
     of #696. Filed as #736.
 
-185. **Creating a workspace is not audited.** `POST /api/v1/tenants` sits
+185. ~~**Creating a workspace is not audited.**~~ (#719) `POST /api/v1/tenants` sits
     behind the session check only, with no workspace in the context, so
     `AuditMiddleware` drops it. File it under the created workspace once the
     handler has it (`recordAuditVerifiedTenant` after the insert, as
     `HandleAcceptInvite` does since #695). Found in #695. Filed as #719.
 
-186. **Anonymous requests are filed under any `X-Tenant-ID`.** A request
+186. ~~**Anonymous requests are filed under any `X-Tenant-ID`.**~~ (#719) A request
     with no valid credential that sends a workspace id in the header is
     still written to that workspace's log (a 401 with no actor), so anyone
     can add rows to any workspace's audit log. Predates #695, which stopped
@@ -1373,7 +1373,7 @@ Last updated 2026-10-28.
     take the builders from `pkg/connectorurl`. Left out of #708 to keep the
     connector edits clear of #704. Filed as #737.
 
-188. **The dev stack's `management-api` has no `ALLOW_PRIVATE_UPSTREAMS`.**
+188. ~~**The dev stack's `management-api` has no `ALLOW_PRIVATE_UPSTREAMS`.**~~ (#720)
     `docker-compose.yml` sets it on `http-producer` and both SAP services, so
     their mocks work, but the management API's start check refuses the same
     URLs: httpbin since #660, mock-sap since #708. Decide whether compose
@@ -1394,6 +1394,23 @@ Last updated 2026-10-28.
     Such an object is left (event mode) or published once more (poll mode).
     On GCS compare generation and size and ignore `Updated`. Found in review
     of #710. Filed as #718.
+
+191. **Salesforce Bulk API jobs are never checked.** `bulkWrite` creates,
+    fills and closes the job and acks; it does not poll the job state or
+    read `failedResults`, so a record the job refuses while Salesforce
+    processes it reaches no queue and no log. A close whose answer is lost
+    also makes the retry submit a second job. Poll the job (bounded, with
+    the SDK's in-progress heartbeat) and treat failed rows like the REST
+    path's refused records, or abort the open job on a failed upload at
+    least. Found in #735. Filed as #760.
+
+192. **Three copies of the redelivery skip set.** `writtenSet` lives in
+    `src/cmd/remote-agent`, `src/cmd/db-producer` (#705) and
+    `src/cmd/salesforce-producer` (#735), and the HTTP destination (#730)
+    has one in `sent.go`. Move it into a small SDK-side package that connectors
+    may import (`make lint-connector` allows it), keyed by a comparable
+    type parameter, together with #727, which makes it survive a restart.
+    Found in #730 and #735. Filed as #758.
 
 ## Human
 

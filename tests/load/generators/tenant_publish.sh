@@ -22,7 +22,7 @@ RATE=""; DURATION=""
 TENANT="load-src-tenant"
 CONN="load-src-pipeline"
 NATS_INTERNAL="${NATS_INTERNAL:-nats://nats:4222}"
-NATS_BOX_IMAGE="${NATS_BOX_IMAGE:-natsio/nats-box:latest}"
+NATS_BOX_IMAGE="${NATS_BOX_IMAGE:-mirror.gcr.io/natsio/nats-box:latest}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --count) COUNT="$2"; shift 2;;

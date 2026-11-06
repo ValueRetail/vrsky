@@ -113,6 +113,15 @@ images in `docker-compose.yml`, the brokers integration.yml starts from it
 Third-party images go through the mirror without `library/`, e.g.
 `mirror.gcr.io/apache/kafka:3.7.0`.
 
+The guard is an allowlist of registries, not a ban on Docker Hub: `mirror.gcr.io/`,
+`mcr.microsoft.com/` (Azurite), `ghcr.io/` and `localhost`, matched as a prefix
+with the slash, so `mirror.gcr.io.example.com/` fails. Besides `FROM`, it
+checks workflow `services:`, `container:` and `docker://` images, every
+`docker run`/`pull`/`create` in a workflow script, and the images of the
+`docker-compose.yml` services a workflow starts (with what they depend on).
+`vrsky-cli:drill`, which `dr-drill.yml` builds itself, is the one explicit
+exception (`TestWorkflowAndComposeImagesPullFromTheMirror`, #720).
+
 Layers are cached in the GitHub Actions cache: one scope for all Go images
 (they share the Go base image, the `go mod download` layer and the copy of
 `src/`), one for the UI. Every job reads the cache; only the `data-filter` and
@@ -153,7 +162,9 @@ clears the flag when it starts.
 
 `infrastructure/azure/smoke-prod.sh [deployment …]` is the same check run
 by hand: `/readyz` and the UI answer 200, each named consumer logged
-*Restored running pipelines*, and nothing that matters is firing. What
+*Restored running pipelines*, and nothing that matters is firing. Only the
+pods of the deployment's current ReplicaSet count; an old pod still
+terminating after the rollout is not read (#741). What
 matters is VRSky's own alerts (the `vrsky-*` rule groups) above `info`
 and anything `critical` from any group; a stock warning that a fleet
 restart produces by itself, such as `KubeClientErrors`, does not fail a

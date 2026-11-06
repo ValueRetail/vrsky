@@ -24,15 +24,46 @@ fail=0
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/readyz"); echo "readyz: $code"; [ "$code" = 200 ] || fail=1
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/");       echo "ui:     $code"; [ "$code" = 200 ] || fail=1
 
+# current_rs <deployment> finds the deployment's current pods: those of the
+# ReplicaSet whose revision is the deployment's. It sets cur_rev, cur_sel
+# (the selector as k=v,…) and cur_hash (pod-template-hash), and fails when
+# it can't tell. `logs deploy/…` picks any one pod, and right after a
+# rollout that can be the old one still terminating (#741). Revision, not
+# position or age: `get rs` lists by name, and a rollback reuses an older
+# ReplicaSet.
+current_rs() {
+  local out
+  cur_rev=""; cur_sel=""; cur_hash=""
+  out=$("$KUBECTL" get deploy -n "$NS" "$1" -o 'go-template={{index .metadata.annotations "deployment.kubernetes.io/revision"}} {{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null) || return 1
+  cur_rev="${out%% *}"; cur_sel="${out#* }"; cur_sel="${cur_sel%,}"
+  if [ -z "$cur_rev" ] || [ "$cur_rev" = "<no value>" ] || [ -z "$cur_sel" ]; then return 1; fi
+  cur_hash=$("$KUBECTL" get rs -n "$NS" -l "$cur_sel" -o 'go-template={{range .items}}{{index .metadata.annotations "deployment.kubernetes.io/revision"}} {{index .metadata.labels "pod-template-hash"}}{{"\n"}}{{end}}' 2>/dev/null \
+    | awk -v r="$cur_rev" '$1 == r { h = $2 } END { print h }') || return 1
+  [ -n "$cur_hash" ]
+}
+
+# restored <deployment>: did any current pod log the line in the last 15
+# minutes? `logs -l` keeps only 10 lines per pod unless told otherwise, hence
+# --tail=-1; --ignore-errors so one pod that can't be read doesn't hide
+# another's line. Logs are read whole before grep: `logs | grep -q` under
+# pipefail fails on a match when grep exits first and kubectl gets SIGPIPE.
+restored() {
+  local logs
+  current_rs "$1" || return 1
+  logs=$("$KUBECTL" logs -n "$NS" -l "$cur_sel,pod-template-hash=$cur_hash" --prefix --since=15m --tail=-1 --ignore-errors 2>/dev/null) || true
+  grep -q '"msg":"Restored running pipelines"' <<<"$logs"
+}
+
+restore_tries="${SMOKE_RESTORE_TRIES:-30}" # 2 s apart; a test shortens it
 for d in "$@"; do
-  for _ in $(seq 1 30); do
-    if "$KUBECTL" logs -n "$NS" "deploy/$d" --since=15m 2>/dev/null | grep -q '"msg":"Restored running pipelines"'; then break; fi
+  for _ in $(seq 1 "$restore_tries"); do
+    if restored "$d"; then break; fi
     sleep 2
   done
-  if "$KUBECTL" logs -n "$NS" "deploy/$d" --since=15m 2>/dev/null | grep -q '"msg":"Restored running pipelines"'; then
+  if restored "$d"; then
     echo "$d: restored its pipelines"
   else
-    echo "$d: no 'Restored running pipelines' line within 60 s" >&2; fail=1
+    echo "$d: no 'Restored running pipelines' line within 60 s (revision ${cur_rev:-?}, selector ${cur_sel:-?}, pod-template-hash ${cur_hash:-?})" >&2; fail=1
   fi
 done
 

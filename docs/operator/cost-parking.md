@@ -203,9 +203,14 @@ VRSky resource groups, set in two places:
   of the Production check: every half hour it reads the month-to-date
   cost of the two groups and, at or above the budget, **stops the cluster
   and opens the issue**; a start afterwards lasts until the next run that
-  month. A failed cost query fails the run and stops nothing. The deploy
-  identity needs *Cost Management Reader* on the two resource groups for
-  this (an Owner grants it); without the variable the step is skipped.
+  month. The step (`infrastructure/azure/budget-check.sh`) queries each
+  resource group at its own scope and adds the two, so the deploy identity
+  needs *Cost Management Reader* on the two resource groups and nothing at
+  subscription scope (an Owner grants it); without the variable the step
+  is skipped. Cost Management throttles hard: a 429 is retried after 10,
+  30 and 60 seconds, and a query still throttled after that is a warning
+  with no verdict, checked again on the next run. Any other failed query
+  logs its HTTP status and error code, fails the run and stops nothing.
 
 What the budget assumes: one node, Free tier, a start by hand around
 09:00 on working days and the 16:00 stop. Two nodes and the Standard tier

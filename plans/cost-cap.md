@@ -81,6 +81,11 @@ decision; it is not in this plan.
 - The Budget step is skipped while `MONTHLY_BUDGET_NOK` is unset, so the
   role grant can land first and the variable afterwards; a set variable
   with a failing query is a red run and no stop.
+- The first version queried at subscription scope with a resource-group
+  filter and threw the error away; it failed on every run (#744). The
+  query now runs per resource group, logs the status of a failure, and
+  rides out a 429 (`infrastructure/azure/budget-check.sh`,
+  `plans/issue-744-budget-check.md`).
 - No PodDisruptionBudget in the cluster allows zero disruptions, and no
   VRSky workload has a required anti-affinity, so one node can carry it;
   the cilium-operator's second replica stays Pending on a single node by

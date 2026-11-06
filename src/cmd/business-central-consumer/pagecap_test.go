@@ -35,11 +35,16 @@ func TestFetchAndPublish_PageCap(t *testing.T) {
 		cap         int
 		incremental bool
 		stored      string // watermark in the checkpoint before the poll
+		// want is the watermark after the poll. An incremental poll reads in
+		// cursor order (#733) and advances to the value before the last one
+		// it read; one that is not incremental stores none.
+		want string
 	}{
-		{"not incremental, cap 3", 3, false, ""},
-		{"not incremental, cap 1", 1, false, ""},
-		{"incremental, no watermark yet", 4, true, ""},
-		{"incremental, watermark stays where it was", 4, true, seeded},
+		{"not incremental, cap 3", 3, false, "", ""},
+		{"not incremental, cap 1", 1, false, "", ""},
+		{"incremental, no watermark yet", 4, true, "", "2026-10-03T10:00:00Z"},
+		{"incremental, watermark advances to where it stopped", 4, true, seeded, "2026-10-03T10:00:00Z"},
+		{"incremental, one page read, nothing to advance to", 1, true, seeded, seeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lowerPageCap(t, tc.cap)
@@ -93,10 +98,10 @@ func TestFetchAndPublish_PageCap(t *testing.T) {
 
 			cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src")
 			switch {
-			case tc.stored == "" && cp != nil:
-				t.Errorf("a watermark was stored (%q) by a poll that hit the cap", cp.LastProcessedMessageID)
-			case tc.stored != "" && (cp == nil || cp.LastProcessedMessageID != tc.stored):
-				t.Errorf("watermark = %+v, want it left at %q", cp, tc.stored)
+			case !tc.incremental && cp != nil:
+				t.Errorf("a checkpoint was stored (%q) by a poll without incremental", cp.LastProcessedMessageID)
+			case tc.want != "" && (cp == nil || cp.LastProcessedMessageID != tc.want):
+				t.Errorf("watermark = %+v, want %q", cp, tc.want)
 			}
 
 			out := logs.String()

@@ -208,8 +208,8 @@ error it hits into one of two kinds:
   `permanent error; dropping message`. Other drops are a plain `return nil`
   and leave only the destination's own line, or none at all: the HTTP
   destination's `4xx` (the feed shows it, the log has `HTTP request returned
-  error`), Kafka, RabbitMQ, SFTP and cloud-storage with a missing setting,
-  Salesforce records it skips, and the rows the database destination skips.
+  error`), Kafka, RabbitMQ, SFTP, cloud-storage and Salesforce with a
+  missing setting.
   Look in the worker's log in Loki, filtered by `connection_id`, and in the
   connection's activity feed.
 
@@ -217,14 +217,14 @@ Which kind an error gets differs per destination:
 
 | Destination | Dropped, not in the DLQ | Retried, then in the DLQ |
 |-------------|-------------------------|--------------------------|
-| HTTP | Every `4xx` except `429` (any other answer below `500` too); a URL a request cannot be built from | `5xx`, `429`, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host) |
-| Database | Payload not JSON; table name that is not `table` or `schema.table`; a row the database refuses (the other rows still go in); a target database that cannot be opened or reached, when no other target is left for the message | Failure to check for or create the table |
+| HTTP | Every `4xx` except `429` (any other answer below `500` too); a URL a request cannot be built from | `5xx`, `429`, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host). With several nodes, only the failing ones are tried again and the last error names them (`node <id>: …`); a node that took the message is skipped, unless the worker restarted in between ([HTTP page](../connectors/http.md#failed-deliveries)) |
+| Database | Payload not JSON | A target database that cannot be opened or reached, a row the database refuses (none of the message's rows stay in that target), a lost connection, failure to check for or create the table; a node with no `host` or a table name that is not `table` or `schema.table`. A target that committed is skipped when the message comes back (see the [database page](../connectors/database.md#several-destination-nodes)) |
 | File | Output path outside the workspace's area or any mounted directory | Failure to write the file; failure to read the connection from the database |
 | Cloud storage | No `bucket` | Failure to open the provider or write the object |
 | SFTP | No `host`, `username` or `remote_dir`; no password or key; `filename_template` that cannot be parsed or rendered | Failure to connect (after three tries), to create `remote_dir` or to write the file |
 | Kafka | No `brokers` or `topic` | Failure to open the writer or to write |
 | RabbitMQ | No `url`, or neither `exchange` nor a queue | Failure to connect or to publish |
-| Salesforce | Payload not JSON; no `object`; `upsert` with no `external_id_field`; on the REST path a record Salesforce answers with a `4xx`, or that has no external-id value (the other records still go in) | `5xx`, `429`, network or token failure on the REST path (the whole message is sent again); any non-`2xx` while creating, filling or closing a Bulk API job |
+| Salesforce | Payload not JSON; no `object`; `upsert` with no `external_id_field` | A record Salesforce refuses with a `4xx` (the error names it as `record[N]` with Salesforce's code; the other records still go in), a record with no external-id value; `401`/`403` after the token refresh, `408`, `429`, `5xx`, a redirect, network or token failure; the same answers while creating, filling or closing a Bulk API job. Records that went in are not sent again on the retry (see the [Salesforce page](../connectors/salesforce.md#records-are-not-sent-twice)) |
 | Sitoo | Incomplete node; a `base_url` the connector refuses; payload not JSON; a webhook event notification; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error |
 | Front Systems | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error; a refused `base_url` or address |
 | Visma | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error, token failure; a refused URL |

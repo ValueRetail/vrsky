@@ -49,7 +49,8 @@ We will implement a **hybrid dual-NATS architecture**:
 
 1. **Platform NATS Cluster** (Shared, HA)
    - 3-5 node HA cluster with JetStream enabled
-   - Used for state tracking, dead letter queue, retries
+   - Used for the data stream (`VRSKY_DATA`), its redeliveries and the
+     dead-letter stream (`VRSKY_DLQ`)
    - Shared across all tenants (platform-wide infrastructure)
 
 2. **Tenant-Scoped NATS Instances** (Ephemeral, NATS Core)
@@ -68,11 +69,9 @@ We will implement a **hybrid dual-NATS architecture**:
 │  │ Node 1  │  │ Node 2  │  │ Node 3  │                     │
 │  └─────────┘  └─────────┘  └─────────┘                     │
 │                                                              │
-│  JetStream + KV Buckets:                                    │
-│  ├─ message_state (TTL: 15min)                              │
-│  ├─ integration_locks (TTL: 5min)                           │
-│  ├─ retry_queue (TTL: 1hr)                                  │
-│  └─ dead_letter_queue (TTL: 7 days)                         │
+│  JetStream streams:                                         │
+│  ├─ VRSKY_DATA  vrsky.data.>  (72 h)                        │
+│  └─ VRSKY_DLQ   vrsky.dlq.>   (7 days)                      │
 └─────────────────────────────────────────────────────────────┘
                           ▲
                           │ (State tracking only)
@@ -116,36 +115,21 @@ We will implement a **hybrid dual-NATS architecture**:
 
 **Use Cases**:
 
-- ✅ Message state tracking (processing status)
-- ✅ Dead letter queue (failed messages)
-- ✅ Retry queue (messages awaiting retry)
-- ✅ Integration locks (prevent duplicate processing)
+- ✅ The data stream: every pipeline message, one durable consumer per worker
+- ✅ Retries: JetStream redelivery of a NAK'd message, with backoff
+- ✅ Dead letter queue: the `VRSKY_DLQ` stream (failed messages)
 - ✅ Platform-wide events (tenant provisioning, etc.)
 - ✅ Cross-tenant integrations (future feature)
 
-**KV Bucket Schema**:
+The original design also had KV buckets for message state, integration
+locks, a retry queue and a dead-letter queue. They were never built: retries
+are JetStream redeliveries and the DLQ is a stream. What exists is in
+`pkg/messaging` (`messaging.go`, `subscriber.go`, `dlq.go`):
 
-```yaml
-message_state:
-  ttl: 15 minutes
-  max_bytes: 10GB
-  replicas: 3
-
-integration_locks:
-  ttl: 5 minutes
-  max_bytes: 1GB
-  replicas: 3
-
-retry_queue:
-  ttl: 1 hour
-  max_bytes: 50GB
-  replicas: 3
-
-dead_letter_queue:
-  ttl: 7 days
-  max_bytes: 100GB
-  replicas: 3
-```
+| Stream       | Subjects       | Retention                    | Duplicate window |
+| ------------ | -------------- | ---------------------------- | ---------------- |
+| `VRSKY_DATA` | `vrsky.data.>` | 72 h, size caps, oldest out  | 5 min            |
+| `VRSKY_DLQ`  | `vrsky.dlq.>`  | 7 days                       | default (2 min)  |
 
 ---
 
@@ -322,48 +306,28 @@ nc.Subscribe("tenant-a.convert.*", processConversion)
 
 ## Retry & Error Handling
 
-### State Machine
+### What a worker does with a message
+
+There is no state store: the attempt count is JetStream's own delivery count
+(`NumDelivered`) on the worker's durable consumer, which has
+`MaxDeliver: 5` and the backoff 1 s, 5 s, 30 s, 2 min
+(`messaging.DefaultBackoff`). `Subscriber.dispatch` in
+`pkg/messaging/subscriber.go` runs the handler and then:
 
 ```
-RECEIVED → PROCESSING → COMPLETED
-    ↓           ↓
-    └─→ RETRY ←┘ (max 3 attempts)
-         ↓
-    DEAD_LETTER (after max retries)
+handler returns nil                      → Ack
+handler returns an error, delivery < 5   → Nak (redelivered after the backoff)
+handler returns an error, delivery = 5   → copy to vrsky.dlq.<tenant>.pipeline.<conn>
+                                           with X-Vrsky-Last-Error, X-Vrsky-Delivered
+                                           and X-Vrsky-Worker, then Ack
+                                           (if the DLQ publish fails: Nak)
+handler panics                           → Nak
 ```
 
-### Retry Logic
-
-```go
-func processMessage(msg *nats.Msg) {
-    msgID := msg.Header.Get("Message-ID")
-
-    // Get current state from Platform NATS KV
-    state := platformKV.Get(msgID)
-
-    if state.RetryCount >= 3 {
-        // Move to dead letter queue
-        deadLetterQueue.Publish(msg)
-        platformKV.Put(msgID, {status: "dead_letter", retry_count: 3})
-        return
-    }
-
-    // Track processing
-    platformKV.Put(msgID, {status: "processing", retry_count: state.RetryCount})
-
-    err := doWork(msg)
-    if err != nil {
-        // Schedule retry with exponential backoff
-        retryDelay := time.Duration(math.Pow(2, float64(state.RetryCount))) * time.Second
-        retryQueue.Publish(msg, nats.RetryDelay(retryDelay))
-        platformKV.Put(msgID, {status: "retry", retry_count: state.RetryCount + 1})
-        return
-    }
-
-    // Success
-    platformKV.Put(msgID, {status: "completed", retry_count: state.RetryCount})
-}
-```
+SDK connectors don't call this directly. The SDK runner maps `Deliver`'s
+result onto it: nil acks, `sdk.Permanent` acks and drops (logged, never
+dead-lettered), anything else is returned and so NAK'd
+(`pkg/sdk/lifecycle.go`).
 
 ### AckWait, in-progress heartbeats & redelivery (#139)
 
@@ -393,10 +357,16 @@ duplicate delivery (`pkg/messaging/subscriber.go`).
 A message that fails five deliveries (`MaxDeliveryAttempts`; redelivered after
 1 s, 5 s, 30 s and 2 min) is dead-lettered:
 
-1. Message moved to the `VRSKY_DLQ` stream in Platform NATS
-2. Tenant notified via webhook/email
-3. Message retained for 7 days
-4. Admin UI allows manual retry or inspection
+1. The message is copied to the `VRSKY_DLQ` stream with the last error and
+   the attempt count, and acked on the data stream.
+2. `vrsky_dlq_messages_total` goes up, and the `DLQGrowing` alert fires
+   when a pipeline dead-letters messages for 10 minutes. The metric has no
+   tenant label, so the alert goes to the platform's notification targets,
+   not the tenant's. Nothing is sent per message.
+3. The message is kept for 7 days.
+4. The connection's DLQ view in the UI lists the messages and can retry one
+   (republished to the data stream, so every worker sees it again) or
+   discard it.
 
 A destination that returns `sdk.Permanent` is not retried at all: the message
 is acked and dropped, and never reaches the DLQ. Which errors each destination
@@ -561,9 +531,11 @@ alerts:
     condition: kv_size > 80GB
     action: Alert + increase retention
 
-  - name: DeadLetterQueueGrowing
-    condition: dlq_size > 10K messages
-    action: Alert tenant + investigate
+  # Built as DLQGrowing in infrastructure/prometheus-rules.yml; it goes to
+  # the platform's targets, not the tenant's (see "Dead Letter Queue").
+  - name: DLQGrowing
+    condition: increase(vrsky_dlq_messages_total[10m]) > 0 for 10min
+    action: Alert platform + investigate
 ```
 
 ---

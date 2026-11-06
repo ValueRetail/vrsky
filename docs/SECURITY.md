@@ -182,6 +182,37 @@ middleware auto-captures the request; `member.role_change` and
 `member.remove` actions include `target_user_id` and (for role changes)
 `new_role` in the details column.
 
+Sign-in events go to a separate security log, the `auth_audit_log` table:
+one row per event with the user (where known), email, event type, status,
+a reason on failure, the client address and the user agent. Never a token,
+a session id or a password, nor their hashes. Client-supplied text is made
+to fit before the insert (email cut to 255 characters, user agent to 500,
+NUL removed, invalid UTF-8 replaced), so an odd value cannot cost an event
+its row. A row that still cannot be written (the database is down) logs
+`auth audit row not written` with the event type and the error, and the
+request goes on.
+
+| Event type | Written by | Status |
+|---|---|---|
+| `registration` | sign-up | `success`, `failed` |
+| `tenant_creation`, `auto_verify` | sign-up | `failed` |
+| `login` | password login | `success`, `failed` |
+| `oidc_login` | OIDC callback | `success`, `failed`, `denied` |
+| `password_reset_requested` | forgot-password | `success`, `not_found`, `send_failed` |
+| `password_reset` | reset-password (using the link) | `success`, `failed` |
+| `password_changed` / `password_change` | change-password | `success` / `failed` |
+| `email_verified` | the verification link | `success`, `failed` |
+| `logout` | logout | `success`, `failed` |
+| `account_deleted` | account deletion | `success` |
+| `login`, `signup`, `forgot_password`, `change_password` | the failed-attempt limits | `blocked` (once, when a block starts) |
+
+A failed `password_reset` or `email_verified` row says why (`invalid token`,
+`token already used`, `token expired`) and names the user when the token
+was a real one. Logout runs behind the session check, so it always names
+the user: it ends the session the request authenticated with (the
+`vrsky_session` cookie first, then the `Authorization` header), and an
+unknown or expired session is a `401` with no row.
+
 ## Failed-attempt limits on the auth routes
 
 `POST /api/v1/auth/login` and `POST /api/v1/auth/register` are the two
@@ -361,7 +392,10 @@ cannot drift.
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and
 `http` for the connectors that are https only), and on `management-api` for
-the start check. A node cannot set it, and it must stay off in production.
+the start check. `docker-compose.yml` sets it to true on `management-api` and
+the connectors that have a mock (the dev stack only, #720); nothing under
+`infrastructure/` sets it. A node cannot set it, and it must stay off in
+production.
 
 ## Threat model
 

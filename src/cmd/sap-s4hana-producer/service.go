@@ -35,7 +35,8 @@ const (
 // API — e.g. creating sales orders (deep insert with to_Item) or posting goods
 // movements. It is an SDK Producer: Configure wires deps, Deliver writes one
 // envelope. Writes require an SAP CSRF token bound to the session cookie the
-// fetch sets, so each delivery runs in a session of its own (sessionClient).
+// fetch sets, so each delivery runs in a session of its own (sessionClient) and logs it
+// off at the end (logoff).
 type sapProducer struct {
 	sdk.BaseProducer
 
@@ -127,8 +128,66 @@ func (p *sapProducer) Deliver(ctx context.Context, env *envelope.Envelope) error
 		return sdk.Permanent(errors.New("payload is not valid JSON"))
 	}
 	hc := p.sessionClient()
+	// Whatever the outcome, end the SAP session this delivery opened (#736).
+	defer p.logoff(ctx, hc, cfg)
 	auth := newAuthorizer(cfg, hc)
 	return p.write(ctx, hc, cfg, auth, env.Payload)
+}
+
+// logoffTimeout bounds the logoff call. It is best-effort cleanup and must
+// not hold up the next delivery.
+const logoffTimeout = 5 * time.Second
+
+// sapSessionCookiePrefix starts the name of the security session cookie an
+// SAP ABAP system sets (SAP_SESSIONID_<SID>_<client>).
+const sapSessionCookiePrefix = "SAP_SESSIONID_"
+
+// logoff ends the SAP security session held in hc's jar by calling the ICF
+// logoff service on the service's own origin. SAP keeps a session per
+// cookie-less login until its idle timeout, and every delivery opens one
+// (#682). It does nothing when the jar holds no SAP session cookie. It is
+// best-effort: bounded by logoffTimeout, runs even when ctx is already
+// cancelled, logs failures at Debug and never touches the delivery's result.
+// The request carries the session cookie only, no credential: a credential
+// could open a new session instead of ending this one. It goes through the
+// delivery's client, so the safeurl dial check and the no-redirect policy
+// apply.
+func (p *sapProducer) logoff(ctx context.Context, hc *http.Client, cfg *SAPProducerConfig) {
+	target, ok := cfg.logoffURL()
+	if !ok || !hasSAPSession(hc.Jar, target) {
+		return
+	}
+	lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), logoffTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(lctx, http.MethodGet, target, nil)
+	if err != nil {
+		p.logger.Debug("sap s/4hana logoff not sent", "error", err)
+		return
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		p.logger.Debug("sap s/4hana logoff failed", "error", err)
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	_ = resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		// A gateway without the ICF logoff service answers 404.
+		p.logger.Debug("sap s/4hana logoff refused", "status", resp.StatusCode)
+	}
+}
+
+func hasSAPSession(jar http.CookieJar, target string) bool {
+	u, err := url.Parse(target)
+	if err != nil || jar == nil {
+		return false
+	}
+	for _, c := range jar.Cookies(u) {
+		if strings.HasPrefix(c.Name, sapSessionCookiePrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // sessionClient returns the client for one delivery: the shared transport
@@ -318,6 +377,20 @@ func (cfg *SAPProducerConfig) serviceRoot() string {
 		return strings.TrimRight(cfg.APIBaseURL, "/")
 	}
 	return fmt.Sprintf("https://%s/sap/opu/odata/sap/%s", cfg.Host, cfg.Service)
+}
+
+// logoffURL is SAP's standard ICF logoff service on the origin (scheme and
+// host) of the service root, so it can only reach the host the writes go to.
+func (cfg *SAPProducerConfig) logoffURL() (string, bool) {
+	u, err := url.Parse(cfg.serviceRoot())
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+	out := url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/sap/public/bc/icf/logoff"}
+	if cfg.SAPClient != "" {
+		out.RawQuery = "sap-client=" + url.QueryEscape(cfg.SAPClient)
+	}
+	return out.String(), true
 }
 
 func (cfg *SAPProducerConfig) csrfURL() string {
