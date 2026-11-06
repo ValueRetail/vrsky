@@ -1343,7 +1343,7 @@ Last updated 2026-10-28.
     the `dead_letter_queue` stream name, who is notified) also predates the
     five-attempt DLQ; check it against `pkg/messaging`. Found in #698. Filed with #705.
 
-184. **SAP sessions are never logged off.** Since #682 every delivery opens
+184. ~~**SAP sessions are never logged off.**~~ (#736) Since #682 every delivery opens
     its own SAP security session (a fresh cookie jar), and nothing logs it
     off, so sessions pile up per technical user until SAP's idle timeout.
     Some SAP setups cap them. Watch the session count on the first real SAP
