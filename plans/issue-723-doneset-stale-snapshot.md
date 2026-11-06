@@ -74,6 +74,10 @@ race always had; the bound limits it.
 
 ## Risks
 
+- Two pollers that both go stale and both recover in the same instant can
+  still overwrite each other: without a compare-and-swap on the rows the check
+  narrows the window, it does not close it. The next check after it catches
+  the loser.
 - One more read of the snapshot row every 8 changes-only saves per poller.
 - `Save` can now read when nothing is dirty. A failed read is returned (doneset)
   or ignored until the next poll (file consumer); nothing is written.

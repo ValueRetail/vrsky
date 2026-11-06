@@ -602,6 +602,7 @@ func (s *fileConsumer) saveKnown(ctx context.Context, ac *ActiveConnection, logg
 	if s.checkpoints == nil {
 		return
 	}
+	notMine := false // the idle check below already found the snapshot is not ours
 	if !ac.dirty {
 		// Nothing to write, but a quiet folder may never save again: if the
 		// last check is due, make it, so changes written on a snapshot nobody
@@ -612,19 +613,30 @@ func (s *fileConsumer) saveKnown(ctx context.Context, ac *ActiveConnection, logg
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
 		mine, err := s.ownsSaved(readCtx, ac)
 		cancel()
-		if err != nil || mine {
+		// An undecodable changes row counts as no saved set (#563): this sets
+		// dirty and clears savedGen, so the snapshot below replaces it.
+		if err = s.undecodableAsNone(ac, err, logger); err != nil {
+			logger.Warn("Could not check whether the saved list of published files is current; trying again at a later poll", "error", err)
+			return
+		}
+		if mine {
 			return
 		}
 		ac.dirty = true
+		notMine = true
 	}
 	if ac.savedGen == "" || changesNodeID(ac) == "" ||
 		len(ac.changed) > min(maxChanges, len(ac.knownFiles)/2) {
 		s.saveSnapshotOrLog(ctx, ac, logger)
 		return
 	}
-	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
-	mine, err := s.ownsSaved(readCtx, ac)
-	cancel()
+	var mine bool
+	var err error
+	if !notMine {
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
+		mine, err = s.ownsSaved(readCtx, ac)
+		cancel()
+	}
 	if err != nil || !mine {
 		if err == nil {
 			s.mergeSaved(context.WithoutCancel(ctx), ac, s.currentOrKnown(ac), logger)

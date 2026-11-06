@@ -240,3 +240,87 @@ func TestKnownChanges_QuietPollRecoversAfterTheTimeBound(t *testing.T) {
 	}
 	requireTimes(t, "A", r.probeA, "o1.json", 0)
 }
+
+// countSnapshotReads makes A's store count reads of the snapshot row.
+func (r *staleRig) countSnapshotReads() *int {
+	n := new(int)
+	r.hookA.setHook(func(node string) {
+		if node == knownNode {
+			*n++
+		}
+	})
+	return n
+}
+
+// A changes row nobody can decode counts as no saved set (#563). The idle
+// check finds it and replaces the rows, as a save with something to write
+// would, so a restart does not adopt files that were never published.
+func TestKnownChanges_IdlePollRepairsAnUndecodableChangesRow(t *testing.T) {
+	r := newStaleRig(t)
+	r.publishA("a0.json", 1)
+	r.publishA("a1.json", 2)
+	r.publishA("a2.json", 3)
+	if err := r.store.Save(context.Background(), &checkpoint.Checkpoint{
+		TenantID: knownTenant, ConnectionID: knownConn, NodeID: knownNode + changesSuffix, State: []byte(`"x"`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	r.a.ac.verifiedAt = r.a.clock.now()
+	r.a.clock.advance(staleBoundTime + time.Second)
+	r.a.c.pollOnce(ctx, r.a.ac)
+	r.a.c.pollOnce(ctx, r.a.ac)
+
+	snap := decodeSnapshot(t, rawRow(t, r.store, knownTenant, knownConn, knownNode))
+	ch := decodeChanges(t, rawRow(t, r.store, knownTenant, knownConn, knownNode+changesSuffix))
+	if snap.Gen == "" || ch.Base != snap.Gen {
+		t.Fatalf("snapshot gen %q, changes base %q; want a decodable changes row on the snapshot", snap.Gen, ch.Base)
+	}
+	have := map[string]bool{}
+	for _, n := range snap.Known {
+		have[n] = true
+	}
+	for n := range snap.Files {
+		have[n] = true
+	}
+	for _, n := range []string{"a0.json", "a1.json", "a2.json"} {
+		if !have[n] {
+			t.Errorf("the snapshot lacks %s", n)
+		}
+	}
+}
+
+// A healthy watcher with nothing to save reads the snapshot row at most once
+// over an hour of idle polls: the check only runs while changes-only saves are
+// unchecked.
+func TestKnownChanges_IdleHealthyWatcherReadsTheSnapshotAtMostOnce(t *testing.T) {
+	r := newStaleRig(t)
+	r.publishA("a0.json", 1)
+	r.publishA("a1.json", 2)
+	reads := r.countSnapshotReads()
+	ctx := context.Background()
+	for i := 0; i < 12; i++ {
+		r.a.clock.advance(staleBoundTime + time.Second)
+		r.a.c.pollOnce(ctx, r.a.ac)
+	}
+	if *reads > 1 {
+		t.Errorf("read the snapshot row %d times over 12 idle intervals, want at most 1", *reads)
+	}
+}
+
+// While nobody else saves, the check costs one read of the snapshot per
+// staleBoundSaves changes-only saves, not one per save after the first.
+func TestKnownChanges_VerificationReadsTheSnapshotOncePerBound(t *testing.T) {
+	r := newStaleRig(t)
+	r.publishA("a0.json", 1)
+	reads := r.countSnapshotReads()
+	saves := 3 * staleBoundSaves
+	for i := 1; i <= saves; i++ {
+		if r.publishA(fmt.Sprintf("b%d.json", i), 1+i) {
+			t.Fatalf("save %d wrote a snapshot with nobody else saving", i)
+		}
+	}
+	if *reads < 1 || *reads > 3 {
+		t.Errorf("read the snapshot row %d times in %d saves, want 1 to 3", *reads, saves)
+	}
+}

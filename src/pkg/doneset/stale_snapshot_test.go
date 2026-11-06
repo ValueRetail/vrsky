@@ -319,3 +319,31 @@ func TestSet_VerificationReadsTheSnapshotOncePerBound(t *testing.T) {
 		t.Errorf("read the snapshot row %d times in %d saves, want at most 3 and at least 1", snapshotReads, 3*boundSaves)
 	}
 }
+
+// A healthy Set with nothing to save reads the snapshot row at most once over
+// an hour of idle Saves: the check only runs while changes-only saves are
+// unchecked.
+func TestSet_IdleHealthySetReadsTheSnapshotAtMostOnce(t *testing.T) {
+	store := newTestStore()
+	r := newStaleRig(t, store, store, tKey)
+	clock := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	r.a.now = func() time.Time { return clock }
+	r.a.verifiedAt = clock
+	if r.publishA(t, store, "a0") {
+		t.Fatal("premise: A's save wrote a snapshot")
+	}
+	store.takeReads()
+	for i := 0; i < 12; i++ {
+		clock = clock.Add(boundTime + time.Second)
+		save(t, r.a)
+	}
+	n := 0
+	for _, rd := range store.takeReads() {
+		if rd == tNode {
+			n++
+		}
+	}
+	if n > 1 {
+		t.Errorf("read the snapshot row %d times over 12 idle intervals, want at most 1", n)
+	}
+}
