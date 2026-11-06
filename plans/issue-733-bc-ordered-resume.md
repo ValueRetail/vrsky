@@ -102,3 +102,14 @@ skipped and nothing is sent twice that the remembered set can keep out.
   value", the carry-over of remembered records and observe-after-publish.
 - `go build`, `go vet`, `gofmt`, `golangci-lint`, `go test -race`,
   `make lint-connector`, `make lint-tenant`.
+
+## Review of #755 (second round)
+
+- Tests pin the stopped-recovery guard and the "resend with nothing to
+  resume from stays a resend" guard.
+- The remembered set keeps the latest observation of a record: the
+  future-dated set is merged last, on the full and the stopped path.
+- The 400 fallback was already limited to 400; a test with 503 and 429 now
+  pins it.
+- The fake pages by sort key, as BC does, and a randomized test (300 seeds:
+  edits while paging, restarts, failed pages) checks exactly-once delivery.

@@ -655,15 +655,10 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	}
 	// A date watermark is read back with `ge`, so the records dated on that
 	// day come back on every poll, like the future-dated ones. Remember both.
-	for k, v := range watermark.atWatermark {
-		ahead[k] = v
-	}
 	// With lookback_days the whole window is read again, so the whole window
 	// is remembered. It is rebuilt from this poll's feed, so a record that
 	// fell below W - N, or was deleted, drops out of what the checkpoint holds.
-	for k, v := range watermark.remembered() {
-		ahead[k] = v
-	}
+	ahead = mergeRemembered(watermark.atWatermark, watermark.remembered(), ahead)
 	if watermark.lookbackDays > 0 && watermark.raw != "" && !watermark.dateOnly && !cfg.lookbackWarned {
 		cfg.lookbackWarned = true
 		logger.Warn("lookback_days is set but cursor_field is a DateTime, so it has no effect; "+
@@ -915,7 +910,18 @@ func (t *cursorTracker) stoppedRemembered(prev, ahead map[string]string) map[str
 			out[k] = v
 		}
 	}
-	for _, m := range []map[string]string{ahead, t.atWatermark, t.remembered(), t.atLast} {
+	return mergeRemembered(out, t.atWatermark, t.remembered(), t.atLast, ahead)
+}
+
+// mergeRemembered merges remembered sets into a new map, later sets winning
+// for a key. The caller passes them in the order the feed observed them, so
+// the latest observation wins: a record edited while the poll paged is read
+// twice, and only its newer cursor value is what the next poll gets back.
+// The future-dated records (ahead) go last, since an ordered feed carries
+// them after every value up to now.
+func mergeRemembered(sets ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, m := range sets {
 		for k, v := range m {
 			out[k] = v
 		}

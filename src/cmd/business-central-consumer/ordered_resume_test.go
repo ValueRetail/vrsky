@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
 )
@@ -30,6 +33,8 @@ import (
 // orderedBC is a Business Central that honours `<field> gt|ge <literal>`,
 // `$orderby=<field> asc` and server-driven paging with a next link. Without
 // $orderby it returns key (id) order, like BC, which is not cursor order.
+// Like BC's, its $skiptoken is the sort key of the last record served, so a
+// record edited while a poll pages moves rather than shifting the pages.
 type orderedBC struct {
 	srv   *httptest.Server
 	tok   *httptest.Server
@@ -47,6 +52,12 @@ type orderedBC struct {
 	// ignoreOrder makes the fake ignore $orderby; rejectOrder makes it
 	// answer 400 to it, as BC does for a field it cannot sort on.
 	ignoreOrder, rejectOrder bool
+	// beforePage, when set, runs (under the lock) before a page is built,
+	// with the page's $skiptoken; a test edits recs in it.
+	beforePage func(token string)
+	// failFirst, when set, is the status the next first-page request gets
+	// instead of a page; it is cleared once used.
+	failFirst int
 }
 
 var orderedFilter = regexp.MustCompile(`^(\w+) (gt|ge) (\S+)$`)
@@ -74,8 +85,18 @@ func (b *orderedBC) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	q := r.URL.Query()
-	if q.Get("$skiptoken") == "" {
+	token := q.Get("$skiptoken")
+	if token == "" {
 		b.firstPages = append(b.firstPages, q)
+		if b.failFirst != 0 {
+			code := b.failFirst
+			b.failFirst = 0
+			http.Error(w, "busy", code)
+			return
+		}
+	}
+	if b.beforePage != nil {
+		b.beforePage(token)
 	}
 	ordered := false
 	if ob := q.Get("$orderby"); ob != "" {
@@ -108,14 +129,18 @@ func (b *orderedBC) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool {
-		vi, vj := b.recs[ids[i]], b.recs[ids[j]]
+	before := func(vi, idi, vj, idj string) bool {
 		if ordered && vi != vj {
 			return b.less(vi, vj)
 		}
-		return ids[i] < ids[j]
-	})
-	off, _ := strconv.Atoi(q.Get("$skiptoken"))
+		return idi < idj
+	}
+	sort.Slice(ids, func(i, j int) bool { return before(b.recs[ids[i]], ids[i], b.recs[ids[j]], ids[j]) })
+	off := 0
+	if token != "" {
+		tv, tid, _ := strings.Cut(token, "|")
+		off = sort.Search(len(ids), func(i int) bool { return before(tv, tid, b.recs[ids[i]], ids[i]) })
+	}
 	mode := ""
 	if b.fail != nil {
 		mode = b.fail(off)
@@ -134,7 +159,8 @@ func (b *orderedBC) serve(w http.ResponseWriter, r *http.Request) {
 	case mode == "off-origin":
 		next = `,"@odata.nextLink":"https://collector.example/collect?page=2"`
 	case end < len(ids):
-		q.Set("$skiptoken", strconv.Itoa(end))
+		last := ids[end-1]
+		q.Set("$skiptoken", b.recs[last]+"|"+last)
 		next = fmt.Sprintf(`,"@odata.nextLink":%q`, b.srv.URL+r.URL.Path+"?"+q.Encode())
 	}
 	fmt.Fprintf(w, `{"value":[%s]%s}`, strings.Join(out, ","), next)
@@ -568,5 +594,265 @@ func TestOrderedResume_StuckOnADateSaysSo(t *testing.T) {
 	}
 	if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp == nil || cp.LastProcessedMessageID != "2026-10-03" {
 		t.Errorf("watermark = %+v, want 2026-10-03", cp)
+	}
+}
+
+// TestOrderedResume_StoppedRecoveryKeepsTheFrozenWatermark: a recovery read
+// past a frozen pre-#591 watermark that stops early stores nothing (review of
+// #755). Its check for a node that saved again after freezing
+// (recovery.resaved) needs the end of the feed, so the next poll must run the
+// recovery again rather than resume as a normal poll.
+func TestOrderedResume_StoppedRecoveryKeepsTheFrozenWatermark(t *testing.T) {
+	const frozen = "2099-01-01T00:00:00Z"
+	lowerPageCap(t, 2)
+	bc, c, got, mu, _ := orderedFixture(t, lmField, 1, map[string]string{
+		"a": mins(-170), "b": mins(-160), "c": mins(-150), "d": mins(-140),
+	})
+	if err := c.checkpoints.Save(context.Background(), &checkpoint.Checkpoint{
+		TenantID: "tenant-1", ConnectionID: "conn-1", NodeID: "src",
+		LastProcessedMessageID: frozen, LastProcessedAt: aheadNow.Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := bc.cfg()
+	if _, err := pollOnce(t, c, got, mu, cfg); !errors.Is(err, errPageCap) {
+		t.Fatalf("err = %v, want errPageCap", err)
+	}
+	if want := lmField + " gt " + aheadNow.Add(-3*time.Hour).Format(time.RFC3339); bc.firstPageQueries()[0].Get("$filter") != want {
+		t.Fatalf("the poll asked %q, want the bounded recovery read %q", bc.firstPageQueries()[0].Get("$filter"), want)
+	}
+	cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src")
+	if cp == nil || cp.LastProcessedMessageID != frozen {
+		t.Errorf("checkpoint = %+v, want the frozen watermark %s kept", cp, frozen)
+	}
+}
+
+// TestOrderedResume_ResendWithNothingToResumeFromStaysAResend: every record
+// a resend read is on one timestamp, so it has no point to resume from. It
+// must stay a resend: ending it would leave the next poll on the old
+// watermark, and the records the capped resend never reached would not go
+// out again (review of #755).
+func TestOrderedResume_ResendWithNothingToResumeFromStaysAResend(t *testing.T) {
+	ts := mins(-60)
+	bc, c, got, mu, _ := orderedFixture(t, lmField, 1, map[string]string{"a": ts, "b": ts, "c": ts})
+	cfg := bc.cfg()
+	if ids, err := pollOnce(t, c, got, mu, cfg); err != nil || sorted(ids) != "a,b,c" {
+		t.Fatalf("first poll: %v, %v", ids, err)
+	}
+	lowerPageCap(t, 2)
+	cfg.resendAll = true
+	ids, err := pollOnce(t, c, got, mu, cfg)
+	if !errors.Is(err, errPageCap) || sorted(ids) != "a,b" {
+		t.Fatalf("capped resend: published %v, err %v; want a,b and errPageCap", ids, err)
+	}
+	if !cfg.resendAll {
+		t.Fatal("the capped resend ended with nothing to resume from")
+	}
+	pageCap = maxPagesPerPoll
+	ids, err = pollOnce(t, c, got, mu, cfg)
+	if err != nil {
+		t.Fatalf("resend after the cap was raised: %v", err)
+	}
+	if !strings.Contains(","+sorted(ids)+",", ",c,") {
+		t.Errorf("published %v after the cap was raised, want c resent", ids)
+	}
+}
+
+// TestOrderedResume_LatestValueWinsInTheRememberedSet: k is read on the
+// watermark day, then edited to a future date while the poll pages, and read
+// again further on. The remembered set must keep the newer value, which is
+// what the next poll gets back; keeping the old one sends k a third time
+// (review of #755). Both a full poll and one the cap stops after k's second
+// read.
+func TestOrderedResume_LatestValueWinsInTheRememberedSet(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cap  int
+	}{
+		{"full poll", 0},
+		// a, j, k, k again, z; zz is past the cap, so k is not on the last
+		// value read and only the ahead set has its newer value.
+		{"stopped poll", 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.cap > 0 {
+				lowerPageCap(t, tc.cap)
+			}
+			bc, c, got, mu, _ := orderedFixture(t, dateField, 1, map[string]string{
+				"a": "2026-10-01", "j": "2026-10-03", "k": "2026-10-03", "z": "2099-06-01", "zz": "2099-07-01",
+			})
+			edited := false
+			bc.beforePage = func(token string) {
+				if !edited && strings.HasSuffix(token, "|k") {
+					edited = true
+					bc.recs["k"] = "2099-01-01"
+				}
+			}
+			cfg := bc.cfg()
+			var published []string
+			for i := 0; i < 3; i++ {
+				ids, err := pollOnce(t, c, got, mu, cfg)
+				if err != nil && !errors.Is(err, errPageCap) {
+					t.Fatalf("poll %d: %v", i+1, err)
+				}
+				published = append(published, ids...)
+			}
+			if !edited {
+				t.Fatal("k was never edited: the case tests nothing")
+			}
+			if tc.cap > 0 && !strings.Contains(sorted(published), "zz") {
+				t.Fatal("zz never published: the later polls did not finish the feed")
+			}
+			n := 0
+			for _, id := range published {
+				if id == "k" {
+					n++
+				}
+			}
+			if n != 2 {
+				t.Errorf("k published %d times, want 2 (before and after the edit); all: %v", n, published)
+			}
+			if got := cfg.aheadSeen["k"]; got != "2099-01-01" {
+				t.Errorf("remembered k = %q, want its newer value 2099-01-01", got)
+			}
+		})
+	}
+}
+
+// TestOrderedResume_TransientErrorKeepsTheOrder: only a 400 to the ordered
+// first page turns $orderby off. A 503 fails that poll and the next one asks
+// in order again (review of #755).
+func TestOrderedResume_TransientErrorKeepsTheOrder(t *testing.T) {
+	for _, code := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			bc, c, got, mu, _ := orderedFixture(t, lmField, 2, map[string]string{"a": mins(-90), "b": mins(-80)})
+			bc.failFirst = code
+			cfg := bc.cfg()
+			if _, err := pollOnce(t, c, got, mu, cfg); err == nil {
+				t.Fatalf("poll 1: want the %d to surface", code)
+			}
+			if _, err := pollOnce(t, c, got, mu, cfg); err != nil {
+				t.Fatalf("poll 2: %v", err)
+			}
+			for i, q := range bc.firstPageQueries() {
+				if q.Get("$orderby") != lmField+" asc" {
+					t.Errorf("request %d asked $orderby=%q, want %q", i+1, q.Get("$orderby"), lmField+" asc")
+				}
+			}
+		})
+	}
+}
+
+// TestOrderedResume_Randomized drives many small random entities through
+// capped polls with records edited while a poll pages, restarts (a fresh
+// node config, state only from the checkpoint) and failed pages. Every
+// record's final value must be published, and no record is published twice
+// with the same value. Sizes keep within what can be passed: fewer records
+// on one value, and fewer future-dated records, than a poll reads.
+// RSEED=<n> runs one seed alone.
+func TestOrderedResume_Randomized(t *testing.T) {
+	const runs = 300
+	for run := 0; run < runs; run++ {
+		if os.Getenv("RSEED") != "" && fmt.Sprint(run) != os.Getenv("RSEED") {
+			continue
+		}
+		seed := uint64(run)
+		rng := rand.New(rand.NewPCG(seed, 733))
+		size, capPages := 1+rng.IntN(3), 1+rng.IntN(3)
+		perPoll := size * capPages
+		if perPoll < 3 {
+			capPages = 3
+			perPoll = size * capPages
+		}
+		tick := 0
+		next := func() string {
+			tick++
+			return aheadNow.Add(-10*time.Hour + time.Duration(tick)*time.Second).Format(time.RFC3339)
+		}
+		recs := map[string]string{}
+		for i, n := 0, 3+rng.IntN(15); i < n; {
+			v := next()
+			for j := 0; j < 1+rng.IntN(perPoll-1) && i < n; j++ { // a tie group smaller than a poll
+				recs[fmt.Sprintf("r%02d", i)] = v
+				i++
+			}
+		}
+		for i, n := 0, rng.IntN(perPoll); i < n; i++ { // future-dated, fewer than a poll reads
+			recs[fmt.Sprintf("f%02d", i)] = aheadNow.Add(time.Duration(1+rng.IntN(48)) * time.Hour).Format(time.RFC3339)
+		}
+
+		ok := t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			lowerPageCap(t, capPages)
+			bc, c, got, mu, _ := orderedFixture(t, lmField, size, recs)
+			edits, failures := 1+rng.IntN(4), rng.IntN(3)
+			bc.beforePage = func(string) {
+				if edits > 0 && rng.IntN(4) == 0 { // an edit stamps BC's now
+					edits--
+					ids := make([]string, 0, len(bc.recs))
+					for id := range bc.recs {
+						ids = append(ids, id)
+					}
+					sort.Strings(ids)
+					bc.recs[ids[rng.IntN(len(ids))]] = next()
+				}
+			}
+			bc.fail = func(int) string {
+				if failures > 0 && rng.IntN(5) == 0 {
+					failures--
+					return "500"
+				}
+				return ""
+			}
+			type version struct{ id, value string }
+			sent := map[version]int{}
+			cfg := bc.cfg()
+			done := false
+			for p := 0; p < 60 && !done; p++ {
+				if rng.IntN(4) == 0 {
+					cfg = bc.cfg() // restart
+				}
+				mu.Lock()
+				before := len(*got)
+				mu.Unlock()
+				// Done is a poll that completes with no edit or failure left
+				// to happen while it pages; an edit during a poll is the
+				// next poll's to read.
+				bc.mu.Lock()
+				quiet := edits == 0 && failures == 0
+				bc.mu.Unlock()
+				_, err := pollOnce(t, c, got, mu, cfg)
+				mu.Lock()
+				for _, env := range (*got)[before:] {
+					var rs []map[string]string
+					if jerr := json.Unmarshal(env.Payload, &rs); jerr != nil {
+						t.Fatalf("payload: %v", jerr)
+					}
+					for _, r := range rs {
+						sent[version{r["id"], r[lmField]}]++
+					}
+				}
+				mu.Unlock()
+				done = err == nil && quiet
+			}
+			if !done {
+				t.Fatalf("size %d, cap %d: the feed never completed", size, capPages)
+			}
+			for v, n := range sent {
+				if n > 1 {
+					t.Errorf("%s at %s published %d times", v.id, v.value, n)
+				}
+			}
+			bc.mu.Lock()
+			defer bc.mu.Unlock()
+			for id, v := range bc.recs {
+				if sent[version{id, v}] == 0 {
+					t.Errorf("%s at its final value %s never published", id, v)
+				}
+			}
+		})
+		if !ok {
+			t.Logf("size %d, cap %d, records %v", size, capPages, recs)
+			return
+		}
 	}
 }

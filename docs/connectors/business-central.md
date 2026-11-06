@@ -305,7 +305,9 @@ node sees) is skipped and the converted record is written.
     - More records on one value than a poll reads (10 000 pages of the same
       timestamp or date) still cannot be passed. For a date field that
       includes the records dated today or later, which every poll reads
-      again after the watermark day. With `lookback_days` the window is read
+      again after the watermark day. For a DateTime field, more distinct
+      future-dated records than a poll reads never complete either: they
+      never become the watermark, so every poll starts before all of them. With `lookback_days` the window is read
       again from its start on every poll, so a window larger than the cap is
       not passed either. The Warn says so: it reads "was not advanced".
     - If BC answers 400 to `$orderby` and the same request without it works
