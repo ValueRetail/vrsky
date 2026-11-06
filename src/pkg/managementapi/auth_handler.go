@@ -181,8 +181,16 @@ func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	// Hash the token to look up in database
 	hashedToken := auth.HashToken(rawToken)
 
+	// Whose token it is, for the security log; the checks are in Use… below.
+	var userID *string
+	if tok, err := h.repo.GetEmailVerificationToken(ctx, hashedToken); err == nil {
+		userID = &tok.UserID
+	}
+	email := h.auditEmail(ctx, userID)
+
 	// Use the verification token (marks as used and verifies email)
 	if err := h.repo.UseEmailVerificationToken(ctx, hashedToken); err != nil {
+		h.logAuthEvent(ctx, r, userID, email, "email_verified", "failed", stringPtr(tokenFailure(err)))
 		if errors.Is(err, auth.ErrInvalidToken) {
 			_ = writeError(w, http.StatusNotFound, "NotFound", "invalid verification link", nil)
 		} else if errors.Is(err, auth.ErrTokenUsed) {
@@ -194,6 +202,7 @@ func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.logAuthEvent(ctx, r, userID, email, "email_verified", "success", nil)
 
 	// Redirect to login page with success message
 	// In production, use a proper redirect URL from config
@@ -381,10 +390,21 @@ func (h *Handler) LogoutUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hashedToken := auth.HashToken(token)
+	var userID *string
+	if sess, err := h.repo.GetSessionByTokenHash(ctx, hashedToken); err == nil {
+		userID = &sess.UserID
+	}
+	email := h.auditEmail(ctx, userID)
 	if err := h.repo.InvalidateSession(ctx, hashedToken); err != nil {
+		h.logAuthEvent(ctx, r, userID, email, "logout", "failed", stringPtr(err.Error()))
 		// Don't fail on logout errors.
 		_ = writeJSON(w, http.StatusOK, MessageResponse{Success: true, Message: "logged out"})
 		return
+	}
+	if userID == nil {
+		h.logAuthEvent(ctx, r, nil, "", "logout", "failed", stringPtr("unknown session"))
+	} else {
+		h.logAuthEvent(ctx, r, userID, email, "logout", "success", nil)
 	}
 	_ = writeJSON(w, http.StatusOK, MessageResponse{Success: true, Message: "logged out successfully"})
 }
@@ -488,8 +508,16 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	// Hash the token to look up in database
 	hashedToken := auth.HashToken(req.Token)
 
+	// Whose token it is, for the security log; the checks are in Use… below.
+	var userID *string
+	if tok, err := h.repo.GetPasswordResetToken(ctx, hashedToken); err == nil {
+		userID = &tok.UserID
+	}
+	email := h.auditEmail(ctx, userID)
+
 	// Use the reset token (validates, updates password, invalidates sessions)
 	if err := h.repo.UsePasswordResetToken(ctx, hashedToken, newPasswordHash); err != nil {
+		h.logAuthEvent(ctx, r, userID, email, "password_reset", "failed", stringPtr(tokenFailure(err)))
 		if errors.Is(err, auth.ErrInvalidToken) {
 			_ = writeError(w, http.StatusBadRequest, "InvalidToken", "invalid or expired reset link", nil)
 		} else if errors.Is(err, auth.ErrTokenUsed) {
@@ -501,6 +529,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.logAuthEvent(ctx, r, userID, email, "password_reset", "success", nil)
 
 	_ = writeJSON(w, http.StatusOK, MessageResponse{
 		Success: true,
@@ -668,6 +697,35 @@ func isValidEmail(email string) bool {
 // stringPtr returns a pointer to a string
 func stringPtr(s string) *string {
 	return &s
+}
+
+// auditEmail is the email of the user a token or session belongs to, for a
+// security-log row; empty when the user is unknown or cannot be read.
+func (h *Handler) auditEmail(ctx context.Context, userID *string) string {
+	if userID == nil {
+		return ""
+	}
+	user, err := h.repo.GetUserByID(ctx, *userID)
+	if err != nil {
+		return ""
+	}
+	return user.Email
+}
+
+// tokenFailure is the security-log reason for a token that could not be
+// used: a fixed phrase for the known cases, so nothing from the request ends
+// up in the row.
+func tokenFailure(err error) string {
+	switch {
+	case errors.Is(err, auth.ErrInvalidToken):
+		return "invalid token"
+	case errors.Is(err, auth.ErrTokenUsed):
+		return "token already used"
+	case errors.Is(err, auth.ErrTokenExpired):
+		return "token expired"
+	default:
+		return err.Error()
+	}
 }
 
 // logAuthEvent logs an authentication event to the audit log

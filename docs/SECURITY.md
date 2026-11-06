@@ -182,6 +182,30 @@ middleware auto-captures the request; `member.role_change` and
 `member.remove` actions include `target_user_id` and (for role changes)
 `new_role` in the details column.
 
+Sign-in events go to a separate security log, the `auth_audit_log` table:
+one row per event with the user (where known), email, event type, status,
+a reason on failure, the client address and the user agent. Never a token,
+a session id or a password, nor their hashes.
+
+| Event type | Written by | Status |
+|---|---|---|
+| `registration` | sign-up | `success`, `failed` |
+| `tenant_creation`, `auto_verify` | sign-up | `failed` |
+| `login` | password login | `success`, `failed` |
+| `oidc_login` | OIDC callback | `success`, `failed`, `denied` |
+| `password_reset_requested` | forgot-password | `success`, `not_found`, `send_failed` |
+| `password_reset` | reset-password (using the link) | `success`, `failed` |
+| `password_changed` / `password_change` | change-password | `success` / `failed` |
+| `email_verified` | the verification link | `success`, `failed` |
+| `logout` | logout | `success`, `failed` |
+| `account_deleted` | account deletion | `success` |
+| `login`, `signup`, `forgot_password`, `change_password` | the failed-attempt limits | `blocked` (once, when a block starts) |
+
+A failed `password_reset` or `email_verified` row says why (`invalid token`,
+`token already used`, `token expired`) and names the user when the token
+was a real one. A `logout` for a session the server does not know is
+`failed` with `unknown session` and no user.
+
 ## Failed-attempt limits on the auth routes
 
 `POST /api/v1/auth/login` and `POST /api/v1/auth/register` are the two
