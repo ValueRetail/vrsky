@@ -8,7 +8,7 @@ import (
 
 func TestSentSet(t *testing.T) {
 	k := func(i int) sentKey {
-		return sentKey{connID: "c", envelopeID: fmt.Sprintf("e%d", i), nodeID: "n", method: "POST", url: "https://x"}
+		return sentKey{connID: "c", envelopeID: fmt.Sprintf("e%d", i), nodeID: "n", target: targetHash("POST", "https://x")}
 	}
 	t0 := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 

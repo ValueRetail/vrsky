@@ -135,14 +135,18 @@ DLQ for every destination is in the
 node failed in a way that is retried. When one node fails and another takes
 the message, the message is retried for the failing node only: a node that
 took it (a `2xx`, or a `4xx`, which is final) is not sent it again on the
-next attempts (#730). The DLQ copy's last error names every node that still
-failed, as `node <node id>: <error>`. A retry from the DLQ skips the nodes
-that took the message as well.
+next attempts (#730). A node whose request failed on the way (the connection
+dropped, a timeout) has not taken it and is tried again. The DLQ copy's last
+error names every node that still failed, as `node <node id>: <error>`. That
+header is cut at 512 bytes, so with many failing nodes the later ones show
+only in the worker's log (`HTTP destination refused`, `HTTP request failed`
+or `HTTP request returned error`, with `connection_id` and `node_id`). A retry from the DLQ skips the nodes that
+took the message as well.
 
-This memory is kept by the `http-producer` process (up to 10 000 nodes, for
-7 days, the DLQ's retention). If the worker restarts
-(or a rolling deploy hands the message to the new pod) between two attempts,
-every node is sent the message again. A node whose `2xx` got lost (a timeout
+This memory is kept by the `http-producer` process: one entry per node per
+message, up to 10 000 entries, for 7 days (the DLQ's retention). If the
+worker restarts (or a rolling deploy hands the message to the new pod)
+between two attempts, every node is sent the message again. A node whose `2xx` got lost (a timeout
 after the partner had accepted the request) is sent it again too. So a node
 receives a message at least once; use `X-Message-ID`, which is the same on
 every attempt, to drop a repeat on the receiving side. Keeping the memory

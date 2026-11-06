@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"sync"
 	"time"
 )
@@ -42,14 +43,18 @@ const (
 // message (the SDK gives Deliver the envelope, not the stream sequence; every
 // message gets a fresh UUID, and a DLQ retry keeps it), and the node plus
 // where it sends is the target, so a node edited to point elsewhere between
-// two attempts is a new target and gets the message. The URL is held in
-// memory only; it may carry user:pass@ and is never logged from here.
+// two attempts is a new target and gets the message. The target is a hash
+// of method and URL, so the set never holds a URL's user:pass@.
 type sentKey struct {
 	connID     string
 	envelopeID string
 	nodeID     string
-	method     string
-	url        string
+	target     [sha256.Size]byte // targetHash(method, url)
+}
+
+// targetHash identifies where a node sends: its method and URL.
+func targetHash(method, url string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(method + "\x00" + url))
 }
 
 type sentSet struct {

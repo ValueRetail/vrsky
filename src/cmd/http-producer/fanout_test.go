@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -343,4 +344,110 @@ func TestFanOut_ErrorNamesEveryFailingNode(t *testing.T) {
 	if n := p.sentSet().size(); n != 0 {
 		t.Errorf("no node took the message, but the skip set holds %d entries", n)
 	}
+}
+
+// dropping is an endpoint that counts each request, then closes the
+// connection without answering: the request went out, the node never said it
+// took it.
+func dropping(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("response writer cannot be hijacked")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+// assertOnlyTaken checks that the skip set holds exactly the given nodes'
+// keys for env.
+func assertOnlyTaken(t *testing.T, p *httpProducer, env *envelope.Envelope, taken ...*HTTPConfig) {
+	t.Helper()
+	s := p.sentSet()
+	if n := s.size(); n != len(taken) {
+		t.Errorf("skip set holds %d entries, want %d", n, len(taken))
+	}
+	for _, c := range taken {
+		k := sentKey{connID: env.IntegrationID, envelopeID: env.ID, nodeID: c.NodeID, target: targetHash(c.Method, c.URL)}
+		if !s.has(k, time.Now()) {
+			t.Errorf("skip set does not hold node %s", c.NodeID)
+		}
+	}
+}
+
+// A node whose request went out but which never answered (the connection was
+// closed, a transport error) has not taken the message: it is tried again on
+// every attempt and never lands in the skip set.
+func TestFanOut_NodeThatFailedMidRequestIsRetried(t *testing.T) {
+	good := newCounter(t, http.StatusOK)
+	drop, dropHits := dropping(t)
+	cfgGood := &HTTPConfig{NodeID: "good", URL: good.srv.URL, Method: "POST"}
+	cfgDrop := &HTTPConfig{NodeID: "drop", URL: drop.URL, Method: "POST"}
+	p := newStreamingProducer(t, []*HTTPConfig{cfgGood, cfgDrop})
+	env := testEnv()
+	for i := 0; i < 3; i++ {
+		err := p.Deliver(context.Background(), env)
+		if err == nil || !strings.Contains(err.Error(), "node drop: transport:") {
+			t.Fatalf("attempt %d: err = %v, want the drop node's transport error", i+1, err)
+		}
+	}
+	if n := good.hits.Load(); n != 1 {
+		t.Errorf("healthy node received %d requests, want 1", n)
+	}
+	if n := dropHits.Load(); n != 3 {
+		t.Errorf("dropping node received %d requests, want 3", n)
+	}
+	assertOnlyTaken(t, p, env, cfgGood)
+}
+
+// The same when the delivery is cancelled while the failing node's request is
+// in flight (shutdown, a deadline): the node that answered 2xx is remembered,
+// the one that was cut off is not.
+func TestFanOut_CancelledMidRequestIsRetried(t *testing.T) {
+	good := newCounter(t, http.StatusOK)
+	var slowHits atomic.Int32
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slowHits.Add(1)
+		// Never answers; the client gives up. The server only notices the
+		// client leaving once the body is read, so read it first, and let
+		// go at the end of the test so Close does not wait on this handler.
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(slow.Close)
+	t.Cleanup(func() { close(release) }) // runs before slow.Close
+	cfgGood := &HTTPConfig{NodeID: "good", URL: good.srv.URL, Method: "POST"}
+	cfgSlow := &HTTPConfig{NodeID: "slow", URL: slow.URL, Method: "POST"}
+	p := newStreamingProducer(t, []*HTTPConfig{cfgGood, cfgSlow})
+	env := testEnv()
+	for i := 0; i < 2; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		err := p.Deliver(ctx, env)
+		cancel()
+		if err == nil || !strings.Contains(err.Error(), "node slow: transport:") {
+			t.Fatalf("attempt %d: err = %v, want the slow node's transport error", i+1, err)
+		}
+	}
+	if n := good.hits.Load(); n != 1 {
+		t.Errorf("healthy node received %d requests, want 1", n)
+	}
+	if n := slowHits.Load(); n != 2 {
+		t.Errorf("cut-off node received %d requests, want 2", n)
+	}
+	assertOnlyTaken(t, p, env, cfgGood)
 }

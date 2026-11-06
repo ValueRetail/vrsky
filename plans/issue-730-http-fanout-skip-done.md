@@ -43,11 +43,14 @@ message's identity (consumers and the SDK republish give every message a
 fresh UUID; a DLQ retry republishes the same envelope, which is what we want
 skipped). Method and URL are part of the key so a node edited to point
 somewhere else between attempts is a new target and gets the message. The
-URL is kept in memory only, never logged.
+key holds a SHA-256 of method and URL, not the URL, which can carry
+`user:pass@`.
 
 (c) What counts as "took the message": any node whose send returned nil,
 that is a `2xx`, or a `4xx` / unbuildable request (already acked by design,
-retrying can't help). Those are not sent again on redelivery.
+retrying can't help). Those are not sent again on redelivery. A node whose
+request went out and then failed (connection dropped, cancelled, timed out)
+has not taken it and is tried again.
 
 (d) Lifecycle: entries are added only when a delivery fails on some node and
 at least one other node took it; the delivery that completes the message

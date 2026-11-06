@@ -218,7 +218,7 @@ func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 	for _, httpCfg := range p.eligibleConfigs(httpConfigs, lastProcessedBy) {
 		key := sentKey{
 			connID: connectionID, envelopeID: env.ID, nodeID: httpCfg.NodeID,
-			method: httpCfg.Method, url: httpCfg.URL,
+			target: targetHash(httpCfg.Method, httpCfg.URL),
 		}
 		if sent.has(key, at) {
 			p.logger.Info("Node already took this message; skipping it on redelivery",
@@ -368,7 +368,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	// DLQ, so the payload is kept for the operator rather than dropped, and no
 	// request leaves the pod (#660).
 	if err := safeurl.CheckRequestURL(httpCfg.URL, p.allowPrivate); err != nil {
-		p.logger.Error("HTTP destination refused", "error", err, "connection_id", connectionID)
+		p.logger.Error("HTTP destination refused", "error", err, "connection_id", connectionID, "node_id", httpCfg.NodeID)
 		p.emitEvent(connectionID, HTTPEvent{Type: "error", Message: "Destination refused: " + err.Error(), Time: now()})
 		return fmt.Errorf("destination refused: %w", err)
 	}
@@ -421,7 +421,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 
 	resp, err := buildAndSend(false)
 	if err != nil {
-		p.logger.Error("HTTP request failed", "error", err, "connection_id", connectionID)
+		p.logger.Error("HTTP request failed", "error", err, "connection_id", connectionID, "node_id", httpCfg.NodeID)
 		p.emitEvent(connectionID, HTTPEvent{
 			Type: "error", Message: err.Error(),
 			Time: now(),
@@ -461,7 +461,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		return nil
 	}
 
-	p.logger.Error("HTTP request returned error", "status", resp.StatusCode, "connection_id", connectionID)
+	p.logger.Error("HTTP request returned error", "status", resp.StatusCode, "connection_id", connectionID, "node_id", httpCfg.NodeID)
 	p.emitEvent(connectionID, HTTPEvent{
 		Type: "error", Message: fmt.Sprintf("%s %s → %d", method, shownURL, resp.StatusCode),
 		StatusCode: resp.StatusCode, Response: respPreview,
