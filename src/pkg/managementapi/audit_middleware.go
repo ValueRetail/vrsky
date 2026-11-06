@@ -61,24 +61,17 @@ type auditActor struct {
 //
 //  1. a route's explicit path override (AuditUnderPathTenant);
 //  2. the workspace the caller was verified against;
-//  3. nothing, when the caller authenticated but was verified against no
-//     workspace: a signed-in non-member, or a key from another workspace,
-//     must not file entries into the workspace named in X-Tenant-ID;
-//  4. otherwise (no credential at all) the context tenant, as before #695
-//     (backlog 186).
-func (b *auditBag) tenant(contextTenant string) string {
+//  3. otherwise nothing. The workspace named in X-Tenant-ID never decides
+//     it: a signed-in non-member or a key from another workspace (#695), and
+//     a request with no valid credential at all (#719), must not file
+//     entries into a workspace's log by naming it.
+func (b *auditBag) tenant() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.tenantOverride != "" {
 		return b.tenantOverride
 	}
-	if b.verifiedTenant != "" {
-		return b.verifiedTenant
-	}
-	if b.actor != nil {
-		return ""
-	}
-	return contextTenant
+	return b.verifiedTenant
 }
 
 // auditBagFrom returns the request's audit bag, or nil when the request did
@@ -261,10 +254,9 @@ func AuditMiddleware(writer AuditWriter, logger *log.Logger) func(http.Handler) 
 			next.ServeHTTP(arw, r.WithContext(ctx))
 
 			// Skip recording when there is no workspace to file it under:
-			// pre-auth paths, and callers who authenticated but were not
+			// requests with no valid credential, and callers who were not
 			// verified against any workspace (see auditBag.tenant).
-			contextTenant, _ := TenantIDFromContextOptional(ctx)
-			tenantID := bag.tenant(contextTenant)
+			tenantID := bag.tenant()
 			if tenantID == "" {
 				return
 			}
@@ -280,14 +272,6 @@ func AuditMiddleware(writer AuditWriter, logger *log.Logger) func(http.Handler) 
 			}(entry)
 		})
 	}
-}
-
-// TenantIDFromContextOptional is the non-erroring variant of
-// GetTenantIDFromContext — used by the middleware to decide whether to
-// audit at all.
-func TenantIDFromContextOptional(ctx context.Context) (string, bool) {
-	tenantID, ok := ctx.Value(TenantIDKey).(string)
-	return tenantID, ok && tenantID != ""
 }
 
 // shouldAudit decides which requests get an audit entry.

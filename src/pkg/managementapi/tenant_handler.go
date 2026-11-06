@@ -41,6 +41,10 @@ func (h *Handler) CreateTenantHandler(w http.ResponseWriter, r *http.Request) {
 		_ = writeError(w, http.StatusInternalServerError, "ServerError", "failed to create workspace", nil)
 		return
 	}
+	// The caller owns the new workspace now: its creation is the first entry
+	// in its log, with the creator as actor (#719).
+	recordAuditVerifiedTenant(r.Context(), tenant.ID)
+	SetAuditResource(r.Context(), "tenant", tenant.ID)
 
 	// Enqueue NATS provisioning job if provisioner is available
 	var jobID string

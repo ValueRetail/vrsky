@@ -703,11 +703,15 @@ Each entry shows:
 Who is the signed-in user's email, or `API key (<workspace>)` when this
 workspace's API key made the call. Refused attempts by the workspace's own
 members (a viewer trying to edit, say) are recorded too, with whoever tried;
-attempts by people outside the workspace are not written to its log. Changes
-to the workspace itself (members, plan requests, the API key) and joining it
-by invite are in its log, whichever workspace you had selected. Plan and
-limit changes made by the VRSky operator show up here too, with the operator
-as who.
+attempts by people outside the workspace, and requests that aren't signed in
+or don't carry a valid API key, are not written to its log. Failed sign-ins
+are kept in VRSky's own sign-in log, not in any workspace's. Creating the
+workspace (when you signed up, or later with **Create new workspace**)
+is its first entry, `tenant.create`, with whoever created it. Changes to the
+workspace itself (members, plan requests, the API key) and joining it by
+invite are in its log, whichever workspace you had selected. Plan and limit
+changes made by the VRSky operator show up here too, with the operator as
+who.
 
 You can **filter** the log by **action**, **resource**, and **date**, and
 **export as JSONL** for archiving or analysis.
