@@ -1294,7 +1294,7 @@ Last updated 2026-10-28.
     with `Deliver`, as `file-producer` does (it answers true on a lookup
     error so `Deliver` can retry). Found in #698.
 
-179. **The database destination loses messages quietly (high priority).**
+179. ~~**The database destination loses messages quietly (high priority).**~~ (#705)
     Filed as #705.
     `getTargetConnections` in `db-producer` `continue`s past a target it
     cannot open or ping, so a failed target is lost even when the others
@@ -1333,8 +1333,8 @@ Last updated 2026-10-28.
     and Front Systems pages used to promise the hint; #698 removed that. Found
     in #698. Filed as #721.
 
-183. **`docs/connectors/database.md` describes a destination config the code
-    does not read.** The page shows `connection_string_secret_id`, `table` and
+183. ~~**`docs/connectors/database.md` describes a destination config the code
+    does not read.**~~ (#705) The page shows `connection_string_secret_id`, `table` and
     `operation`; `db-producer` reads `database.host`, `port`, `user`,
     `password` (as `password_secret_id`), `database`, `sslmode`, `table` and
     `mode` (`insert`, `upsert` or `create_insert`) and skips a node without

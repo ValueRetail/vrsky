@@ -19,6 +19,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/pgdsn"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -52,6 +53,12 @@ type dbProducer struct {
 	// postgres opener in Configure; tests inject a mock so the connector can be
 	// exercised without Docker.
 	openTarget func(connStr string) (*sql.DB, error)
+
+	// written remembers the targets that committed a message whose delivery
+	// failed on another target, so its redelivery skips them (#705; see
+	// writtenSet). Created on first use.
+	written     *writtenSet
+	writtenOnce sync.Once
 }
 
 type TargetDBConfig struct {
@@ -65,11 +72,71 @@ type TargetDBConfig struct {
 	Mode     string `json:"mode"` // "insert", "upsert", "create_insert"
 }
 
+// targetConnectTimeout bounds connecting to a target database (dial, TLS and
+// sign-in), in seconds. Without it a host that drops packets holds the
+// delivery for the OS connect timeout, minutes, on every attempt (#705). A
+// variable so a test can shorten it.
+var targetConnectTimeout = 10
+
+// errTargetEvicted is returned for a target whose cached list was replaced
+// or evicted while a delivery was using it. The delivery is retried and reads
+// the current config.
+var errTargetEvicted = errors.New("target config was reloaded during the delivery; will retry")
+
+// TargetConnection is one database destination node of a connection.
 type TargetConnection struct {
-	DB             *sql.DB
+	NodeID         string
 	Config         TargetDBConfig
 	PredecessorID  string // direct predecessor node ID
 	PredIsConsumer bool   // if true, process when _last_processed_by is empty
+
+	// ConfigErr is set for a node that cannot be written to as configured
+	// (no host, a config that does not parse). Deliver logs it at Error and
+	// fails the message, so it is retried and dead-lettered (#705).
+	ConfigErr error
+
+	// DB is the target's pool, opened (and pinged) on first use by pool.
+	// A failed open is not kept: the next delivery tries again.
+	DB  *sql.DB
+	dsn string
+	mu  sync.Mutex
+	// closed is set by close: the list this target was in has been evicted
+	// or replaced, so pool must not open a pool nothing would ever close.
+	closed bool
+}
+
+// pool returns the target's pool, opening and pinging it first if needed.
+func (tc *TargetConnection) pool(ctx context.Context, open func(string) (*sql.DB, error)) (*sql.DB, error) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.closed {
+		return nil, errTargetEvicted
+	}
+	if tc.DB != nil {
+		return tc.DB, nil
+	}
+	db, err := open(tc.dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open target database %s:%d: %w", tc.Config.Host, tc.Config.Port, err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("reach target database %s:%d: %w", tc.Config.Host, tc.Config.Port, err)
+	}
+	tc.DB = db
+	return db, nil
+}
+
+// close closes the target's pool if it was opened, and keeps pool from
+// opening another.
+func (tc *TargetConnection) close() {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.closed = true
+	if tc.DB != nil {
+		_ = tc.DB.Close()
+		tc.DB = nil
+	}
 }
 
 type DBProdEvent struct {
@@ -135,9 +202,7 @@ func (p *dbProducer) evictTargetCache(connectionID string) {
 	p.targetCacheMu.Lock()
 	if tcs, ok := p.targetCache[connectionID]; ok {
 		for _, tc := range tcs {
-			if tc.DB != nil {
-				_ = tc.DB.Close()
-			}
+			tc.close()
 		}
 		delete(p.targetCache, connectionID)
 		delete(p.targetCacheTime, connectionID)
@@ -168,9 +233,7 @@ func (p *dbProducer) Stop(ctx context.Context) error {
 	defer p.targetCacheMu.Unlock()
 	for _, tcs := range p.targetCache {
 		for _, tc := range tcs {
-			if tc.DB != nil {
-				_ = tc.DB.Close()
-			}
+			tc.close()
 		}
 	}
 	p.targetCache = make(map[string][]*TargetConnection)
@@ -178,11 +241,19 @@ func (p *dbProducer) Stop(ctx context.Context) error {
 }
 
 // Deliver writes one envelope into every matching target database configured
-// for its connection. Transient DB failures (open/ping/exec) return
-// sdk.Retriable so the SDK NAKs → retries → DLQs; a malformed (non-JSON)
-// payload returns sdk.Permanent (retrying can't help). A missing producer
-// config for the connection is not an error — this binary just isn't the
-// producer for it.
+// for its connection, and acks (nil) only when every one of them has it.
+//
+//   - A payload that is not JSON is sdk.Permanent: dropped, retrying can't help.
+//   - Anything that stops a target from taking the rows is returned so the
+//     SDK NAKs it, retries and in the end dead-letters it with the error (#705):
+//     a target that cannot be opened or reached, a row the database refuses
+//     (constraint, type), a lost connection, and a node that cannot be written
+//     to as configured (no host, a table name that is not `table` or
+//     `schema.table`). The rows of one target go in one transaction, so a
+//     failed target keeps none of them, and a target that committed is
+//     skipped by the redelivery (see writtenSet).
+//   - A connection with no database destination is not ours: acked. A failed
+//     config read is not acked (#704).
 func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connectionID := env.IntegrationID
 	if connectionID == "" {
@@ -205,8 +276,7 @@ func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 			lastProcessedBy = v
 		}
 	}
-
-	var transient error
+	var routed []*TargetConnection
 	for _, tc := range tcs {
 		if tc.PredIsConsumer && lastProcessedBy != "" {
 			continue
@@ -214,65 +284,109 @@ func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 		if !tc.PredIsConsumer && tc.PredecessorID != "" && lastProcessedBy != tc.PredecessorID {
 			continue
 		}
+		routed = append(routed, tc)
+	}
+	if len(routed) == 0 {
+		return nil
+	}
 
-		if err := p.processForTarget(connectionID, tc, env); err != nil {
-			if errors.Is(err, errBadPayload) || errors.Is(err, errBadTableName) {
-				// Malformed payload or table name — drop (Permanent); retrying can't help.
-				p.logger.Error("dropping message", "error", err, "envelope_id", env.ID)
-				return sdk.Permanent(err)
-			}
-			if transient == nil {
-				transient = err
-			}
+	rows, err := parseRows(env.Payload)
+	if err != nil {
+		p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: err.Error(), Time: now()})
+		p.logger.Error("dropping message", "error", err, "envelope_id", env.ID)
+		return sdk.Permanent(err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	written := p.writtenSet()
+	at := time.Now()
+	var failed []error
+	var done []writtenKey // committed in this delivery or an earlier one
+	var committed []writtenKey
+	for _, tc := range routed {
+		key := writtenKey{
+			connID: connectionID, envelopeID: env.ID, nodeID: tc.NodeID,
+			host: tc.Config.Host, port: tc.Config.Port, user: tc.Config.User,
+			database: tc.Config.Database, table: tc.Config.Table,
 		}
+		if written.has(key, at) {
+			p.logger.Info("Target already has this message; skipping it on redelivery",
+				"connection_id", connectionID, "node_id", tc.NodeID, "envelope_id", env.ID)
+			done = append(done, key)
+			continue
+		}
+		if err := p.writeTarget(ctx, connectionID, tc, rows, env.Payload); err != nil {
+			p.logger.Error("Not written to target database; message not acked, will retry",
+				"connection_id", connectionID, "node_id", tc.NodeID, "table", tc.Config.Table,
+				"envelope_id", env.ID, "error", err)
+			p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: err.Error(), Time: now(), Table: tc.Config.Table})
+			failed = append(failed, fmt.Errorf("node %s: %w", tc.NodeID, err))
+			continue
+		}
+		done = append(done, key)
+		committed = append(committed, key)
 	}
-	if transient != nil {
-		return sdk.Retriable(transient)
+	if len(failed) > 0 {
+		written.add(at, committed...)
+		return sdk.Retriable(errors.Join(failed...))
 	}
+	written.forget(done...)
 	return nil
+}
+
+// writtenSet returns the producer's skip set, creating it on first use.
+func (p *dbProducer) writtenSet() *writtenSet {
+	p.writtenOnce.Do(func() {
+		if p.written == nil {
+			p.written = newWrittenSet(writtenTTL, writtenMax)
+		}
+	})
+	return p.written
 }
 
 // errBadPayload marks an envelope whose payload isn't JSON — a poison message.
 var errBadPayload = errors.New("payload is not valid JSON")
 
 // errBadTableName marks a destination whose configured table name is neither
-// `table` nor `schema.table` — retrying can't fix a config typo.
+// `table` nor `schema.table`.
 var errBadTableName = errors.New("table name must be `table` or `schema.table`")
 
-// processForTarget writes one envelope to one target DB. It returns
-// errBadPayload for unparseable payloads and errBadTableName for a malformed
-// table name (both Permanent), and a transient error if
-// table creation fails (Retriable); per-row insert failures are logged and the
-// batch continues (best-effort, as before).
-func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection, env *envelope.Envelope) error {
-	// Parse payload — a single object or an array of objects.
-	var rows []map[string]interface{}
-	payload := bytes.TrimSpace(env.Payload)
-	if len(payload) > 0 && payload[0] == '[' {
+// errNoHost marks a database destination node without a host.
+var errNoHost = errors.New("database destination has no host")
+
+// parseRows reads a payload as one JSON object or an array of objects.
+func parseRows(raw []byte) ([]map[string]interface{}, error) {
+	payload := bytes.TrimSpace(raw)
+	switch {
+	case len(payload) > 0 && payload[0] == '[':
+		var rows []map[string]interface{}
 		if err := json.Unmarshal(payload, &rows); err != nil {
-			p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Failed to parse JSON array: " + err.Error(), Time: now()})
-			return fmt.Errorf("%w: %v", errBadPayload, err)
+			return nil, fmt.Errorf("%w: %v", errBadPayload, err)
 		}
-	} else if len(payload) > 0 && payload[0] == '{' {
+		return rows, nil
+	case len(payload) > 0 && payload[0] == '{':
 		var single map[string]interface{}
 		if err := json.Unmarshal(payload, &single); err != nil {
-			p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Failed to parse JSON: " + err.Error(), Time: now()})
-			return fmt.Errorf("%w: %v", errBadPayload, err)
+			return nil, fmt.Errorf("%w: %v", errBadPayload, err)
 		}
-		rows = []map[string]interface{}{single}
-	} else {
-		p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Payload is not JSON", Time: now()})
-		return errBadPayload
+		return []map[string]interface{}{single}, nil
+	default:
+		return nil, errBadPayload
 	}
+}
 
-	if len(rows) == 0 {
-		return nil
+// writeTarget writes the rows to one target database in one transaction:
+// the target ends up with all of them or none. Any error is the target's
+// (config, open, ping, table check or create, a refused row, commit).
+func (p *dbProducer) writeTarget(ctx context.Context, connectionID string, tc *TargetConnection, rows []map[string]interface{}, payload []byte) error {
+	if tc.ConfigErr != nil {
+		return tc.ConfigErr
 	}
-
 	table := tc.Config.Table
 	schema, tableName, err := parseTableName(table)
 	if err != nil {
-		p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: err.Error(), Time: now(), Table: table})
 		return err
 	}
 	mode := tc.Config.Mode
@@ -280,7 +394,12 @@ func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection,
 		mode = "create_insert"
 	}
 
-	payloadPreview := string(payload)
+	db, err := tc.pool(ctx, p.openTarget)
+	if err != nil {
+		return err
+	}
+
+	payloadPreview := string(bytes.TrimSpace(payload))
 	if len(payloadPreview) > 3000 {
 		payloadPreview = payloadPreview[:3000] + "..."
 	}
@@ -288,43 +407,45 @@ func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection,
 	for k := range rows[0] {
 		columns = append(columns, k)
 	}
-
 	p.emitEvent(connectionID, DBProdEvent{Type: "info", Message: fmt.Sprintf("Writing %d rows to %s", len(rows), table), Time: now(), Payload: payloadPreview, Table: table, Columns: columns})
 
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction on %s: %w", table, err)
+	}
+	defer func() { _ = tx.Rollback() }() // a no-op after Commit
+
 	if mode == "create_insert" {
-		if err := p.ensureTable(tc, schema, tableName, rows[0]); err != nil {
-			p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Failed to create table: " + err.Error(), Time: now()})
+		if err := p.ensureTable(ctx, tx, schema, tableName, rows[0]); err != nil {
 			return fmt.Errorf("ensure table %q: %w", table, err)
 		}
 	}
-
-	inserted := 0
-	for _, row := range rows {
-		if err := p.insertRow(tc, schema, tableName, row); err != nil {
-			p.logger.Error("Failed to insert row", "error", err, "table", table)
-			p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Insert failed: " + err.Error(), Time: now()})
-			continue
+	for i, row := range rows {
+		if err := insertRow(ctx, tx, schema, tableName, row); err != nil {
+			return fmt.Errorf("row %d of %d refused by %s: %w", i+1, len(rows), table, err)
 		}
-		inserted++
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit %d rows to %s: %w", len(rows), table, err)
 	}
 
-	p.logger.Info("Rows inserted", "connection_id", connectionID, "table", table, "count", inserted)
+	p.logger.Info("Rows inserted", "connection_id", connectionID, "node_id", tc.NodeID, "table", table, "count", len(rows))
 	p.emitEvent(connectionID, DBProdEvent{
-		Type: "inserted", Message: fmt.Sprintf("Inserted %d/%d rows into %s", inserted, len(rows), table),
-		Count: inserted, Time: now(), Payload: payloadPreview, Table: table, Columns: columns,
+		Type: "inserted", Message: fmt.Sprintf("Inserted %d/%d rows into %s", len(rows), len(rows), table),
+		Count: len(rows), Time: now(), Payload: payloadPreview, Table: table, Columns: columns,
 	})
 	return nil
 }
 
 // ensureTable creates schema.table (or a bare table) from the sample row's keys
 // unless it already exists. A bare name is looked up in public, as before.
-func (p *dbProducer) ensureTable(tc *TargetConnection, schema, table string, sample map[string]interface{}) error {
+func (p *dbProducer) ensureTable(ctx context.Context, tx *sql.Tx, schema, table string, sample map[string]interface{}) error {
 	lookupSchema := schema
 	if lookupSchema == "" {
 		lookupSchema = "public"
 	}
 	var exists bool
-	err := tc.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name=$2)",
+	err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name=$2)",
 		lookupSchema, table).Scan(&exists)
 	if err != nil {
 		return err
@@ -346,7 +467,7 @@ func (p *dbProducer) ensureTable(tc *TargetConnection, schema, table string, sam
 	}
 
 	query := fmt.Sprintf("CREATE TABLE %s (%s)", qualifiedTable(schema, table), strings.Join(cols, ", "))
-	if _, err = tc.DB.Exec(query); err != nil {
+	if _, err = tx.ExecContext(ctx, query); err != nil {
 		return err
 	}
 
@@ -354,7 +475,7 @@ func (p *dbProducer) ensureTable(tc *TargetConnection, schema, table string, sam
 	return nil
 }
 
-func (p *dbProducer) insertRow(tc *TargetConnection, schema, table string, row map[string]interface{}) error {
+func insertRow(ctx context.Context, tx *sql.Tx, schema, table string, row map[string]interface{}) error {
 	columns := make([]string, 0, len(row))
 	placeholders := make([]string, 0, len(row))
 	values := make([]interface{}, 0, len(row))
@@ -378,7 +499,7 @@ func (p *dbProducer) insertRow(tc *TargetConnection, schema, table string, row m
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "))
 
-	_, err := tc.DB.Exec(query, values...)
+	_, err := tx.ExecContext(ctx, query, values...)
 	return err
 }
 
@@ -472,15 +593,19 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets for node %s: %w", node.ID, rerr))
 		}
 		node.Config = resolved
+		// The pool is opened on first use (TargetConnection.pool), so a target
+		// that is down now is retried on the next delivery rather than left
+		// out of the cached list. A node that is ours but cannot be written to
+		// as configured stays in the list with ConfigErr, so Deliver fails the
+		// message instead of skipping it (#705).
+		tc := &TargetConnection{NodeID: node.ID}
 		var nodeConfig struct {
-			Type     string         `json:"type"`
 			Database TargetDBConfig `json:"database"`
 		}
 		if err := json.Unmarshal(node.Config, &nodeConfig); err != nil {
-			continue
-		}
-		if nodeConfig.Type != "database" || nodeConfig.Database.Host == "" {
-			continue
+			tc.ConfigErr = fmt.Errorf("node config does not parse: %w", err)
+		} else if nodeConfig.Database.Host == "" {
+			tc.ConfigErr = errNoHost
 		}
 
 		cfg := nodeConfig.Database
@@ -490,20 +615,11 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 		if cfg.SSLMode == "" {
 			cfg.SSLMode = "disable"
 		}
-
-		connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode)
-
-		targetDB, err := p.openTarget(connStr)
-		if err != nil {
-			p.logger.Error("Failed to open target DB", "error", err)
-			continue
-		}
-		if err := targetDB.Ping(); err != nil {
-			targetDB.Close()
-			p.logger.Error("Failed to ping target DB", "error", err)
-			continue
-		}
+		tc.Config = cfg
+		tc.dsn = pgdsn.Build(pgdsn.Config{
+			Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password,
+			Database: cfg.Database, SSLMode: cfg.SSLMode, ConnectTimeout: targetConnectTimeout,
+		})
 
 		var predID string
 		var predIsConsumer bool
@@ -520,7 +636,8 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 			}
 		}
 
-		tcs = append(tcs, &TargetConnection{DB: targetDB, Config: cfg, PredecessorID: predID, PredIsConsumer: predIsConsumer})
+		tc.PredecessorID, tc.PredIsConsumer = predID, predIsConsumer
+		tcs = append(tcs, tc)
 	}
 
 	if len(tcs) == 0 {
@@ -535,9 +652,7 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 	// be redelivered; refreshes are infrequent (default 5m).
 	if old, ok := p.targetCache[connectionID]; ok {
 		for _, tc := range old {
-			if tc.DB != nil {
-				_ = tc.DB.Close()
-			}
+			tc.close()
 		}
 	}
 	p.targetCache[connectionID] = tcs
@@ -669,8 +784,10 @@ func testConnectionHandler() http.HandlerFunc {
 		if cfg.SSLMode == "" {
 			cfg.SSLMode = "disable"
 		}
-		connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
-			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode)
+		connStr := pgdsn.Build(pgdsn.Config{
+			Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password,
+			Database: cfg.Database, SSLMode: cfg.SSLMode, ConnectTimeout: 5,
+		})
 		db, err := sql.Open("postgres", connStr)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")

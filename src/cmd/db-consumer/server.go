@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	_ "github.com/lib/pq"
+
+	"github.com/ValueRetail/vrsky/pkg/pgdsn"
 )
 
 // HTTP handlers served on the SDK auxiliary HTTP port (WORKER_HTTP_PORT, 9300 in
@@ -94,8 +96,10 @@ func handleTestConnection() http.HandlerFunc {
 			cfg.SSLMode = "disable"
 		}
 
-		connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
-			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode)
+		connStr := pgdsn.Build(pgdsn.Config{
+			Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password,
+			Database: cfg.Database, SSLMode: cfg.SSLMode, ConnectTimeout: 5,
+		})
 
 		db, err := sql.Open("postgres", connStr)
 		if err != nil {
@@ -179,8 +183,10 @@ func handleSampleData() http.HandlerFunc {
 			req.Limit = 3
 		}
 
-		connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
-			req.Host, req.Port, req.User, req.Password, req.Database, req.SSLMode)
+		connStr := pgdsn.Build(pgdsn.Config{
+			Host: req.Host, Port: req.Port, User: req.User, Password: req.Password,
+			Database: req.Database, SSLMode: req.SSLMode, ConnectTimeout: 5,
+		})
 
 		db, err := sql.Open("postgres", connStr)
 		if err != nil {
@@ -298,8 +304,10 @@ func handleSchema() http.HandlerFunc {
 			req.SSLMode = "disable"
 		}
 
-		connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
-			req.Host, req.Port, req.User, req.Password, req.Database, req.SSLMode)
+		connStr := pgdsn.Build(pgdsn.Config{
+			Host: req.Host, Port: req.Port, User: req.User, Password: req.Password,
+			Database: req.Database, SSLMode: req.SSLMode, ConnectTimeout: 5,
+		})
 
 		db, err := sql.Open("postgres", connStr)
 		if err != nil {
