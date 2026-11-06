@@ -151,10 +151,7 @@ func (cfg *BrightpearlProducerConfig) baseURL() string {
 	if cfg.BaseURL != "" {
 		return strings.TrimRight(cfg.BaseURL, "/")
 	}
-	if cfg.Datacenter == "" || cfg.AccountCode == "" {
-		return ""
-	}
-	return fmt.Sprintf("https://ws-%s.brightpearl.com/public-api/%s", cfg.Datacenter, cfg.AccountCode)
+	return connectorurl.BrightpearlBaseURL(cfg.Datacenter, cfg.AccountCode)
 }
 
 // checkBaseURL refuses a URL the connector must not call (#667): it comes from

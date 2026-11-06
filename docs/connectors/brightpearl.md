@@ -15,8 +15,15 @@ supports polling and webhooks.
 > Store the token as a secret and reference it as `staff_token_secret_id`.
 >
 > **Base URL** is account- and datacenter-scoped:
-> `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`. Set
-> `datacenter` (e.g. `eu1`, `use1`) + `account_code`, or override `base_url`.
+> `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`
+> ([Brightpearl's URI syntax](https://help.brightpearl.com/hc/en-us/articles/212645003-URI-syntax)).
+> Set `datacenter` + `account_code`, or override `base_url`. Datacenters:
+> `euw1` (EU) and `use1` (US East). Codes from the legacy
+> `ws-{code}.brightpearl.com` hosts are still accepted: `eu1` means `euw1`,
+> `use` means `use1`. US West (`usw`, `usw1`) has no documented
+> `brightpearlconnect.com` name, so it keeps the legacy host
+> `https://ws-usw.brightpearl.com/public-api/{account_code}`, which still
+> serves the API.
 > Both are checked before anything is called; see [The base URL](#the-base-url).
 
 ## As a source (consumer)
@@ -38,7 +45,7 @@ connector unwraps and publishes the inner `response` value.
 {
   "type": "brightpearl",
   "brightpearl": {
-    "datacenter": "eu1",
+    "datacenter": "euw1",
     "account_code": "youraccount",
     "app_ref": "yourapp",
     "staff_token_secret_id": "<secret-uuid>",
@@ -71,7 +78,7 @@ A producer node writes each message to a Brightpearl resource (`POST`/`PUT`/`PAT
 {
   "type": "brightpearl",
   "brightpearl": {
-    "datacenter": "eu1",
+    "datacenter": "euw1",
     "account_code": "youraccount",
     "app_ref": "yourapp",
     "staff_token_secret_id": "<secret-uuid>",
@@ -96,9 +103,9 @@ from the node, so the connector only calls addresses it can trust (#667):
 
 - A `base_url` override must be `https`, with a host, and no user name, query
   string or fragment.
-- Without an override, `datacenter` must be a single host label (`eu1`,
+- Without an override, `datacenter` must be a single host label (`euw1`,
   `use1`) and `account_code` may only hold letters, digits, `-` and `_`, so
-  neither can move the request off `ws-{datacenter}.brightpearl.com`.
+  neither can move the request off `{datacenter}.brightpearlconnect.com`.
 - The connector will not connect to loopback, private (10/8, 172.16/12,
   192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
   metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT

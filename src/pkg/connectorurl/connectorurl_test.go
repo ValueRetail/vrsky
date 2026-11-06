@@ -34,16 +34,16 @@ func TestBrightpearl(t *testing.T) {
 	}{
 		{"derived", "", "eu1", "acme_01", false, ""},
 		{"derived, upper case datacenter", "", "USE1", "acme", false, ""},
-		{"public override", "https://ws-eu1.brightpearl.com/public-api/acme", "", "", false, ""},
-		{"override wins over a bad datacenter", "https://ws-eu1.brightpearl.com/public-api/acme", "x@10.0.0.1/", "", false, ""},
+		{"public override", "https://euw1.brightpearlconnect.com/public-api/acme", "", "", false, ""},
+		{"override wins over a bad datacenter", "https://euw1.brightpearlconnect.com/public-api/acme", "x@10.0.0.1/", "", false, ""},
 
-		{"override http", "http://ws-eu1.brightpearl.com/public-api/acme", "", "", false, "base_url"},
+		{"override http", "http://euw1.brightpearlconnect.com/public-api/acme", "", "", false, "base_url"},
 		{"override loopback", "https://127.0.0.1/public-api/acme", "", "", false, "private"},
 		{"override metadata", "https://169.254.169.254/latest", "", "", false, "private"},
 		{"override ipv6 loopback", "https://[::1]/x", "", "", false, "private"},
-		{"override userinfo", "https://u:" + secret + "@ws-eu1.brightpearl.com/x", "", "", false, "user name"},
-		{"override query", "https://ws-eu1.brightpearl.com/x?k=" + secret, "", "", false, "query"},
-		{"override not a url", "ws-eu1.brightpearl.com", "", "", false, "base_url"},
+		{"override userinfo", "https://u:" + secret + "@euw1.brightpearlconnect.com/x", "", "", false, "user name"},
+		{"override query", "https://euw1.brightpearlconnect.com/x?k=" + secret, "", "", false, "query"},
+		{"override not a url", "euw1.brightpearlconnect.com", "", "", false, "base_url"},
 
 		{"no override and nothing set", "", "", "", false, "datacenter"},
 		{"datacenter moves the host", "", "x@10.0.0.1/", "acme", false, "datacenter"},
@@ -202,5 +202,36 @@ func TestBusinessCentral(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			check(t, BusinessCentral(tt.cfg, tt.allowPrivate), tt.wantErr)
 		})
+	}
+}
+
+func TestBrightpearlBaseURL(t *testing.T) {
+	tests := []struct{ name, dc, acct, want string }{
+		{"eu", "euw1", "acme", "https://euw1.brightpearlconnect.com/public-api/acme"},
+		{"us", "use1", "acme", "https://use1.brightpearlconnect.com/public-api/acme"},
+		{"old eu code", "eu1", "acme", "https://euw1.brightpearlconnect.com/public-api/acme"},
+		{"old us east code", "use", "acme", "https://use1.brightpearlconnect.com/public-api/acme"},
+		{"us west legacy host", "usw", "acme", "https://ws-usw.brightpearl.com/public-api/acme"},
+		{"us west usw1", "USW1", "acme", "https://ws-usw.brightpearl.com/public-api/acme"},
+		{"upper case", "USE1", "acme", "https://use1.brightpearlconnect.com/public-api/acme"},
+		{"no datacenter", "", "acme", ""},
+		{"no account", "euw1", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := BrightpearlBaseURL(tc.dc, tc.acct); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBrightpearlUSWestHostIsAccepted(t *testing.T) {
+	// The legacy US West host must pass the same URL rules as an override.
+	if err := Brightpearl(BrightpearlBaseURL("usw", "acme"), "", "", false); err != nil {
+		t.Errorf("legacy US West host rejected: %v", err)
+	}
+	if err := Brightpearl("", "usw", "acme", false); err != nil {
+		t.Errorf("usw datacenter rejected: %v", err)
 	}
 }

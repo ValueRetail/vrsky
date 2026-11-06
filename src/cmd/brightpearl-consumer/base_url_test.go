@@ -31,9 +31,9 @@ func TestCheckBaseURL(t *testing.T) {
 	}{
 		{"derived default", BrightpearlConfig{Datacenter: "eu1", AccountCode: "acme"}, false, true},
 		{"derived, other datacenter", BrightpearlConfig{Datacenter: "use1", AccountCode: "acme_2-x"}, false, true},
-		{"override to the default host", BrightpearlConfig{BaseURL: "https://ws-eu1.brightpearl.com/public-api/acme"}, false, true},
+		{"override to the default host", BrightpearlConfig{BaseURL: "https://euw1.brightpearlconnect.com/public-api/acme"}, false, true},
 		{"override to another public https host", BrightpearlConfig{BaseURL: "https://bp-proxy.example.com/"}, false, true},
-		{"http", BrightpearlConfig{BaseURL: "http://ws-eu1.brightpearl.com/public-api/acme"}, false, false},
+		{"http", BrightpearlConfig{BaseURL: "http://euw1.brightpearlconnect.com/public-api/acme"}, false, false},
 		{"loopback", BrightpearlConfig{BaseURL: "https://127.0.0.1/x"}, false, false},
 		{"loopback v6", BrightpearlConfig{BaseURL: "https://[::1]/x"}, false, false},
 		{"private 10/8", BrightpearlConfig{BaseURL: "https://10.0.0.1/x"}, false, false},
@@ -41,8 +41,8 @@ func TestCheckBaseURL(t *testing.T) {
 		{"private 192.168/16", BrightpearlConfig{BaseURL: "https://192.168.1.1/x"}, false, false},
 		{"cloud metadata", BrightpearlConfig{BaseURL: "https://169.254.169.254/latest/meta-data"}, false, false},
 		{"azure wire server", BrightpearlConfig{BaseURL: "https://168.63.129.16/"}, false, false},
-		{"userinfo", BrightpearlConfig{BaseURL: "https://u:p@ws-eu1.brightpearl.com/public-api/acme"}, false, false},
-		{"query", BrightpearlConfig{BaseURL: "https://ws-eu1.brightpearl.com/public-api/acme?a=b"}, false, false},
+		{"userinfo", BrightpearlConfig{BaseURL: "https://u:p@euw1.brightpearlconnect.com/public-api/acme"}, false, false},
+		{"query", BrightpearlConfig{BaseURL: "https://euw1.brightpearlconnect.com/public-api/acme?a=b"}, false, false},
 		{"datacenter moves the host", BrightpearlConfig{Datacenter: "x@10.0.0.1/", AccountCode: "acme"}, false, false},
 		{"datacenter adds a domain", BrightpearlConfig{Datacenter: "eu1.evil.example/", AccountCode: "acme"}, false, false},
 		{"datacenter with a dot", BrightpearlConfig{Datacenter: "eu1.x", AccountCode: "acme"}, false, false},
@@ -166,7 +166,7 @@ func TestStart_DerivedDefaultStillPolls(t *testing.T) {
 		t.Fatalf("active pollers = %d, want 1", n)
 	}
 	harness.Eventually(t, srWait, "the default host to be polled", func() bool { return len(rt.seen()) > 0 })
-	if got, want := rt.seen()[0], "https://ws-eu1.brightpearl.com/public-api/acme/order-service/order-search"; got != want {
+	if got, want := rt.seen()[0], "https://euw1.brightpearlconnect.com/public-api/acme/order-service/order-search"; got != want {
 		t.Errorf("polled %s, want %s", got, want)
 	}
 }

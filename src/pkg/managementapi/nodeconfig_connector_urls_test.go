@@ -77,13 +77,13 @@ func TestValidateNodeConfigs_BrightpearlURLs(t *testing.T) {
 	}
 	runConnectorURLCases(t, "brightpearl", []connectorURLCase{
 		{name: "derived from datacenter and account code", block: bp("datacenter", "eu1", "account_code", "acme")},
-		{name: "public base_url override", block: bp("base_url", "https://ws-eu1.brightpearl.com/public-api/acme")},
+		{name: "public base_url override", block: bp("base_url", "https://euw1.brightpearlconnect.com/public-api/acme")},
 
-		{name: "base_url over http", block: bp("base_url", "http://ws-eu1.brightpearl.com/public-api/acme"), wantErr: "brightpearl.base_url"},
+		{name: "base_url over http", block: bp("base_url", "http://euw1.brightpearlconnect.com/public-api/acme"), wantErr: "brightpearl.base_url"},
 		{name: "base_url loopback", block: bp("base_url", "https://127.0.0.1/x"), wantErr: "private"},
 		{name: "base_url metadata", block: bp("base_url", "https://169.254.169.254/latest"), wantErr: "private"},
-		{name: "base_url userinfo", block: bp("base_url", "https://u:"+urlSecret+"@ws-eu1.brightpearl.com/x"), wantErr: "user name"},
-		{name: "base_url query", block: bp("base_url", "https://ws-eu1.brightpearl.com/x?k="+urlSecret), wantErr: "query"},
+		{name: "base_url userinfo", block: bp("base_url", "https://u:"+urlSecret+"@euw1.brightpearlconnect.com/x"), wantErr: "user name"},
+		{name: "base_url query", block: bp("base_url", "https://euw1.brightpearlconnect.com/x?k="+urlSecret), wantErr: "query"},
 		{name: "datacenter moves the host", block: bp("datacenter", "x@10.0.0.1/", "account_code", "acme"), wantErr: "brightpearl.datacenter"},
 		{name: "account_code leaves the path", block: bp("datacenter", "eu1", "account_code", "acme/../admin"), wantErr: "brightpearl.account_code"},
 		{name: "neither base_url nor datacenter", block: bp(), wantErr: "brightpearl.datacenter"},
