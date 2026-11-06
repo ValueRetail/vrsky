@@ -246,6 +246,13 @@ published once, not again at every start (#538).
   already published`. It tries again at every poll and carries on as normal
   once the read works. A one-shot connection (`poll_interval_seconds: 0`)
   ends with status `error` instead.
+- **Two pollers at once.** During a deploy the old and the new pod can both
+  poll the connection. Each notices the other's save and merges it before
+  writing. If both save at the same instant, one of them can briefly keep
+  saving where the other no longer reads. It checks again after at most 8
+  saves or 5 minutes, whichever comes first, and writes the full list then. A
+  restart before that can publish the objects from those saves once more
+  (#723).
 - **Checkpoint damaged.** If the saved list is there but can't be decoded (a
   hand edit, or another version's format), it counts as no saved list: the
   consumer logs one warning, `The saved list of published objects can't be

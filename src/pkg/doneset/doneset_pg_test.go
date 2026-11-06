@@ -223,3 +223,72 @@ func TestSetPG_UndecodableRowIsReplaced(t *testing.T) {
 		}
 	})
 }
+
+// #723 on a real Postgres: another poller's snapshot and changes reset land
+// between this Set's read of the changes row and its write. The Set notices
+// within the bound, a restart finds every name, and nothing is published
+// again.
+func TestSetPG_ChangesOnAReplacedSnapshotAreRecovered(t *testing.T) {
+	db := pgDB(t)
+	pg := checkpoint.NewPostgresStore(db)
+	tenant, conn := pgConnection(t, db)
+	key := Key{TenantID: tenant, ConnectionID: conn, NodeID: tNode}
+	hooked := &hookStore{Store: pg}
+
+	a, _ := loaded(t, hooked, key, tScope)
+	listing := map[string]Stamp{}
+	for _, n := range names(100, "f") {
+		listing[n] = st(1, 0)
+		a.Mark(n, st(1, 0))
+	}
+	a.Observe(listing)
+	save(t, a)
+	b, _ := loaded(t, pg, key, tScope)
+
+	reads := 0
+	hooked.set(func(node string) {
+		if node != tNode+changesSuffix {
+			return
+		}
+		if reads++; reads != 2 { // 1: Refresh, 2: the Save about to write
+			return
+		}
+		listing["fromB"] = st(1, 0)
+		b.Observe(listing)
+		b.Mark("fromB", st(1, 0))
+		if err := b.Save(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+
+	var published []string
+	recovered := false
+	for i := 0; i < boundSaves+1 && !recovered; i++ {
+		n := names(boundSaves+1, "a")[i]
+		listing[n] = st(1, 0)
+		a.Observe(listing)
+		if err := a.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		a.Mark(n, st(1, 0))
+		published = append(published, n)
+		before := a.gen
+		save(t, a)
+		recovered = a.gen != before
+	}
+	// The save that went stale is the first of the window; boundSaves more may
+	// follow it before the check.
+	if !recovered || len(published) > boundSaves+1 {
+		t.Fatalf("recovered %v after %d saves, want within %d", recovered, len(published), boundSaves+1)
+	}
+
+	r, found := loaded(t, pg, key, tScope)
+	if !found {
+		t.Fatal("restart found no saved set")
+	}
+	for _, n := range append([]string{"fromB", "f0000"}, published...) {
+		if !r.Done(n, st(1, 0)) {
+			t.Errorf("after the restart %s is not done, so it would be published again", n)
+		}
+	}
+}

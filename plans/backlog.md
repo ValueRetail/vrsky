@@ -753,7 +753,7 @@ Last updated 2026-10-28.
     `move_prefix`, `file_pattern` and `poll_interval_seconds` are missing.
     Check against `getSFTPConfig`/`getConfig` and the UI property panel.
     Found in #538.
-109. **A done set's changes can be written on a snapshot nobody reads.**
+109. ~~**A done set's changes can be written on a snapshot nobody reads.**~~ (#723)
     `ownsSaved` (`src/pkg/doneset`, and `src/cmd/file-consumer/known.go`)
     reads only the changes row. If another poller's snapshot and changes
     reset land between that read and the changes write, or another poller
