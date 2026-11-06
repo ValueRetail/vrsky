@@ -153,7 +153,9 @@ clears the flag when it starts.
 
 `infrastructure/azure/smoke-prod.sh [deployment …]` is the same check run
 by hand: `/readyz` and the UI answer 200, each named consumer logged
-*Restored running pipelines*, and nothing that matters is firing. What
+*Restored running pipelines*, and nothing that matters is firing. Only the
+pods of the deployment's current ReplicaSet count; an old pod still
+terminating after the rollout is not read (#741). What
 matters is VRSky's own alerts (the `vrsky-*` rule groups) above `info`
 and anything `critical` from any group; a stock warning that a fleet
 restart produces by itself, such as `KubeClientErrors`, does not fail a
