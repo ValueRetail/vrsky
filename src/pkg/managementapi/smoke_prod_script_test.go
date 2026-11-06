@@ -14,24 +14,21 @@ import (
 )
 
 // These tests run infrastructure/azure/smoke-prod.sh for real against a
-// kubectl stand-in that models one deployment mid-rollout: an old
-// ReplicaSet (revision 1) whose pod is still terminating and a new one
-// (revision 2). `kubectl logs deploy/…` answers with the old pod's logs, as
-// it did in run 41621931134 (#741). KUBECONFIG is /dev/null and PATH holds
-// the stub first and nothing that contains a real kubectl; the test checks
-// that before it runs the script.
+// kubectl stand-in that models one deployment mid-rollout: the current
+// ReplicaSet and a previous one whose pod is still terminating.
+// `kubectl logs deploy/…` answers with the previous pod's logs, as it did in
+// run 41621931134 (#741). KUBECONFIG is /dev/null and PATH holds the stub
+// first and nothing that contains a real kubectl; the test checks that
+// before it runs the script.
 
 const (
-	smokeDeploy = "vrsky-demo-consumer"
-	// What the stub answers; TestSmokeProdTemplates checks the script's
-	// go-templates produce exactly this from real-shaped objects.
-	smokeDeployOut = "2 app=" + smokeDeploy + ","
-	smokeRSOut     = "1 old1111\n2 new2222\n"
-	restoredLine   = `{"level":"INFO","msg":"Restored running pipelines","count":3}`
+	smokeDeploy  = "vrsky-demo-consumer"
+	restoredLine = `{"level":"INFO","msg":"Restored running pipelines","count":3}`
 )
 
 const smokeKubectlStub = `#!/bin/sh
-echo "$*" >> "$STUB_DIR/calls"
+all="$*"
+echo "$all" >> "$STUB_DIR/calls"
 for a in "$@"; do
   case "$a" in go-template=*) printf '%s' "${a#go-template=}" > "$STUB_DIR/tpl-$2" ;; esac
 done
@@ -40,20 +37,20 @@ case "$1" in
     case "$2" in
       --raw) echo '{"status":"success","data":{"groups":[]}}' ;;
       deploy) [ "$5" = "$STUB_DEPLOY" ] || exit 1; printf '%s' "$STUB_DEPLOY_OUT" ;;
-      rs) case "$*" in *"-l app=$STUB_DEPLOY "*) printf '%s' "$STUB_RS_OUT" ;; *) exit 1 ;; esac ;;
+      rs) case "$all" in *"-l $STUB_SEL "*) printf '%s' "$STUB_RS_OUT" ;; *) exit 1 ;; esac ;;
       *) exit 1 ;;
     esac ;;
   logs)
-    case "$*" in
-      *"deploy/$STUB_DEPLOY"*) f=old ;;
-      *"-l app=$STUB_DEPLOY,pod-template-hash=new2222 "*) f=new ;;
-      *"-l app=$STUB_DEPLOY,pod-template-hash=old1111 "*) f=old ;;
+    case "$all" in
+      *"deploy/$STUB_DEPLOY"*) f="$STUB_DIR/logs-$STUB_PREV" ;;
+      *"-l $STUB_SEL,pod-template-hash="*) h="${all#*pod-template-hash=}"; f="$STUB_DIR/logs-${h%% *}" ;;
       *) exit 1 ;;
     esac
+    [ -f "$f" ] || exit 1
     # kubectl logs -l keeps only the last 10 lines per pod unless told otherwise.
-    case "$*" in
-      *"-l "*) case "$*" in *--tail=-1*) cat "$STUB_DIR/logs-$f" ;; *) tail -n 10 "$STUB_DIR/logs-$f" ;; esac ;;
-      *) cat "$STUB_DIR/logs-$f" ;;
+    case "$all" in
+      *"-l "*) case "$all" in *--tail=-1*) cat "$f" ;; *) tail -n 10 "$f" ;; esac ;;
+      *) cat "$f" ;;
     esac ;;
   *) exit 1 ;;
 esac
@@ -73,6 +70,23 @@ func podLogs(pod string, restored bool) string {
 	return b.String()
 }
 
+// smokeCluster is what the stub reports: the deployment's revision and
+// selector (as the script's go-template renders them), the ReplicaSets as
+// `get rs` lists them (by name, so the current one can be anywhere), and
+// which pods restored.
+type smokeCluster struct {
+	deployOut                 string // "<revision> k=v,…,"
+	sel                       string // the selector as -l takes it
+	rsOut                     string // "<revision> <hash>" per line
+	cur, prev                 string // pod-template-hash of the current and the previous ReplicaSet
+	curRestored, prevRestored bool
+}
+
+var smokeRollout = smokeCluster{
+	deployOut: "2 app=" + smokeDeploy + ",", sel: "app=" + smokeDeploy,
+	rsOut: "1 5b7d4c8f9\n2 6c9f8d7b5\n", cur: "6c9f8d7b5", prev: "5b7d4c8f9",
+}
+
 type smokeRun struct {
 	out   string
 	err   error
@@ -80,7 +94,7 @@ type smokeRun struct {
 	dir   string
 }
 
-func runSmokeRestore(t *testing.T, oldRestored, newRestored bool) smokeRun {
+func runSmokeRestore(t *testing.T, c smokeCluster) smokeRun {
 	t.Helper()
 	bash := "/bin/bash"
 	if _, err := os.Stat(bash); err != nil {
@@ -98,11 +112,9 @@ func runSmokeRestore(t *testing.T, oldRestored, newRestored bool) smokeRun {
 	if err := os.WriteFile(stub, []byte(smokeKubectlStub), 0o700); err != nil { //nolint:gosec // an executable stub in a temp dir
 		t.Fatal(err)
 	}
-	for f, body := range map[string]string{
-		"logs-old": podLogs(smokeDeploy+"-old1111-abcde", oldRestored),
-		"logs-new": podLogs(smokeDeploy+"-new2222-fghij", newRestored),
-	} {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte(body), 0o600); err != nil {
+	for hash, restored := range map[string]bool{c.cur: c.curRestored, c.prev: c.prevRestored} {
+		body := podLogs(smokeDeploy+"-"+hash+"-abcde", restored)
+		if err := os.WriteFile(filepath.Join(dir, "logs-"+hash), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -114,8 +126,10 @@ func runSmokeRestore(t *testing.T, oldRestored, newRestored bool) smokeRun {
 		"SMOKE_RESTORE_TRIES=2",
 		"STUB_DIR=" + dir,
 		"STUB_DEPLOY=" + smokeDeploy,
-		"STUB_DEPLOY_OUT=" + smokeDeployOut,
-		"STUB_RS_OUT=" + smokeRSOut,
+		"STUB_DEPLOY_OUT=" + c.deployOut,
+		"STUB_SEL=" + c.sel,
+		"STUB_RS_OUT=" + c.rsOut,
+		"STUB_PREV=" + c.prev,
 	}
 
 	// The stub must be the only kubectl the script can find.
@@ -152,37 +166,62 @@ func runSmokeRestore(t *testing.T, oldRestored, newRestored bool) smokeRun {
 
 // After a rollout `kubectl logs deploy/…` can pick the old pod that is still
 // terminating, whose restore line is older than the window. The check reads
-// the current ReplicaSet's pods only and passes if any of them restored
-// (#741, plans/issue-741-smoke-current-pods.md).
+// the pods of the ReplicaSet whose revision is the deployment's, wherever
+// `get rs` lists it, and passes if any of them restored (#741,
+// plans/issue-741-smoke-current-pods.md).
 func TestSmokeProdReadsCurrentPods(t *testing.T) {
+	with := func(c smokeCluster, f func(*smokeCluster)) smokeCluster { f(&c); return c }
+	// A rollback: revision 3 reuses the ReplicaSet of revision 1, which `get rs`
+	// lists first because it lists by name.
+	rollback := smokeCluster{
+		deployOut: "3 app=" + smokeDeploy + ",", sel: "app=" + smokeDeploy,
+		rsOut: "3 1a2b3c4d5\n2 6c9f8d7b5\n", cur: "1a2b3c4d5", prev: "6c9f8d7b5",
+	}
+	// Current in the middle of three.
+	middle := smokeCluster{
+		deployOut: "4 app=" + smokeDeploy + ",", sel: "app=" + smokeDeploy,
+		rsOut: "2 1a2b3c4d5\n4 6c9f8d7b5\n3 9e8d7c6b5\n", cur: "6c9f8d7b5", prev: "9e8d7c6b5",
+	}
+	twoLabels := with(smokeRollout, func(c *smokeCluster) {
+		c.deployOut = "2 app=" + smokeDeploy + ",tier=connector,"
+		c.sel = "app=" + smokeDeploy + ",tier=connector"
+	})
 	for _, tc := range []struct {
-		name                     string
-		oldRestored, newRestored bool
-		pass                     bool
+		name string
+		c    smokeCluster
+		pass bool
 	}{
-		{"new pod restored, old pod did not", false, true, true},
-		{"no current pod restored", false, false, false},
-		{"only the old pod restored in the window", true, false, false},
+		{"new pod restored, old pod did not", with(smokeRollout, func(c *smokeCluster) { c.curRestored = true }), true},
+		{"no current pod restored", smokeRollout, false},
+		{"only the old pod restored in the window", with(smokeRollout, func(c *smokeCluster) { c.prevRestored = true }), false},
+		{"rollback, current listed first, restored", with(rollback, func(c *smokeCluster) { c.curRestored = true }), true},
+		{"rollback, current listed first, only the old pod restored", with(rollback, func(c *smokeCluster) { c.prevRestored = true }), false},
+		{"current listed in the middle, restored", with(middle, func(c *smokeCluster) { c.curRestored = true }), true},
+		{"current listed in the middle, only the last pod restored", with(middle, func(c *smokeCluster) { c.prevRestored = true }), false},
+		{"two-label selector, restored", with(twoLabels, func(c *smokeCluster) { c.curRestored = true }), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := runSmokeRestore(t, tc.oldRestored, tc.newRestored)
+			r := runSmokeRestore(t, tc.c)
 			if tc.pass {
 				if r.err != nil || !strings.Contains(r.out, smokeDeploy+": restored its pipelines") || !strings.Contains(r.out, "smoke: ok") {
 					t.Fatalf("want a pass; err=%v\n%s", r.err, r.out)
 				}
 			} else {
-				want := smokeDeploy + ": no 'Restored running pipelines' line within 60 s"
+				rev := tc.c.deployOut[:strings.Index(tc.c.deployOut, " ")]
+				want := smokeDeploy + ": no 'Restored running pipelines' line within 60 s (revision " + rev +
+					", selector " + tc.c.sel + ", pod-template-hash " + tc.c.cur + ")"
 				if r.err == nil || !strings.Contains(r.out, want) || !strings.Contains(r.out, "smoke: FAILED") {
 					t.Fatalf("want a failure with %q; err=%v\n%s", want, r.err, r.out)
 				}
 			}
 			var logCalls int
 			for _, c := range r.calls {
-				if strings.HasPrefix(c, "logs ") {
-					logCalls++
-					if strings.Contains(c, "deploy/") || strings.Contains(c, "old1111") {
-						t.Errorf("read logs beyond the current pods: %q", c)
-					}
+				if !strings.HasPrefix(c, "logs ") {
+					continue
+				}
+				logCalls++
+				if !strings.Contains(c, "-l "+tc.c.sel+",pod-template-hash="+tc.c.cur+" ") {
+					t.Errorf("read logs other than the current ReplicaSet's (%s): %q", tc.c.cur, c)
 				}
 			}
 			if logCalls == 0 {
@@ -197,42 +236,46 @@ func TestSmokeProdReadsCurrentPods(t *testing.T) {
 // kubectl renders -o go-template with text/template over the object decoded
 // from JSON, as here.
 func TestSmokeProdTemplates(t *testing.T) {
-	r := runSmokeRestore(t, false, true)
-	if r.err != nil {
-		t.Fatalf("smoke failed: %v\n%s", r.err, r.out)
-	}
-	for _, tc := range []struct{ kind, object, want string }{
-		{"deploy", `{"apiVersion":"apps/v1","kind":"Deployment",
+	r := runSmokeRestore(t, smokeRollout)
+	deploy := func(matchLabels string) string {
+		return `{"apiVersion":"apps/v1","kind":"Deployment",
 			"metadata":{"name":"` + smokeDeploy + `","namespace":"vrsky-platform",
 				"annotations":{"deployment.kubernetes.io/revision":"2","kubectl.kubernetes.io/last-applied-configuration":"{}"},
 				"labels":{"app":"` + smokeDeploy + `","tier":"connector"}},
-			"spec":{"replicas":1,"selector":{"matchLabels":{"app":"` + smokeDeploy + `"}}}}`, smokeDeployOut},
-		{"rs", `{"apiVersion":"v1","kind":"List","items":[
-			{"kind":"ReplicaSet","metadata":{"name":"` + smokeDeploy + `-old1111",
+			"spec":{"replicas":1,"selector":{"matchLabels":` + matchLabels + `}}}`
+	}
+	for _, tc := range []struct{ name, kind, object, want string }{
+		{"deployment", "deploy", deploy(`{"app":"` + smokeDeploy + `"}`), smokeRollout.deployOut},
+		{"deployment, two labels", "deploy", deploy(`{"tier":"connector","app":"` + smokeDeploy + `"}`),
+			"2 app=" + smokeDeploy + ",tier=connector,"},
+		{"replicasets", "rs", `{"apiVersion":"v1","kind":"List","items":[
+			{"kind":"ReplicaSet","metadata":{"name":"` + smokeDeploy + `-5b7d4c8f9",
 				"annotations":{"deployment.kubernetes.io/desired-replicas":"1","deployment.kubernetes.io/revision":"1"},
-				"labels":{"app":"` + smokeDeploy + `","pod-template-hash":"old1111"}}},
-			{"kind":"ReplicaSet","metadata":{"name":"` + smokeDeploy + `-new2222",
+				"labels":{"app":"` + smokeDeploy + `","pod-template-hash":"5b7d4c8f9"}}},
+			{"kind":"ReplicaSet","metadata":{"name":"` + smokeDeploy + `-6c9f8d7b5",
 				"annotations":{"deployment.kubernetes.io/desired-replicas":"1","deployment.kubernetes.io/revision":"2"},
-				"labels":{"app":"` + smokeDeploy + `","pod-template-hash":"new2222"}}}]}`, smokeRSOut},
+				"labels":{"app":"` + smokeDeploy + `","pod-template-hash":"6c9f8d7b5"}}}]}`, smokeRollout.rsOut},
 	} {
-		raw, err := os.ReadFile(filepath.Join(r.dir, "tpl-"+tc.kind)) //nolint:gosec // the test's own temp file
-		if err != nil {
-			t.Fatalf("the script never passed a go-template to `kubectl get %s`: %v", tc.kind, err)
-		}
-		tpl, err := template.New(tc.kind).Parse(string(raw))
-		if err != nil {
-			t.Fatalf("%s template does not parse: %v\n%s", tc.kind, err, raw)
-		}
-		var obj any
-		if err := json.Unmarshal([]byte(tc.object), &obj); err != nil {
-			t.Fatal(err)
-		}
-		var got strings.Builder
-		if err := tpl.Execute(&got, obj); err != nil {
-			t.Fatalf("%s template: %v", tc.kind, err)
-		}
-		if got.String() != tc.want {
-			t.Errorf("%s template renders %q, want %q", tc.kind, got.String(), tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(r.dir, "tpl-"+tc.kind)) //nolint:gosec // the test's own temp file
+			if err != nil {
+				t.Fatalf("the script never passed a go-template to `kubectl get %s`: %v\n%s", tc.kind, err, r.out)
+			}
+			tpl, err := template.New(tc.kind).Parse(string(raw))
+			if err != nil {
+				t.Fatalf("%s template does not parse: %v\n%s", tc.kind, err, raw)
+			}
+			var obj any
+			if err := json.Unmarshal([]byte(tc.object), &obj); err != nil {
+				t.Fatal(err)
+			}
+			var got strings.Builder
+			if err := tpl.Execute(&got, obj); err != nil {
+				t.Fatalf("%s template: %v", tc.kind, err)
+			}
+			if got.String() != tc.want {
+				t.Errorf("%s template renders %q, want %q", tc.kind, got.String(), tc.want)
+			}
+		})
 	}
 }

@@ -24,29 +24,33 @@ fail=0
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/readyz"); echo "readyz: $code"; [ "$code" = 200 ] || fail=1
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/");       echo "ui:     $code"; [ "$code" = 200 ] || fail=1
 
-# current_pod_logs <deployment> prints the last 15 minutes of logs of the
-# deployment's current pods: those of the ReplicaSet whose revision is the
-# deployment's. `logs deploy/…` picks any one pod, and right after a rollout
-# that can be the old one still terminating (#741). Revision rather than
-# creation time, because a rollback reuses an older ReplicaSet. `logs -l`
-# keeps only 10 lines per pod unless told otherwise, hence --tail=-1.
-current_pod_logs() {
-  local d="$1" out rev sel hash
-  out=$("$KUBECTL" get deploy -n "$NS" "$d" -o 'go-template={{index .metadata.annotations "deployment.kubernetes.io/revision"}} {{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null) || return 1
-  rev="${out%% *}"; sel="${out#* }"; sel="${sel%,}"
-  if [ -z "$rev" ] || [ "$rev" = "<no value>" ] || [ -z "$sel" ]; then return 1; fi
-  hash=$("$KUBECTL" get rs -n "$NS" -l "$sel" -o 'go-template={{range .items}}{{index .metadata.annotations "deployment.kubernetes.io/revision"}} {{index .metadata.labels "pod-template-hash"}}{{"\n"}}{{end}}' 2>/dev/null \
-    | awk -v r="$rev" '$1 == r { h = $2 } END { print h }') || return 1
-  [ -n "$hash" ] || return 1
-  "$KUBECTL" logs -n "$NS" -l "$sel,pod-template-hash=$hash" --prefix --since=15m --tail=-1 --max-log-requests=10 2>/dev/null
+# current_rs <deployment> finds the deployment's current pods: those of the
+# ReplicaSet whose revision is the deployment's. It sets cur_rev, cur_sel
+# (the selector as k=v,…) and cur_hash (pod-template-hash), and fails when
+# it can't tell. `logs deploy/…` picks any one pod, and right after a
+# rollout that can be the old one still terminating (#741). Revision, not
+# position or age: `get rs` lists by name, and a rollback reuses an older
+# ReplicaSet.
+current_rs() {
+  local out
+  cur_rev=""; cur_sel=""; cur_hash=""
+  out=$("$KUBECTL" get deploy -n "$NS" "$1" -o 'go-template={{index .metadata.annotations "deployment.kubernetes.io/revision"}} {{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null) || return 1
+  cur_rev="${out%% *}"; cur_sel="${out#* }"; cur_sel="${cur_sel%,}"
+  if [ -z "$cur_rev" ] || [ "$cur_rev" = "<no value>" ] || [ -z "$cur_sel" ]; then return 1; fi
+  cur_hash=$("$KUBECTL" get rs -n "$NS" -l "$cur_sel" -o 'go-template={{range .items}}{{index .metadata.annotations "deployment.kubernetes.io/revision"}} {{index .metadata.labels "pod-template-hash"}}{{"\n"}}{{end}}' 2>/dev/null \
+    | awk -v r="$cur_rev" '$1 == r { h = $2 } END { print h }') || return 1
+  [ -n "$cur_hash" ]
 }
 
-# Logs are read whole before grep: `logs | grep -q` under pipefail fails on a
-# match when grep exits first and kubectl gets SIGPIPE. What a partly failed
-# read printed still counts.
+# restored <deployment>: did any current pod log the line in the last 15
+# minutes? `logs -l` keeps only 10 lines per pod unless told otherwise, hence
+# --tail=-1; --ignore-errors so one pod that can't be read doesn't hide
+# another's line. Logs are read whole before grep: `logs | grep -q` under
+# pipefail fails on a match when grep exits first and kubectl gets SIGPIPE.
 restored() {
   local logs
-  logs=$(current_pod_logs "$1") || true
+  current_rs "$1" || return 1
+  logs=$("$KUBECTL" logs -n "$NS" -l "$cur_sel,pod-template-hash=$cur_hash" --prefix --since=15m --tail=-1 --ignore-errors 2>/dev/null) || true
   grep -q '"msg":"Restored running pipelines"' <<<"$logs"
 }
 
@@ -59,7 +63,7 @@ for d in "$@"; do
   if restored "$d"; then
     echo "$d: restored its pipelines"
   else
-    echo "$d: no 'Restored running pipelines' line within 60 s" >&2; fail=1
+    echo "$d: no 'Restored running pipelines' line within 60 s (revision ${cur_rev:-?}, selector ${cur_sel:-?}, pod-template-hash ${cur_hash:-?})" >&2; fail=1
   fi
 done
 
