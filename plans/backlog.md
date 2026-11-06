@@ -1315,7 +1315,7 @@ Last updated 2026-10-28.
     ~line 61) asserts `sdk.IsPermanent` and has to be flipped with it. Found
     in #698. Filed as #721.
 
-181. **Salesforce REST writes skip rejected records and ack the message.**
+181. ~~**Salesforce REST writes skip rejected records and ack the message.**~~ (#735)
     `restWrite` logs a `4xx` per record and moves on; the message is acked
     and the rejected records are in no queue. When another record in the same
     message fails transiently, the whole message is retried and the records
@@ -1395,12 +1395,22 @@ Last updated 2026-10-28.
     On GCS compare generation and size and ignore `Updated`. Found in review
     of #710. Filed as #718.
 
-191. **Three copies of the multi-target skip set.** `remote-agent`
-    (`written.go`, #587), `db-producer` (`written.go`, #705) and
-    `http-producer` (`sent.go`, #730) each carry the same bounded TTL map
-    that remembers which targets took a message. Move it to one small
-    package (generic over the key) so a fix lands once, and do it together
-    with #727, which makes it survive a restart. Found in #730.
+191. **Salesforce Bulk API jobs are never checked.** `bulkWrite` creates,
+    fills and closes the job and acks; it does not poll the job state or
+    read `failedResults`, so a record the job refuses while Salesforce
+    processes it reaches no queue and no log. A close whose answer is lost
+    also makes the retry submit a second job. Poll the job (bounded, with
+    the SDK's in-progress heartbeat) and treat failed rows like the REST
+    path's refused records, or abort the open job on a failed upload at
+    least. Found in #735. Filed as #760.
+
+192. **Three copies of the redelivery skip set.** `writtenSet` lives in
+    `src/cmd/remote-agent`, `src/cmd/db-producer` (#705) and
+    `src/cmd/salesforce-producer` (#735), and the HTTP destination (#730)
+    has one in `sent.go`. Move it into a small SDK-side package that connectors
+    may import (`make lint-connector` allows it), keyed by a comparable
+    type parameter, together with #727, which makes it survive a restart.
+    Found in #730 and #735. Filed as #758.
 
 ## Human
 

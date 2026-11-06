@@ -50,6 +50,10 @@ type salesforceProducer struct {
 	cacheTime map[string]time.Time
 	cacheTTL  time.Duration
 	cacheMu   sync.RWMutex
+
+	// written remembers records that went in during a delivery that then
+	// failed, so the redelivery does not send them again (#735).
+	written *writtenSet
 }
 
 // SalesforceProducerConfig is the per-node configuration (config.salesforce).
@@ -63,6 +67,7 @@ type SalesforceProducerConfig struct {
 }
 
 type sfTarget struct {
+	nodeID         string
 	cfg            SalesforceProducerConfig
 	predecessorID  string
 	predIsConsumer bool
@@ -99,6 +104,9 @@ func (p *salesforceProducer) Configure(ctx context.Context, res *sdk.Resources) 
 	if p.cacheTTL == 0 {
 		p.cacheTTL = 5 * time.Minute
 	}
+	if p.written == nil {
+		p.written = newWrittenSet(writtenTTL, writtenMax)
+	}
 	p.tokens = oauthtoken.New(os.Getenv("MGMT_API_URL"), os.Getenv("OAUTH_TOKEN_SERVICE_SECRET"))
 	if p.resolveToken == nil {
 		p.resolveToken = func(ctx context.Context, tenantID, grantID string, force bool) (string, error) {
@@ -116,9 +124,14 @@ func (p *salesforceProducer) Configure(ctx context.Context, res *sdk.Resources) 
 }
 
 // Deliver writes the envelope's records into every matching Salesforce target.
-// Transient failures (5xx, network, token, bulk-job errors) → sdk.Retriable; a
-// non-JSON payload → sdk.Permanent. A missing producer config for the connection
-// is not an error.
+//
+// Retryable (NAK, then the DLQ after five attempts): a record Salesforce
+// rejects (a 4xx, named by its index with Salesforce's error code), a
+// transient failure (network, token, 401/403 after the token refresh, 408,
+// 429, 5xx), and the same answers while creating, filling or closing a Bulk
+// API job (#735). Records that went in are remembered, so the redelivery
+// sends only the rest. A non-JSON payload → sdk.Permanent. A missing
+// producer config for the connection is not an error.
 func (p *salesforceProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connID := env.IntegrationID
 	if connID == "" {
@@ -152,7 +165,8 @@ func (p *salesforceProducer) Deliver(ctx context.Context, env *envelope.Envelope
 		}
 	}
 
-	var transient error
+	var res writeResult
+	var errs []error
 	for _, t := range targets {
 		if t.predIsConsumer && lastProcessedBy != "" {
 			continue
@@ -160,17 +174,36 @@ func (p *salesforceProducer) Deliver(ctx context.Context, env *envelope.Envelope
 		if !t.predIsConsumer && t.predecessorID != "" && lastProcessedBy != t.predecessorID {
 			continue
 		}
-		if err := p.writeRecords(ctx, env.TenantID, &t.cfg, records); err != nil && transient == nil {
-			transient = err
+		if err := p.writeRecords(ctx, env, t, records, &res); err != nil {
+			errs = append(errs, fmt.Errorf("node %s: %w", t.nodeID, err))
 		}
 	}
-	if transient != nil {
-		return sdk.Retriable(transient)
+	if len(errs) > 0 {
+		// Remember what went in, so the redelivery skips it.
+		p.written.add(time.Now(), res.fresh...)
+		return sdk.Retriable(errors.Join(errs...))
 	}
+	p.written.forget(res.done...)
 	return nil
 }
 
-func (p *salesforceProducer) writeRecords(ctx context.Context, tenantID string, cfg *SalesforceProducerConfig, records []map[string]any) error {
+// writeResult collects, across a delivery's targets, the records that are in
+// Salesforce: fresh ones went in during this attempt, done ones are fresh plus
+// those an earlier attempt wrote.
+type writeResult struct {
+	fresh []writtenKey
+	done  []writtenKey
+}
+
+func (r *writeResult) wrote(k writtenKey) {
+	r.fresh = append(r.fresh, k)
+	r.done = append(r.done, k)
+}
+
+// writeRecords takes cfg by value: the target is cached and shared between
+// deliveries, and the API version default is filled in here.
+func (p *salesforceProducer) writeRecords(ctx context.Context, env *envelope.Envelope, t *sfTarget, records []map[string]any, res *writeResult) error {
+	cfg := t.cfg
 	if cfg.Object == "" {
 		p.logger.Error("Salesforce producer missing object; skipping")
 		return nil
@@ -186,30 +219,154 @@ func (p *salesforceProducer) writeRecords(ctx context.Context, tenantID string, 
 		p.logger.Error("Salesforce upsert requires external_id_field; skipping", "object", cfg.Object)
 		return nil
 	}
+	key := func(i int) writtenKey {
+		return writtenKey{
+			connID:      env.IntegrationID,
+			envelopeID:  env.ID,
+			nodeID:      t.nodeID,
+			instanceURL: cfg.InstanceURL,
+			object:      cfg.Object,
+			operation:   op,
+			externalID:  cfg.ExternalIDField,
+			record:      i,
+		}
+	}
 
 	if len(records) >= p.bulkThreshold {
-		return p.bulkWrite(ctx, tenantID, cfg, op, records)
+		return p.bulkWrite(ctx, env.TenantID, &cfg, op, records, key(bulkRecord), res)
 	}
-	return p.restWrite(ctx, tenantID, cfg, op, records)
+	return p.restWrite(ctx, env.TenantID, &cfg, op, records, key, res)
 }
 
-// restWrite writes records one-by-one via the REST sObject API. Per-record 4xx
-// errors are logged and skipped (poison record); transient errors are returned.
-func (p *salesforceProducer) restWrite(ctx context.Context, tenantID string, cfg *SalesforceProducerConfig, op string, records []map[string]any) error {
+// answer is how a Salesforce response is treated. REST and Bulk share it.
+type answer int
+
+const (
+	answerOK        answer = iota // 2xx
+	answerRejected                // the record (or job) is refused: retried, then the DLQ
+	answerTransient               // not about the record: stop, retry the rest later
+)
+
+// classify maps a status code. 401/403 are transient (after doRequest's one
+// token refresh): a fixed grant lets the retry or a DLQ replay go through.
+// 300 on an upsert means the external id matches several records, which is
+// about the record; other 3xx (redirects are never followed) are about the
+// instance URL.
+func classify(status int) answer {
+	switch {
+	case status >= 200 && status < 300:
+		return answerOK
+	case status == http.StatusMultipleChoices:
+		return answerRejected
+	case status < 400,
+		status == http.StatusUnauthorized,
+		status == http.StatusForbidden,
+		status == http.StatusRequestTimeout,
+		status == http.StatusTooManyRequests,
+		status >= 500:
+		return answerTransient
+	default:
+		return answerRejected
+	}
+}
+
+// sfError is one entry of Salesforce's error body:
+// [{"message":"...","errorCode":"REQUIRED_FIELD_MISSING","fields":["Name"]}].
+type sfError struct {
+	Message   string `json:"message"`
+	ErrorCode string `json:"errorCode"`
+}
+
+func parseSFErrors(body []byte) []sfError {
+	var list []sfError
+	if err := json.Unmarshal(body, &list); err == nil {
+		var out []sfError
+		for _, e := range list {
+			if e.ErrorCode != "" || e.Message != "" {
+				out = append(out, e)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	var one sfError
+	if err := json.Unmarshal(body, &one); err == nil && (one.ErrorCode != "" || one.Message != "") {
+		return []sfError{one}
+	}
+	return nil
+}
+
+// describe renders a response for an error: the status and Salesforce's error
+// codes and messages, or a short piece of the body when it has none. It never
+// includes request headers.
+func describe(status int, body []byte) string {
+	errs := parseSFErrors(body)
+	if len(errs) == 0 {
+		if s := truncateN(body, 200); s != "" {
+			return fmt.Sprintf("%d: %s", status, s)
+		}
+		return fmt.Sprintf("%d", status)
+	}
+	parts := make([]string, 0, len(errs))
+	for _, e := range errs {
+		code := e.ErrorCode
+		if code == "" {
+			code = "UNKNOWN"
+		}
+		parts = append(parts, code+": "+truncateN([]byte(e.Message), 200))
+	}
+	return fmt.Sprintf("%d %s", status, strings.Join(parts, "; "))
+}
+
+// maxListed bounds how many rejected records one error names, so the DLQ's
+// last-error header stays short.
+const maxListed = 5
+
+// rejectedError names the records Salesforce refused.
+func rejectedError(cfg *SalesforceProducerConfig, op string, total int, rejected []string) error {
+	listed := rejected
+	more := ""
+	if len(listed) > maxListed {
+		more = fmt.Sprintf("; and %d more", len(listed)-maxListed)
+		listed = listed[:maxListed]
+	}
+	return fmt.Errorf("salesforce rejected %d of %d records (%s %s): %s%s",
+		len(rejected), total, cfg.Object, op, strings.Join(listed, "; "), more)
+}
+
+// restWrite writes records one by one via the REST sObject API. Records the
+// skip set has are not sent. A record Salesforce refuses is collected and the
+// others still go in; the delivery then fails with every refused record named
+// by index. A transient failure stops the loop: the records after it are sent
+// on the retry.
+func (p *salesforceProducer) restWrite(ctx context.Context, tenantID string, cfg *SalesforceProducerConfig, op string, records []map[string]any, key func(int) writtenKey, res *writeResult) error {
 	base := strings.TrimRight(cfg.InstanceURL, "/")
+	now := time.Now()
+	var rejected []string
 	var transient error
-	ok := 0
-	for _, rec := range records {
+	ok, skipped := 0, 0
+	reject := func(i int, why string) {
+		p.logger.Error("Salesforce rejected record", "record", i, "object", cfg.Object, "op", op, "error", why)
+		rejected = append(rejected, fmt.Sprintf("record[%d]: %s", i, why))
+	}
+	for i, rec := range records {
+		k := key(i)
+		if p.written.has(k, now) {
+			res.done = append(res.done, k)
+			skipped++
+			continue
+		}
 		var method, u string
 		if op == "upsert" {
 			extVal, _ := rec[cfg.ExternalIDField].(string)
 			if extVal == "" {
-				if v, present := rec[cfg.ExternalIDField]; present {
+				if v, present := rec[cfg.ExternalIDField]; present && v != nil {
 					extVal = fmt.Sprint(v)
 				}
 			}
 			if extVal == "" {
-				p.logger.Error("upsert record missing external id value; skipping", "field", cfg.ExternalIDField)
+				reject(i, fmt.Sprintf("no value for external id field %s", cfg.ExternalIDField))
 				continue
 			}
 			method = http.MethodPatch
@@ -220,35 +377,63 @@ func (p *salesforceProducer) restWrite(ctx context.Context, tenantID string, cfg
 		}
 		body, err := json.Marshal(rec)
 		if err != nil {
-			// A record that can't be marshalled won't improve on retry — skip
-			// it (poison record) rather than sending an empty/invalid body.
-			p.logger.Error("skipping unmarshalable record", "object", cfg.Object, "error", err)
+			reject(i, fmt.Sprintf("cannot encode record: %v", err))
 			continue
 		}
 		status, respBody, err := p.doRequest(ctx, tenantID, cfg.OAuthGrantID, method, u, "application/json", body)
 		if err != nil {
-			if transient == nil {
-				transient = err
-			}
-			continue
+			transient = fmt.Errorf("record[%d]: %w", i, err)
+			break
 		}
-		switch {
-		case status >= 200 && status < 300:
+		switch classify(status) {
+		case answerOK:
+			res.wrote(k)
 			ok++
-		case status >= 500 || status == http.StatusTooManyRequests:
-			if transient == nil {
-				transient = fmt.Errorf("salesforce %d: %s", status, truncate(respBody))
-			}
-		default: // 4xx — bad record, won't improve on retry
-			p.logger.Error("Salesforce rejected record", "status", status, "object", cfg.Object, "body", truncate(respBody))
+		case answerTransient:
+			transient = fmt.Errorf("record[%d]: salesforce %s", i, describe(status, respBody))
+		default:
+			reject(i, describe(status, respBody))
+		}
+		if transient != nil {
+			break
 		}
 	}
-	p.logger.Info("Salesforce REST write", "object", cfg.Object, "op", op, "ok", ok, "total", len(records))
-	return transient
+	p.logger.Info("Salesforce REST write", "object", cfg.Object, "op", op,
+		"ok", ok, "skipped_already_written", skipped, "rejected", len(rejected), "total", len(records))
+
+	var errs []error
+	if len(rejected) > 0 {
+		errs = append(errs, rejectedError(cfg, op, len(records), rejected))
+	}
+	if transient != nil {
+		errs = append(errs, fmt.Errorf("stopped before the remaining records: %w", transient))
+	}
+	return errors.Join(errs...)
+}
+
+// bulkStep checks one Bulk API answer with the REST path's classification.
+// Every failure is retryable; the text says whether Salesforce refused the
+// job or the call failed for another reason.
+func bulkStep(step string, status int, body []byte) error {
+	switch classify(status) {
+	case answerOK:
+		return nil
+	case answerTransient:
+		return fmt.Errorf("bulk %s: salesforce %s", step, describe(status, body))
+	default:
+		return fmt.Errorf("salesforce rejected the bulk job (%s): %s", step, describe(status, body))
+	}
 }
 
 // bulkWrite ingests records via Bulk API 2.0: create job → upload CSV → close.
-func (p *salesforceProducer) bulkWrite(ctx context.Context, tenantID string, cfg *SalesforceProducerConfig, op string, records []map[string]any) error {
+// A job submitted for this message is remembered as one entry, so a
+// redelivery caused by another target does not submit it again.
+func (p *salesforceProducer) bulkWrite(ctx context.Context, tenantID string, cfg *SalesforceProducerConfig, op string, records []map[string]any, k writtenKey, res *writeResult) error {
+	if p.written.has(k, time.Now()) {
+		p.logger.Info("Salesforce Bulk API job already submitted for this message; skipping", "object", cfg.Object, "op", op)
+		res.done = append(res.done, k)
+		return nil
+	}
 	base := strings.TrimRight(cfg.InstanceURL, "/")
 
 	jobReq := map[string]string{"object": cfg.Object, "operation": op, "contentType": "CSV", "lineEnding": "LF"}
@@ -259,10 +444,10 @@ func (p *salesforceProducer) bulkWrite(ctx context.Context, tenantID string, cfg
 	status, respBody, err := p.doRequest(ctx, tenantID, cfg.OAuthGrantID, http.MethodPost,
 		fmt.Sprintf("%s/services/data/%s/jobs/ingest", base, cfg.APIVersion), "application/json", jobBody)
 	if err != nil {
-		return err
+		return fmt.Errorf("bulk create job: %w", err)
 	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("create bulk job %d: %s", status, truncate(respBody))
+	if err := bulkStep("create job", status, respBody); err != nil {
+		return err
 	}
 	var job struct {
 		ID string `json:"id"`
@@ -278,21 +463,22 @@ func (p *salesforceProducer) bulkWrite(ctx context.Context, tenantID string, cfg
 	status, respBody, err = p.doRequest(ctx, tenantID, cfg.OAuthGrantID, http.MethodPut,
 		fmt.Sprintf("%s/services/data/%s/jobs/ingest/%s/batches", base, cfg.APIVersion, job.ID), "text/csv", csvData)
 	if err != nil {
-		return err
+		return fmt.Errorf("bulk upload data: %w", err)
 	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("upload bulk data %d: %s", status, truncate(respBody))
+	if err := bulkStep("upload data", status, respBody); err != nil {
+		return err
 	}
 
 	closeBody := []byte(`{"state":"UploadComplete"}`)
 	status, respBody, err = p.doRequest(ctx, tenantID, cfg.OAuthGrantID, http.MethodPatch,
 		fmt.Sprintf("%s/services/data/%s/jobs/ingest/%s", base, cfg.APIVersion, job.ID), "application/json", closeBody)
 	if err != nil {
+		return fmt.Errorf("bulk close job: %w", err)
+	}
+	if err := bulkStep("close job", status, respBody); err != nil {
 		return err
 	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("close bulk job %d: %s", status, truncate(respBody))
-	}
+	res.wrote(k)
 	p.logger.Info("Salesforce Bulk API job submitted", "object", cfg.Object, "op", op, "job_id", job.ID, "records", len(records))
 	return nil
 }
@@ -401,10 +587,12 @@ func csvValue(v any) string {
 	}
 }
 
-func truncate(b []byte) string {
+func truncate(b []byte) string { return truncateN(b, 300) }
+
+func truncateN(b []byte, n int) string {
 	s := strings.TrimSpace(string(b))
-	if len(s) > 300 {
-		return s[:300] + "…"
+	if len(s) > n {
+		return strings.ToValidUTF8(s[:n], "") + "…"
 	}
 	return s
 }
@@ -471,7 +659,7 @@ func (p *salesforceProducer) getTargets(ctx context.Context, connID, tenantID st
 				break
 			}
 		}
-		targets = append(targets, &sfTarget{cfg: *nc.Salesforce, predecessorID: predID, predIsConsumer: predIsConsumer})
+		targets = append(targets, &sfTarget{nodeID: n.ID, cfg: *nc.Salesforce, predecessorID: predID, predIsConsumer: predIsConsumer})
 	}
 	if len(targets) == 0 {
 		return nil, errors.New("no salesforce producer node found")
