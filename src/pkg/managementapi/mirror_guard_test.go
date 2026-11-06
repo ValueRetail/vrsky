@@ -21,8 +21,8 @@ import (
 // `postgres:16` and fail on Docker Hub's pull limit on the day it matters.
 
 var (
-	dockerCmdRe  = regexp.MustCompile(`\bdocker\s+(run|pull|create)\b`)
-	composeCmdRe = regexp.MustCompile(`\bdocker\s+compose\s+(up|pull|run)\b`)
+	dockerCmdRe  = regexp.MustCompile(`\bdocker\s+(?:(?:container|image)\s+)?(run|pull|create)\b`)
+	composeCmdRe = regexp.MustCompile(`\bdocker(?:\s+compose|-compose)\b`)
 )
 
 // shellFields splits one command line the way a shell would for our purposes:
@@ -105,21 +105,73 @@ func scriptCommandImages(script string) []string {
 	return out
 }
 
+// composeValueFlags take their value as the next word, before the verb
+// (global options) or after it (run).
+var composeValueFlags = map[string]bool{
+	"-f": true, "--file": true, "-p": true, "--project-name": true, "--profile": true,
+	"--env-file": true, "--project-directory": true, "--ansi": true, "--parallel": true,
+	"--progress": true, "-e": true, "--env": true, "-v": true, "--volume": true,
+	"-u": true, "--user": true, "-w": true, "--workdir": true, "--entrypoint": true,
+	"--name": true, "--pull": true,
+}
+
+// composeStarting verbs start or create containers, so the images of the named
+// services matter. composeOther verbs never pull an image.
+var (
+	composeStarting = map[string]bool{"up": true, "pull": true, "run": true, "create": true, "start": true}
+	composeOther    = map[string]bool{
+		"build": true, "logs": true, "down": true, "ps": true, "config": true, "stop": true,
+		"restart": true, "exec": true, "kill": true, "rm": true, "images": true, "ls": true,
+		"top": true, "cp": true, "port": true, "pause": true, "unpause": true, "version": true,
+		"events": true, "wait": true, "push": true, "watch": true,
+	}
+)
+
 // scriptComposeServices returns the service names named on each
-// `docker compose up|pull|run`, with "*" for a command that names none (all
-// services).
+// `docker compose` / `docker-compose` command that starts containers, with "*"
+// for one that names none (all services) and "?" for an invocation whose verb
+// it cannot classify (the guard fails on those rather than skip them).
 func scriptComposeServices(script string) []string {
 	flat := strings.ReplaceAll(commentFree(script), "\\\n", " ")
 	var out []string
 	for _, loc := range composeCmdRe.FindAllStringIndex(flat, -1) {
 		words := shellFields(flat[loc[1]:])
+		i := 0
+		for ; i < len(words); i++ {
+			w := words[i]
+			if !strings.HasPrefix(w, "-") {
+				break
+			}
+			if composeValueFlags[w] {
+				i++
+			}
+		}
+		if i >= len(words) {
+			out = append(out, "?")
+			continue
+		}
+		verb := words[i]
+		if composeOther[verb] {
+			continue
+		}
+		if !composeStarting[verb] {
+			out = append(out, "?")
+			continue
+		}
 		named := false
-		for _, w := range words {
+		for i++; i < len(words); i++ {
+			w := words[i]
 			if strings.HasPrefix(w, "-") {
+				if composeValueFlags[w] {
+					i++
+				}
 				continue
 			}
 			out = append(out, w)
 			named = true
+			if verb == "run" {
+				break // the rest is the command to run
+			}
 		}
 		if !named {
 			out = append(out, "*")
@@ -150,6 +202,8 @@ func TestScriptCommandImages(t *testing.T) {
 		{"value flags", "docker run --rm --network vrsky-network -v \"$PWD/x\":/x:ro -e A=b mirror.gcr.io/library/golang:1.26 \\\n  go test", []string{"mirror.gcr.io/library/golang:1.26"}},
 		{"entrypoint before image", "docker run --rm --entrypoint promtool mirror.gcr.io/prom/prometheus:v3.5.0 check rules", []string{"mirror.gcr.io/prom/prometheus:v3.5.0"}},
 		{"quoted value with spaces", "docker run -e \"A=b c\" quay.io/x/y:1 cmd", []string{"quay.io/x/y:1"}},
+		{"container run", "docker container run --rm alpine sh", []string{"alpine"}},
+		{"image pull", "docker image pull -q grafana/k6", []string{"grafana/k6"}},
 		{"pull", "retry docker pull grafana/k6:latest", []string{"grafana/k6:latest"}},
 		{"in an if", "if docker run --rm --network n mirror.gcr.io/library/busybox \\\n sh -c \"nc\"; then", []string{"mirror.gcr.io/library/busybox"}},
 		{"two commands", "docker run -d --name a -p 1:1 mcr.microsoft.com/azure-storage/azurite:3.34.0 x\ndocker run --rm vrsky-cli:drill", []string{"mcr.microsoft.com/azure-storage/azurite:3.34.0", "vrsky-cli:drill"}},
@@ -177,6 +231,12 @@ func TestScriptComposeServices(t *testing.T) {
 		{"stops at the end of the command", "docker compose up -d nats && echo done", []string{"nats"}},
 		{"all services", "docker compose up -d --build", []string{"*"}},
 		{"logs are not started", "docker compose logs --tail=100 management-api", nil},
+		{"hyphenated binary", "docker-compose up -d nats", []string{"nats"}},
+		{"global -f before the verb", "docker compose -f x.yml up -d nats", []string{"nats"}},
+		{"global options before the verb", "docker compose --profile p -p proj --project-name q --env-file e.env pull nats", []string{"nats"}},
+		{"run takes one service", "docker compose run --rm -e A=b mock-sap sh -c x", []string{"mock-sap"}},
+		{"unknown verb", "docker compose frobnicate nats", []string{"?"}},
+		{"no verb", "docker compose --ansi never", []string{"?"}},
 		{"build is not a pull", "docker compose build management-api", nil},
 	}
 	for _, tc := range cases {
@@ -277,8 +337,14 @@ func composeServices(t *testing.T, root string) (image map[string]string, deps m
 // explicit: localCIImages for what the job builds itself.
 func TestWorkflowAndComposeImagesPullFromTheMirror(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
-	files, _ := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
-	actions, _ := filepath.Glob(filepath.Join(root, ".github", "actions", "*", "action.yml"))
+	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatalf("glob workflows: %v", err)
+	}
+	actions, err := filepath.Glob(filepath.Join(root, ".github", "actions", "*", "action.yml"))
+	if err != nil {
+		t.Fatalf("glob actions: %v", err)
+	}
 	files = append(files, actions...)
 	if len(files) < 5 {
 		t.Fatalf("found %d workflow files, expected the ones under .github; is the glob broken?", len(files))
@@ -292,7 +358,10 @@ func TestWorkflowAndComposeImagesPullFromTheMirror(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		rel, _ := filepath.Rel(root, f)
+		rel, err := filepath.Rel(root, f)
+		if err != nil {
+			t.Fatalf("relative path of %s: %v", f, err)
+		}
 		refs, scripts := workflowImageRefs(t, body)
 		for where, img := range refs {
 			checkedServices++
@@ -313,6 +382,10 @@ func TestWorkflowAndComposeImagesPullFromTheMirror(t *testing.T) {
 					for n := range composeImage {
 						started[n] = true
 					}
+					continue
+				}
+				if svc == "?" {
+					bad = append(bad, rel+": a docker compose command the guard cannot classify")
 					continue
 				}
 				if _, ok := composeImage[svc]; !ok {

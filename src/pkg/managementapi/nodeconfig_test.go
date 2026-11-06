@@ -916,9 +916,11 @@ var allowedImageRegistries = []string{
 	baseImageMirror,      // Docker Hub through Google's cache
 	"mcr.microsoft.com/", // Azurite
 	"ghcr.io/",           // GitHub Container Registry
-	"localhost/",         // a registry or image on the runner itself
-	"localhost:",
 }
+
+// localhostImageRe matches an image on a registry on the runner itself, with
+// an optional port. A bare `localhost:latest` is Docker Hub's library/localhost.
+var localhostImageRe = regexp.MustCompile(`^localhost(:\d+)?/`)
 
 // localCIImages are images a workflow builds itself before it runs them, so
 // there is nothing to pull.
@@ -930,6 +932,9 @@ var localCIImages = map[string]bool{
 // registry, or an image the job builds itself.
 func imageAllowed(image string) bool {
 	if localCIImages[image] {
+		return true
+	}
+	if localhostImageRe.MatchString(image) {
 		return true
 	}
 	for _, r := range allowedImageRegistries {
@@ -1064,6 +1069,7 @@ func TestDockerHubBases(t *testing.T) {
 		{"allowed registries", "FROM mcr.microsoft.com/azure-storage/azurite\nFROM localhost:5000/x\nFROM localhost/x\nFROM ghcr.io/o/i:1", nil},
 		{"lookalike mirror host", "FROM mirror.gcr.io.example.com/library/alpine:3.19", []string{"FROM mirror.gcr.io.example.com/library/alpine:3.19"}},
 		{"lookalike prefix", "FROM ghcr.io.evil.net/o/i\nFROM localhost.evil.net/x\nFROM xmirror.gcr.io/library/alpine", []string{"FROM ghcr.io.evil.net/o/i", "FROM localhost.evil.net/x", "FROM xmirror.gcr.io/library/alpine"}},
+		{"localhost tag is Docker Hub", "FROM localhost:latest", []string{"FROM localhost:latest"}},
 		{"unlisted registry", "FROM quay.io/prometheus/prometheus:v3", []string{"FROM quay.io/prometheus/prometheus:v3"}},
 		{"official image", "FROM golang:1.26-alpine AS builder", []string{"FROM golang:1.26-alpine"}},
 		{"lower-case from", "from alpine:3.19", []string{"FROM alpine:3.19"}},
