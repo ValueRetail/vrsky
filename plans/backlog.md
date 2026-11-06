@@ -1350,13 +1350,13 @@ Last updated 2026-10-28.
     tenant; if it matters, log off at the end of a delivery. Found in review
     of #696. Filed as #736.
 
-185. **Creating a workspace is not audited.** `POST /api/v1/tenants` sits
+185. ~~**Creating a workspace is not audited.**~~ (#719) `POST /api/v1/tenants` sits
     behind the session check only, with no workspace in the context, so
     `AuditMiddleware` drops it. File it under the created workspace once the
     handler has it (`recordAuditVerifiedTenant` after the insert, as
     `HandleAcceptInvite` does since #695). Found in #695. Filed as #719.
 
-186. **Anonymous requests are filed under any `X-Tenant-ID`.** A request
+186. ~~**Anonymous requests are filed under any `X-Tenant-ID`.**~~ (#719) A request
     with no valid credential that sends a workspace id in the header is
     still written to that workspace's log (a 401 with no actor), so anyone
     can add rows to any workspace's audit log. Predates #695, which stopped

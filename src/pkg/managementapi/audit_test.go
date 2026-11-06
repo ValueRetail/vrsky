@@ -45,16 +45,18 @@ func (f *fakeAuditWriter) wait(t *testing.T, want int) []*AuditEntry {
 	return nil
 }
 
+// runAuditMiddleware sends one request through AuditMiddleware to a handler
+// that stands in for the auth checks: it records tenantID as the workspace
+// the caller was verified against, "" for none. A workspace in the context
+// alone files nothing since #719.
 func runAuditMiddleware(t *testing.T, w *fakeAuditWriter, method, path, tenantID string, status int) {
 	t.Helper()
 	inner := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		recordAuditVerifiedTenant(r.Context(), tenantID)
 		rw.WriteHeader(status)
 	})
 	h := AuditMiddleware(w, nil)(inner)
 	req := httptest.NewRequest(method, path, nil)
-	if tenantID != "" {
-		req = req.WithContext(ContextWithTenantID(req.Context(), tenantID))
-	}
 	h.ServeHTTP(httptest.NewRecorder(), req)
 }
 
@@ -134,13 +136,13 @@ func TestAudit_SkipsRecursiveAuditEndpoint(t *testing.T) {
 func TestAudit_HandlerCanEnrichDetails(t *testing.T) {
 	w := &fakeAuditWriter{}
 	inner := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		recordAuditVerifiedTenant(r.Context(), "tenant-A")
 		SetAuditDetail(r.Context(), "name", "prod-pg-pwd")
 		SetAuditAction(r.Context(), "secret.rotate")
 		rw.WriteHeader(http.StatusOK)
 	})
 	h := AuditMiddleware(w, nil)(inner)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/abc/rotate", nil)
-	req = req.WithContext(ContextWithTenantID(req.Context(), "tenant-A"))
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
 	got := w.wait(t, 1)
@@ -168,11 +170,11 @@ func TestAudit_ConcurrentRequests(t *testing.T) {
 		}
 		wg.Wait()
 		atomic.AddInt32(&done, 1)
+		recordAuditVerifiedTenant(r.Context(), "tenant-A")
 		rw.WriteHeader(http.StatusOK)
 	})
 	h := AuditMiddleware(w, nil)(inner)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/connections", nil)
-	req = req.WithContext(ContextWithTenantID(req.Context(), "tenant-A"))
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
 	w.wait(t, 1)

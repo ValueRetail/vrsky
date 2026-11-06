@@ -123,6 +123,14 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("X-Default-Workspace-Message", "Default workspace could not be created; you can create one later.")
 		// Log but don't fail registration — user can create a tenant later
 		h.logAuthEvent(ctx, r, &user.ID, req.Email, "tenant_creation", "failed", stringPtr(err.Error()))
+	} else {
+		// The new user owns the new workspace: file its creation in that
+		// workspace's log, as POST /api/v1/tenants does (#719).
+		recordAuditUser(ctx, user)
+		recordAuditVerifiedTenant(ctx, tenant.ID)
+		SetAuditAction(ctx, "tenant.create")
+		SetAuditResource(ctx, "tenant", tenant.ID)
+		SetAuditDetail(ctx, "via", "registration")
 	}
 
 	// Auto-verify email (no email service configured yet)
