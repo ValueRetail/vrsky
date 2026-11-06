@@ -1402,14 +1402,14 @@ Last updated 2026-10-28.
     also makes the retry submit a second job. Poll the job (bounded, with
     the SDK's in-progress heartbeat) and treat failed rows like the REST
     path's refused records, or abort the open job on a failed upload at
-    least. Found in #735.
+    least. Found in #735. Filed as #760.
 
 192. **Three copies of the redelivery skip set.** `writtenSet` lives in
     `src/cmd/remote-agent`, `src/cmd/db-producer` (#705) and
     `src/cmd/salesforce-producer` (#735), and the HTTP destination (#730)
     is getting one. Move it into a small SDK-side package that connectors
     may import (`make lint-connector` allows it), keyed by a comparable
-    type parameter. Found in #735.
+    type parameter. Found in #735. Filed as #758.
 
 ## Human
 

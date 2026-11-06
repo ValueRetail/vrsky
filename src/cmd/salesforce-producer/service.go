@@ -189,7 +189,7 @@ func (p *salesforceProducer) Deliver(ctx context.Context, env *envelope.Envelope
 
 // writeResult collects, across a delivery's targets, the records that are in
 // Salesforce: fresh ones went in during this attempt, done ones are fresh plus
-// those an earlier attempt wrote (and duplicates on an upsert).
+// those an earlier attempt wrote.
 type writeResult struct {
 	fresh []writtenKey
 	done  []writtenKey
@@ -319,21 +319,6 @@ func describe(status int, body []byte) string {
 	return fmt.Sprintf("%d %s", status, strings.Join(parts, "; "))
 }
 
-// onlyDuplicates reports whether Salesforce refused the record only because
-// it is already there. On an upsert that means the record is in.
-func onlyDuplicates(body []byte) bool {
-	errs := parseSFErrors(body)
-	if len(errs) == 0 {
-		return false
-	}
-	for _, e := range errs {
-		if e.ErrorCode != "DUPLICATE_VALUE" && e.ErrorCode != "DUPLICATES_DETECTED" {
-			return false
-		}
-	}
-	return true
-}
-
 // maxListed bounds how many rejected records one error names, so the DLQ's
 // last-error header stays short.
 const maxListed = 5
@@ -407,12 +392,6 @@ func (p *salesforceProducer) restWrite(ctx context.Context, tenantID string, cfg
 		case answerTransient:
 			transient = fmt.Errorf("record[%d]: salesforce %s", i, describe(status, respBody))
 		default:
-			if op == "upsert" && onlyDuplicates(respBody) {
-				p.logger.Warn("Salesforce reports the record as a duplicate; counted as written",
-					"record", i, "object", cfg.Object, "error", describe(status, respBody))
-				res.done = append(res.done, k)
-				continue
-			}
 			reject(i, describe(status, respBody))
 		}
 		if transient != nil {

@@ -18,9 +18,11 @@ API path retries every non-`2xx`, so the two paths disagree.
   retried and then dead-lettered. The error names the record by its index
   in the payload and carries Salesforce's `errorCode` and `message`. It
   never carries the token or request headers.
-- Exception: on `upsert`, when every rejected record of a target is
-  rejected only as a duplicate (`DUPLICATE_VALUE`, `DUPLICATES_DETECTED`),
-  the target counts as done (Warn log, no error).
+- A duplicate is a refused record too, on an `upsert` as well: there
+  `DUPLICATE_VALUE` means another unique field clashed or a concurrent
+  insert won, and `DUPLICATES_DETECTED` is a blocking duplicate rule, so
+  the request's values were not written. The race case clears itself on
+  the retry. (A first version acked these; review of #759 removed it.)
 - A record with no external-id value on `upsert`, or one that cannot be
   encoded, is a rejected record too (same error path), not a silent skip.
 - Records that went in are not sent again when the message comes back: an
@@ -68,9 +70,9 @@ API path retries every non-`2xx`, so the two paths disagree.
 
 - Bulk API 2.0 jobs are not polled: a record the job rejects while
   processing is only visible in Salesforce (`failedResults`). Backlog
-  item 191; documented on the Salesforce page.
+  item 191, #760; documented on the Salesforce page.
 - The skip set now exists three times (remote agent, db-producer, here).
-  Backlog item 192.
+  Backlog item 192, #758.
 - The Salesforce page listed `operation: update`, which the code sends as
   an insert and the editor does not offer; the page now lists `insert` and
   `upsert` only.
@@ -90,5 +92,5 @@ From `src/`: `go build ./...`, `go vet ./...`, `gofmt -l .`,
 `golangci-lint run ./...`, `go test -race -count=1
 ./cmd/salesforce-producer/...`; from the root `make lint-connector` and
 `make lint-tenant`. New tests run against main's `service.go` first to show
-they fail there, then mutations of the classification, the duplicate
-exception and the skip set.
+they fail there, then mutations of the classification, the skip set and
+the skip-set key.

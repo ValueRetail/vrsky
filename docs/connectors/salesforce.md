@@ -87,9 +87,10 @@ through the REST API. Larger batches go to one Bulk API 2.0 job per node.
 Both paths treat Salesforce's answers the same way (#735):
 
 - **A record Salesforce refuses** (a `4xx` such as `REQUIRED_FIELD_MISSING`,
-  `FIELD_CUSTOM_VALIDATION_EXCEPTION`, `DUPLICATE_VALUE` on an `insert`, a
-  `300` for an `upsert` whose external id matches several records), and a
-  record with no external-id value on an `upsert`. The other records of the
+  `FIELD_CUSTOM_VALIDATION_EXCEPTION`, `DUPLICATE_VALUE` or
+  `DUPLICATES_DETECTED`, on an `insert` or an `upsert`, or a `300` for an
+  `upsert` whose external id matches several records), and a record with
+  no external-id value on an `upsert`. The other records of the
   message still go in. The message is retried and then dead-lettered. The
   error names each refused record by its index in the payload (`record[3]`,
   counting from 0) with Salesforce's error code and message, for example
@@ -97,10 +98,6 @@ Both paths treat Salesforce's answers the same way (#735):
   400 REQUIRED_FIELD_MISSING: Required fields are missing: [LastName]`. On
   the Bulk path the error is about the job instead (`salesforce rejected
   the bulk job (create job): 400 …`).
-- **A duplicate on an `upsert`.** When every record Salesforce refuses is
-  refused only as a duplicate (`DUPLICATE_VALUE`, `DUPLICATES_DETECTED`),
-  the record is taken to be there already: a warning is logged and the
-  message is acked.
 - **A transient failure**: a network error, a token that cannot be fetched,
   a `401` that survives the one token refresh, a `403`, `408`, `429`, any
   `5xx`, or a redirect (they are never followed). The node stops sending

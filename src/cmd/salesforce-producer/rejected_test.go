@@ -273,21 +273,26 @@ func TestREST_RejectedRecordIsDeadLetteredAndOthersNotResent(t *testing.T) {
 	}
 }
 
-// On an upsert, a record Salesforce refuses only as a duplicate is already
-// there: the message is acked. A duplicate next to a real rejection still
-// dead-letters, naming only the real one.
-func TestREST_UpsertDuplicates(t *testing.T) {
+// On an upsert a duplicate is still a refused record: DUPLICATE_VALUE means
+// another unique field clashed or a concurrent insert won, and
+// DUPLICATES_DETECTED is a blocking duplicate rule, so the request's values
+// were not written. Acking would lose them (review of #759).
+func TestREST_UpsertDuplicatesAreRefused(t *testing.T) {
 	dup := reply{status: 400, body: `[{"message":"duplicate value found: Email__c","errorCode":"DUPLICATE_VALUE","fields":[]}]`}
 	rules := reply{status: 400, body: `[{"message":"Use one of these records?","errorCode":"DUPLICATES_DETECTED","fields":[]}]`}
 	invalid := reply{status: 400, body: `[{"message":"bad","errorCode":"INVALID_FIELD","fields":[]}]`}
 	cases := []struct {
-		name    string
-		replies map[string]reply
-		wantErr string // "" = acked
+		name     string
+		replies  map[string]reply
+		wantText []string
+		notText  []string
 	}{
-		{name: "one duplicate", replies: map[string]reply{"r1": dup}},
-		{name: "duplicate rules", replies: map[string]reply{"r0": rules, "r2": dup}},
-		{name: "duplicate and a validation error", replies: map[string]reply{"r0": dup, "r2": invalid}, wantErr: "record[2]: 400 INVALID_FIELD"},
+		{name: "one duplicate", replies: map[string]reply{"r1": dup},
+			wantText: []string{"record[1]: 400 DUPLICATE_VALUE"}, notText: []string{"record[0]", "record[2]"}},
+		{name: "duplicate rules", replies: map[string]reply{"r0": rules, "r2": dup},
+			wantText: []string{"2 of 3", "record[0]: 400 DUPLICATES_DETECTED", "record[2]: 400 DUPLICATE_VALUE"}, notText: []string{"record[1]"}},
+		{name: "duplicate and a validation error", replies: map[string]reply{"r0": dup, "r2": invalid},
+			wantText: []string{"record[0]: 400 DUPLICATE_VALUE", "record[2]: 400 INVALID_FIELD"}, notText: []string{"record[1]"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,21 +301,113 @@ func TestREST_UpsertDuplicates(t *testing.T) {
 				return r, ok
 			})
 			p := newTestProducer(t, 200, nil, target("p1", sf.srv.URL, "Account", "upsert"))
-			err := p.Deliver(context.Background(), testEnvelope(threeRecords))
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("Deliver = %v, want nil (duplicates on an upsert are in)", err)
+			env := testEnvelope(threeRecords)
+			for attempt := 1; attempt <= 2; attempt++ {
+				err := p.Deliver(context.Background(), env)
+				checkRetryable(t, err)
+				for _, want := range tc.wantText {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("attempt %d: error %q does not contain %q", attempt, err, want)
+					}
 				}
-				return
+				for _, not := range tc.notText {
+					if strings.Contains(err.Error(), not) {
+						t.Errorf("attempt %d: error %q names %s, which went in", attempt, err, not)
+					}
+				}
 			}
-			checkRetryable(t, err)
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("error %q does not contain %q", err, tc.wantErr)
-			}
-			if strings.Contains(err.Error(), "record[0]") {
-				t.Errorf("error names the duplicate: %v", err)
+			// The refused records are sent again; the one that went in is not.
+			for _, k := range []string{"r0", "r1", "r2"} {
+				want := 1
+				if _, refused := tc.replies[k]; refused {
+					want = 2
+				}
+				if got := sf.count(k); got != want {
+					t.Errorf("%s sent %d times over two attempts, want %d", k, got, want)
+				}
 			}
 		})
+	}
+}
+
+// The skip-set key: after a delivery failed partway (r0 went in and is in
+// the skip set), a delivery that differs in one part of the key is a
+// different record in a different target, so every record is sent. Each
+// case pins one field of writtenKey.
+func TestREST_SkipSetKeyedByMessageAndTarget(t *testing.T) {
+	sfOther := newFakeSF(t, nil) // a second org
+	cases := []struct {
+		name   string
+		base   string // operation of the first delivery
+		change func(t *testing.T, p *salesforceProducer, env *envelope.Envelope, sf *fakeSF)
+	}{
+		{name: "another envelope with the same payload", base: "insert", change: func(_ *testing.T, _ *salesforceProducer, env *envelope.Envelope, _ *fakeSF) {
+			env.ID = "env-735-other"
+		}},
+		{name: "node re-pointed to another instance", base: "insert", change: func(_ *testing.T, p *salesforceProducer, _ *envelope.Envelope, _ *fakeSF) {
+			p.cache[testConn] = []*sfTarget{target("p1", sfOther.srv.URL, "Account", "insert")}
+		}},
+		{name: "node re-pointed to another object", base: "insert", change: func(_ *testing.T, p *salesforceProducer, _ *envelope.Envelope, sf *fakeSF) {
+			p.cache[testConn] = []*sfTarget{target("p1", sf.srv.URL, "Contact", "insert")}
+		}},
+		{name: "node switched to another operation", base: "insert", change: func(_ *testing.T, p *salesforceProducer, _ *envelope.Envelope, sf *fakeSF) {
+			p.cache[testConn] = []*sfTarget{target("p1", sf.srv.URL, "Account", "upsert")}
+		}},
+		{name: "upsert on another external id field", base: "upsert", change: func(_ *testing.T, p *salesforceProducer, _ *envelope.Envelope, sf *fakeSF) {
+			tg := target("p1", sf.srv.URL, "Account", "upsert")
+			tg.cfg.ExternalIDField = "Other__c"
+			p.cache[testConn] = []*sfTarget{tg}
+		}},
+		{name: "a second node with the same settings", base: "insert", change: func(_ *testing.T, p *salesforceProducer, _ *envelope.Envelope, sf *fakeSF) {
+			p.cache[testConn] = []*sfTarget{target("p1", sf.srv.URL, "Account", "insert"), target("p2", sf.srv.URL, "Account", "insert")}
+		}},
+	}
+	const payload = `[{"Name":"r0","ExtId__c":"e0","Other__c":"o0"},{"Name":"r1","ExtId__c":"e1","Other__c":"o1"},{"Name":"r2","ExtId__c":"e2","Other__c":"o2"}]`
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sf := newFakeSF(t, func(key string, n int) (reply, bool) {
+				return reply{status: 503, body: `[{"message":"down","errorCode":"SERVER_UNAVAILABLE"}]`}, key == "r1" && n == 0
+			})
+			p := newTestProducer(t, 200, nil, target("p1", sf.srv.URL, "Account", tc.base))
+			env := testEnvelope(payload)
+			checkRetryable(t, p.Deliver(context.Background(), env))
+			if n := p.written.size(); n != 1 {
+				t.Fatalf("skip set holds %d entries after the partial delivery, want 1 (r0)", n)
+			}
+			before := sf.count("r0") + sfOther.count("r0")
+
+			tc.change(t, p, env, sf)
+			if err := p.Deliver(context.Background(), env); err != nil {
+				t.Fatalf("second delivery: %v", err)
+			}
+			if got := sf.count("r0") + sfOther.count("r0") - before; got < 1 {
+				t.Errorf("r0 was not sent by the changed delivery: the skip set matched a different key")
+			}
+		})
+	}
+}
+
+// Deliveries run concurrently and share the cached target; filling in the
+// API version default must not write to it (run with -race).
+func TestDeliver_ConcurrentSharesTargetWithoutRace(t *testing.T) {
+	sf := newFakeSF(t, nil)
+	tg := target("p1", sf.srv.URL, "Account", "insert") // APIVersion empty
+	p := newTestProducer(t, 200, nil, tg)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			env := testEnvelope(fmt.Sprintf(`{"Name":"c%d"}`, i))
+			env.ID = fmt.Sprintf("env-concurrent-%d", i)
+			if err := p.Deliver(context.Background(), env); err != nil {
+				t.Errorf("Deliver %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if tg.cfg.APIVersion != "" {
+		t.Errorf("cached target's APIVersion was set to %q; it must stay as configured", tg.cfg.APIVersion)
 	}
 }
 
