@@ -2646,7 +2646,8 @@ only one of them can be honestly claimed by a shared-broker design.</p>
 <ol>
 <li><strong>Platform NATS Cluster</strong> (Shared, HA)</li>
 <li>3-5 node HA cluster with JetStream enabled</li>
-<li>Used for state tracking, dead letter queue, retries</li>
+<li>Used for the data stream (<code>VRSKY_DATA</code>), its redeliveries and the
+     dead-letter stream (<code>VRSKY_DLQ</code>)</li>
 <li>
 <p>Shared across all tenants (platform-wide infrastructure)</p>
 </li>
@@ -2665,11 +2666,9 @@ only one of them can be honestly claimed by a shared-broker design.</p>
 │  │ Node 1  │  │ Node 2  │  │ Node 3  │                     │
 │  └─────────┘  └─────────┘  └─────────┘                     │
 │                                                              │
-│  JetStream + KV Buckets:                                    │
-│  ├─ message_state (TTL: 15min)                              │
-│  ├─ integration_locks (TTL: 5min)                           │
-│  ├─ retry_queue (TTL: 1hr)                                  │
-│  └─ dead_letter_queue (TTL: 7 days)                         │
+│  JetStream streams:                                         │
+│  ├─ VRSKY_DATA  vrsky.data.&gt;  (72 h)                        │
+│  └─ VRSKY_DLQ   vrsky.dlq.&gt;   (7 days)                      │
 └─────────────────────────────────────────────────────────────┘
                           ▲
                           │ (State tracking only)
@@ -2733,34 +2732,40 @@ only one of them can be honestly claimed by a shared-broker design.</p>
 </table>
 <p><strong>Use Cases</strong>:</p>
 <ul>
-<li>✅ Message state tracking (processing status)</li>
-<li>✅ Dead letter queue (failed messages)</li>
-<li>✅ Retry queue (messages awaiting retry)</li>
-<li>✅ Integration locks (prevent duplicate processing)</li>
+<li>✅ The data stream: every pipeline message, one durable consumer per worker</li>
+<li>✅ Retries: JetStream redelivery of a NAK'd message, with backoff</li>
+<li>✅ Dead letter queue: the <code>VRSKY_DLQ</code> stream (failed messages)</li>
 <li>✅ Platform-wide events (tenant provisioning, etc.)</li>
 <li>✅ Cross-tenant integrations (future feature)</li>
 </ul>
-<p><strong>KV Bucket Schema</strong>:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">message_state</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15 minutes</span>
-<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10GB</span>
-<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-
-<span class="nt">integration_locks</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5 minutes</span>
-<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1GB</span>
-<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-
-<span class="nt">retry_queue</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1 hour</span>
-<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50GB</span>
-<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-
-<span class="nt">dead_letter_queue</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">7 days</span>
-<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100GB</span>
-<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-</code></pre></div>
+<p>The original design also had KV buckets for message state, integration
+locks, a retry queue and a dead-letter queue. They were never built: retries
+are JetStream redeliveries and the DLQ is a stream. What exists is in
+<code>pkg/messaging</code> (<code>messaging.go</code>, <code>subscriber.go</code>, <code>dlq.go</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Stream</th>
+<th>Subjects</th>
+<th>Retention</th>
+<th>Duplicate window</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VRSKY_DATA</code></td>
+<td><code>vrsky.data.&gt;</code></td>
+<td>72 h, size caps, oldest out</td>
+<td>5 min</td>
+</tr>
+<tr>
+<td><code>VRSKY_DLQ</code></td>
+<td><code>vrsky.dlq.&gt;</code></td>
+<td>7 days</td>
+<td>default (2 min)</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h3 id="tenant-scoped-nats-instances">Tenant-Scoped NATS Instances<a class="headerlink" href="#tenant-scoped-nats-instances" title="Permanent link">&para;</a></h3>
 <p><strong>Purpose</strong>: Fast, ephemeral message transport within tenant boundary</p>
@@ -2928,43 +2933,24 @@ record of the intended design, because it is one of the candidate answers to</p>
 </code></pre></div>
 <hr />
 <h2 id="retry-error-handling">Retry &amp; Error Handling<a class="headerlink" href="#retry-error-handling" title="Permanent link">&para;</a></h2>
-<h3 id="state-machine">State Machine<a class="headerlink" href="#state-machine" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>RECEIVED → PROCESSING → COMPLETED
-    ↓           ↓
-    └─→ RETRY ←┘ (max 3 attempts)
-         ↓
-    DEAD_LETTER (after max retries)
+<h3 id="what-a-worker-does-with-a-message">What a worker does with a message<a class="headerlink" href="#what-a-worker-does-with-a-message" title="Permanent link">&para;</a></h3>
+<p>There is no state store: the attempt count is JetStream's own delivery count
+(<code>NumDelivered</code>) on the worker's durable consumer, which has
+<code>MaxDeliver: 5</code> and the backoff 1 s, 5 s, 30 s, 2 min
+(<code>messaging.DefaultBackoff</code>). <code>Subscriber.dispatch</code> in
+<code>pkg/messaging/subscriber.go</code> runs the handler and then:</p>
+<div class="highlight"><pre><span></span><code>handler returns nil                      → Ack
+handler returns an error, delivery &lt; 5   → Nak (redelivered after the backoff)
+handler returns an error, delivery = 5   → copy to vrsky.dlq.&lt;tenant&gt;.pipeline.&lt;conn&gt;
+                                           with X-Vrsky-Last-Error, X-Vrsky-Delivered
+                                           and X-Vrsky-Worker, then Ack
+                                           (if the DLQ publish fails: Nak)
+handler panics                           → Nak
 </code></pre></div>
-<h3 id="retry-logic">Retry Logic<a class="headerlink" href="#retry-logic" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="kd">func</span><span class="w"> </span><span class="nx">processMessage</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="o">*</span><span class="nx">nats</span><span class="p">.</span><span class="nx">Msg</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">msgID</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">msg</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="s">"Message-ID"</span><span class="p">)</span>
-
-<span class="w">    </span><span class="c1">// Get current state from Platform NATS KV</span>
-<span class="w">    </span><span class="nx">state</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="nx">msgID</span><span class="p">)</span>
-
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="c1">// Move to dead letter queue</span>
-<span class="w">        </span><span class="nx">deadLetterQueue</span><span class="p">.</span><span class="nx">Publish</span><span class="p">(</span><span class="nx">msg</span><span class="p">)</span>
-<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"dead_letter"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">})</span>
-<span class="w">        </span><span class="k">return</span>
-<span class="w">    </span><span class="p">}</span>
-
-<span class="w">    </span><span class="c1">// Track processing</span>
-<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"processing"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
-
-<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">doWork</span><span class="p">(</span><span class="nx">msg</span><span class="p">)</span>
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="c1">// Schedule retry with exponential backoff</span>
-<span class="w">        </span><span class="nx">retryDelay</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nx">Pow</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="kt">float64</span><span class="p">(</span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">)))</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span>
-<span class="w">        </span><span class="nx">retryQueue</span><span class="p">.</span><span class="nx">Publish</span><span class="p">(</span><span class="nx">msg</span><span class="p">,</span><span class="w"> </span><span class="nx">nats</span><span class="p">.</span><span class="nx">RetryDelay</span><span class="p">(</span><span class="nx">retryDelay</span><span class="p">))</span>
-<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"retry"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">})</span>
-<span class="w">        </span><span class="k">return</span>
-<span class="w">    </span><span class="p">}</span>
-
-<span class="w">    </span><span class="c1">// Success</span>
-<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"completed"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
-<span class="p">}</span>
-</code></pre></div>
+<p>SDK connectors don't call this directly. The SDK runner maps <code>Deliver</code>'s
+result onto it: nil acks, <code>sdk.Permanent</code> acks and drops (logged, never
+dead-lettered), anything else is returned and so NAK'd
+(<code>pkg/sdk/lifecycle.go</code>).</p>
 <h3 id="ackwait-in-progress-heartbeats-redelivery-139">AckWait, in-progress heartbeats &amp; redelivery (#139)<a class="headerlink" href="#ackwait-in-progress-heartbeats-redelivery-139" title="Permanent link">&para;</a></h3>
 <p>The durable consumer's <strong>AckWait</strong> is the crash-recovery window — how long
 JetStream waits for an ack before assuming the worker died and redelivering. It
@@ -2991,10 +2977,16 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
 <p>A message that fails five deliveries (<code>MaxDeliveryAttempts</code>; redelivered after
 1 s, 5 s, 30 s and 2 min) is dead-lettered:</p>
 <ol>
-<li>Message moved to the <code>VRSKY_DLQ</code> stream in Platform NATS</li>
-<li>Tenant notified via webhook/email</li>
-<li>Message retained for 7 days</li>
-<li>Admin UI allows manual retry or inspection</li>
+<li>The message is copied to the <code>VRSKY_DLQ</code> stream with the last error and
+   the attempt count, and acked on the data stream.</li>
+<li><code>vrsky_dlq_messages_total</code> goes up, and the <code>DLQGrowing</code> alert fires
+   when a pipeline dead-letters messages for 10 minutes. The metric has no
+   tenant label, so the alert goes to the platform's notification targets,
+   not the tenant's. Nothing is sent per message.</li>
+<li>The message is kept for 7 days.</li>
+<li>The connection's DLQ view in the UI lists the messages and can retry one
+   (republished to the data stream, so every worker sees it again) or
+   discard it.</li>
 </ol>
 <p>A destination that returns <code>sdk.Permanent</code> is not retried at all: the message
 is acked and dropped, and never reaches the DLQ. Which errors each destination
@@ -3141,9 +3133,11 @@ marks permanent is in the
 <span class="w">    </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kv_size &gt; 80GB</span>
 <span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Alert + increase retention</span>
 
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DeadLetterQueueGrowing</span>
-<span class="w">    </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dlq_size &gt; 10K messages</span>
-<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Alert tenant + investigate</span>
+<span class="w">  </span><span class="c1"># Built as DLQGrowing in infrastructure/prometheus-rules.yml; it goes to</span>
+<span class="w">  </span><span class="c1"># the platform's targets, not the tenant's (see "Dead Letter Queue").</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DLQGrowing</span>
+<span class="w">    </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">increase(vrsky_dlq_messages_total[10m]) &gt; 0 for 10min</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Alert platform + investigate</span>
 </code></pre></div>
 <hr />
 <h2 id="security-considerations">Security Considerations<a class="headerlink" href="#security-considerations" title="Permanent link">&para;</a></h2>

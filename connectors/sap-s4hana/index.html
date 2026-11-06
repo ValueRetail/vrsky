@@ -2603,6 +2603,14 @@ on the fetch (<code>SAP_SESSIONID_*</code>, <code>MYSAPSSO2</code>) are kept onl
 delivery's fetch, write and OAuth2 token call, then dropped. Two connections,
 or two tenants, writing to the same SAP host never send each other's session
 (#682).</p>
+<p>When a delivery ends, success or failure, the producer logs that session off
+with <code>GET /sap/public/bc/icf/logoff</code> on the service's own host (with
+<code>sap-client</code> when set), sending only the session cookie. This keeps sessions
+from piling up per technical user until SAP's idle timeout (#736). It is
+best-effort: it waits at most 5 seconds, it is skipped when SAP set no
+<code>SAP_SESSIONID_*</code> cookie, and an error or a <code>404</code> (a gateway without the ICF
+logoff service) is logged at debug level and never changes the delivery's
+result. There is no setting for it.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sap_s4hana"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"sap_s4hana"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>

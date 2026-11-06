@@ -2923,8 +2923,8 @@ error it hits into one of two kinds:</p>
   <code>permanent error; dropping message</code>. Other drops are a plain <code>return nil</code>
   and leave only the destination's own line, or none at all: the HTTP
   destination's <code>4xx</code> (the feed shows it, the log has <code>HTTP request returned
-  error</code>), Kafka, RabbitMQ, SFTP and cloud-storage with a missing setting,
-  Salesforce records it skips, and the rows the database destination skips.
+  error</code>), Kafka, RabbitMQ, SFTP, cloud-storage and Salesforce with a
+  missing setting.
   Look in the worker's log in Loki, filtered by <code>connection_id</code>, and in the
   connection's activity feed.</li>
 </ul>
@@ -2941,12 +2941,12 @@ error it hits into one of two kinds:</p>
 <tr>
 <td>HTTP</td>
 <td>Every <code>4xx</code> except <code>429</code> (any other answer below <code>500</code> too); a URL a request cannot be built from</td>
-<td><code>5xx</code>, <code>429</code>, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host)</td>
+<td><code>5xx</code>, <code>429</code>, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host). With several nodes, only the failing ones are tried again and the last error names them (<code>node &lt;id&gt;: …</code>); a node that took the message is skipped, unless the worker restarted in between (<a href="../../connectors/http/#failed-deliveries">HTTP page</a>)</td>
 </tr>
 <tr>
 <td>Database</td>
-<td>Payload not JSON; table name that is not <code>table</code> or <code>schema.table</code>; a row the database refuses (the other rows still go in); a target database that cannot be opened or reached, when no other target is left for the message</td>
-<td>Failure to check for or create the table</td>
+<td>Payload not JSON</td>
+<td>A target database that cannot be opened or reached, a row the database refuses (none of the message's rows stay in that target), a lost connection, failure to check for or create the table; a node with no <code>host</code> or a table name that is not <code>table</code> or <code>schema.table</code>. A target that committed is skipped when the message comes back (see the <a href="../../connectors/database/#several-destination-nodes">database page</a>)</td>
 </tr>
 <tr>
 <td>File</td>
@@ -2975,8 +2975,8 @@ error it hits into one of two kinds:</p>
 </tr>
 <tr>
 <td>Salesforce</td>
-<td>Payload not JSON; no <code>object</code>; <code>upsert</code> with no <code>external_id_field</code>; on the REST path a record Salesforce answers with a <code>4xx</code>, or that has no external-id value (the other records still go in)</td>
-<td><code>5xx</code>, <code>429</code>, network or token failure on the REST path (the whole message is sent again); any non-<code>2xx</code> while creating, filling or closing a Bulk API job</td>
+<td>Payload not JSON; no <code>object</code>; <code>upsert</code> with no <code>external_id_field</code></td>
+<td>A record Salesforce refuses with a <code>4xx</code> (the error names it as <code>record[N]</code> with Salesforce's code; the other records still go in), a record with no external-id value; <code>401</code>/<code>403</code> after the token refresh, <code>408</code>, <code>429</code>, <code>5xx</code>, a redirect, network or token failure; the same answers while creating, filling or closing a Bulk API job. Records that went in are not sent again on the retry (see the <a href="../../connectors/salesforce/#records-are-not-sent-twice">Salesforce page</a>)</td>
 </tr>
 <tr>
 <td>Sitoo</td>

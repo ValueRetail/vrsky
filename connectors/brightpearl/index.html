@@ -2542,8 +2542,15 @@ headers:</p>
 </ul>
 <p>Store the token as a secret and reference it as <code>staff_token_secret_id</code>.</p>
 <p><strong>Base URL</strong> is account- and datacenter-scoped:
-<code>https://ws-{datacenter}.brightpearl.com/public-api/{account_code}</code>. Set
-<code>datacenter</code> (e.g. <code>eu1</code>, <code>use1</code>) + <code>account_code</code>, or override <code>base_url</code>.
+<code>https://{datacenter}.brightpearlconnect.com/public-api/{account_code}</code>
+(<a href="https://help.brightpearl.com/hc/en-us/articles/212645003-URI-syntax">Brightpearl's URI syntax</a>).
+Set <code>datacenter</code> + <code>account_code</code>, or override <code>base_url</code>. Datacenters:
+<code>euw1</code> (EU) and <code>use1</code> (US East). Codes from the legacy
+<code>ws-{code}.brightpearl.com</code> hosts are still accepted: <code>eu1</code> means <code>euw1</code>,
+<code>use</code> means <code>use1</code>. US West (<code>usw</code>, <code>usw1</code>) has no documented
+<code>brightpearlconnect.com</code> name, so it keeps the legacy host
+<code>https://ws-usw.brightpearl.com/public-api/{account_code}</code>, which still
+serves the API.
 Both are checked before anything is called; see <a href="#the-base-url">The base URL</a>.</p>
 </blockquote>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
@@ -2562,7 +2569,7 @@ connector unwraps and publishes the inner <code>response</code> value.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"brightpearl"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"brightpearl"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"datacenter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"eu1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"datacenter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"euw1"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"account_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"youraccount"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"app_ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"yourapp"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"staff_token_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
@@ -2587,7 +2594,7 @@ a message routed to the owning tenant/connection.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"brightpearl"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"brightpearl"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"datacenter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"eu1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"datacenter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"euw1"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"account_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"youraccount"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"app_ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"yourapp"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"staff_token_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
@@ -2609,9 +2616,9 @@ from the node, so the connector only calls addresses it can trust (#667):</p>
 <ul>
 <li>A <code>base_url</code> override must be <code>https</code>, with a host, and no user name, query
   string or fragment.</li>
-<li>Without an override, <code>datacenter</code> must be a single host label (<code>eu1</code>,
+<li>Without an override, <code>datacenter</code> must be a single host label (<code>euw1</code>,
   <code>use1</code>) and <code>account_code</code> may only hold letters, digits, <code>-</code> and <code>_</code>, so
-  neither can move the request off <code>ws-{datacenter}.brightpearl.com</code>.</li>
+  neither can move the request off <code>{datacenter}.brightpearlconnect.com</code>.</li>
 <li>The connector will not connect to loopback, private (10/8, 172.16/12,
   192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
   metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT

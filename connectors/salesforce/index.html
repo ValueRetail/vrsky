@@ -1680,6 +1680,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#what-happens-when-a-write-fails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens when a write fails
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What happens when a write fails">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#records-are-not-sent-twice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Records are not sent twice
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2432,6 +2460,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#what-happens-when-a-write-fails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens when a write fails
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What happens when a write fails">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#records-are-not-sent-twice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Records are not sent twice
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2492,7 +2548,7 @@ field used to match existing records.</p>
 <li><code>instance_url</code> — your org URL.</li>
 <li><code>oauth_grant_id</code> — the grant UUID.</li>
 <li><code>object</code> — the target object (e.g. <code>Contact</code>).</li>
-<li><code>operation</code> — <code>insert</code>, <code>update</code>, or <code>upsert</code>.</li>
+<li><code>operation</code> — <code>insert</code> (the default) or <code>upsert</code>.</li>
 <li><code>external_id_field</code> — external-id field for <code>upsert</code>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
@@ -2515,20 +2571,53 @@ field used to match existing records.</p>
   instance are valid before deploying.</li>
 <li><strong>Failed deliveries.</strong> A payload that is not JSON is dropped (logged, not
   dead-lettered), and so is a message for a node with no <code>object</code>, or an
-  <code>upsert</code> node with no <code>external_id_field</code> (logged, acked). Small batches go
-  out one record at a time through the REST API. There, a record Salesforce
-  answers with a <code>4xx</code> (a <code>401</code> that survives the one token refresh included)
-  is logged and skipped, and so is a record with no external-id value or one
-  that cannot be encoded; the message is still acked, and the skipped records
-  are not kept anywhere. A <code>5xx</code>, a <code>429</code>, a network error or a token failure
-  retries the whole message, and the records already written go out again, so
-  an <code>insert</code> can create duplicates. Batches at or above the bulk threshold use the
-  Bulk API: there any answer that is not <code>2xx</code> while creating, filling or
-  closing the job, a <code>4xx</code> too, is retried and then dead-lettered. See the
-  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
+  <code>upsert</code> node with no <code>external_id_field</code> (logged, acked). Everything else
+  is retried and, after five attempts, dead-lettered with the error; see
+  <a href="#what-happens-when-a-write-fails">What happens when a write fails</a>.</li>
 <li>Field mapping, batch sizing, and other options not listed here are
   configured via the in-app pipeline editor (Property panel).</li>
 </ul>
+<h2 id="what-happens-when-a-write-fails">What happens when a write fails<a class="headerlink" href="#what-happens-when-a-write-fails" title="Permanent link">&para;</a></h2>
+<p>Batches below the bulk threshold (200 records) go out one record at a time
+through the REST API. Larger batches go to one Bulk API 2.0 job per node.
+Both paths treat Salesforce's answers the same way (#735):</p>
+<ul>
+<li><strong>A record Salesforce refuses</strong> (a <code>4xx</code> such as <code>REQUIRED_FIELD_MISSING</code>,
+  <code>FIELD_CUSTOM_VALIDATION_EXCEPTION</code>, <code>DUPLICATE_VALUE</code> or
+  <code>DUPLICATES_DETECTED</code>, on an <code>insert</code> or an <code>upsert</code>, or a <code>300</code> for an
+  <code>upsert</code> whose external id matches several records), and a record with
+  no external-id value on an <code>upsert</code>. The other records of the
+  message still go in. The message is retried and then dead-lettered. The
+  error names each refused record by its index in the payload (<code>record[3]</code>,
+  counting from 0) with Salesforce's error code and message, for example
+  <code>node p1: salesforce rejected 1 of 10 records (Contact insert): record[3]:
+  400 REQUIRED_FIELD_MISSING: Required fields are missing: [LastName]</code>. On
+  the Bulk path the error is about the job instead (<code>salesforce rejected
+  the bulk job (create job): 400 …</code>).</li>
+<li><strong>A transient failure</strong>: a network error, a token that cannot be fetched,
+  a <code>401</code> that survives the one token refresh, a <code>403</code>, <code>408</code>, <code>429</code>, any
+  <code>5xx</code>, or a redirect (they are never followed). The node stops sending
+  the rest of the message and it is retried; after five attempts it is
+  dead-lettered. A <code>401</code> or <code>403</code> can be replayed from the DLQ once the
+  OAuth grant is fixed.</li>
+</ul>
+<h3 id="records-are-not-sent-twice">Records are not sent twice<a class="headerlink" href="#records-are-not-sent-twice" title="Permanent link">&para;</a></h3>
+<p>A record that went in is not sent again when the message comes back,
+whether it comes back for a refused record, a transient failure or another
+node: on the retry only the remaining records go out, so an <code>insert</code> does
+not create duplicates. A Bulk job that was submitted for a node is not
+submitted again either. A retry from the DLQ skips them as well.</p>
+<p>This is remembered by the worker process, for seven days and up to 10 000
+records. A redelivery handled by another process (after a restart or a
+deploy) sends every record again, and so does a record whose answer from
+Salesforce was lost. Delivery is at least once: use <code>upsert</code> with an
+external id where a duplicate matters.</p>
+<p>The Bulk path does not wait for the job to finish. A record the job refuses
+while Salesforce processes it is only listed in the job's failed results in
+Salesforce (Setup, Bulk Data Load Jobs); it does not reach the DLQ.</p>
+<p>See the
+<a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>
+for how other destinations treat failures.</p>
 
 
 

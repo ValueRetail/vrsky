@@ -1480,6 +1480,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#connection-settings-both-sides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection settings (both sides)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#as-a-source-consumer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1498,6 +1509,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="As a destination (producer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-happens-when-a-write-fails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens when a write fails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#several-destination-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Several destination nodes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2400,6 +2439,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#connection-settings-both-sides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection settings (both sides)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#as-a-source-consumer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2418,6 +2468,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="As a destination (producer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-happens-when-a-write-fails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens when a write fails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#several-destination-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Several destination nodes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2450,59 +2528,70 @@
 
 
 <h1 id="databases">Databases<a class="headerlink" href="#databases" title="Permanent link">&para;</a></h1>
-<p>The database connector (<code>config.type: "database"</code>) polls a SQL database (PostgreSQL) as a source and writes rows as a destination.</p>
-<h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
-<p>A consumer node runs a query on a fixed interval and emits the result rows into the pipeline.</p>
-<p>Config reference:</p>
+<p>The database connector (<code>config.type: "database"</code>) reads rows from a PostgreSQL database as a source and writes rows into one as a destination. Both sides take the connection details in a <code>database</code> block on the node.</p>
+<h2 id="connection-settings-both-sides">Connection settings (both sides)<a class="headerlink" href="#connection-settings-both-sides" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>type</code> — <code>"database"</code>.</li>
-<li><code>database.connection_string_secret_id</code> — reference to the connection string secret.</li>
-<li><code>database.query</code> — <code>SELECT</code> statement to run each interval.</li>
-<li><code>database.interval</code> — polling interval as a duration string (e.g. <code>"30s"</code>).</li>
+<li><code>database.host</code> — host name or address. Required.</li>
+<li><code>database.port</code> — default <code>5432</code>.</li>
+<li><code>database.user</code> — role to connect as.</li>
+<li><code>database.password_secret_id</code> — reference to the password secret (see Secrets below).</li>
+<li><code>database.database</code> — database name.</li>
+<li><code>database.sslmode</code> — a libpq <code>sslmode</code> (<code>disable</code>, <code>require</code>, <code>verify-full</code>, …). Default <code>disable</code>. The editor has no field for it; set it in the node JSON.</li>
 </ul>
-<p>To explore available tables and columns, use the editor's <strong>Discover</strong> button, backed by the <code>/schema</code> discovery endpoint (#81).</p>
+<h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
+<p>A consumer node runs a query when the connection starts and, with a poll interval, again on that interval. All rows of one run go out as one message: a JSON array of objects, one per row, with <code>columns</code>, <code>row_count</code> and <code>filename</code> (<code>&lt;table&gt;.json</code>, or <code>query_result.json</code>) in the metadata. A run that returns no rows publishes nothing.</p>
+<ul>
+<li><code>database.table</code> — table to read; the query is then <code>SELECT * FROM &lt;table&gt;</code>.</li>
+<li><code>database.query</code> — a query to run instead of the table (overrides <code>table</code>).</li>
+<li><code>database.poll_interval_seconds</code> — seconds between runs; <code>0</code> (the default) runs once.</li>
+</ul>
+<p>A converter after this source can read the table's columns with its <strong>Discover schema</strong> button (<code>/api/v1/schema-discovery/database</code>, #81).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"database"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"database"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"connection_string_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_pgconn_01"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"db.example.com"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"port"</span><span class="p">:</span><span class="w"> </span><span class="mi">5432</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vrsky_reader"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"6f1c2a9e-0000-4000-8000-000000000001"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"database"</span><span class="p">:</span><span class="w"> </span><span class="s2">"shop"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"query"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SELECT id, status, created_at FROM public.orders WHERE status = 'new'"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"interval"</span><span class="p">:</span><span class="w"> </span><span class="s2">"30s"</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">30</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
-<p>A producer node writes incoming messages as rows into a target table.</p>
-<p>Config reference:</p>
+<p>A producer node writes each message as rows into a table. The payload is a JSON object (one row) or an array of objects (one row each); each key is a column. Nested objects and arrays are written as JSON text.</p>
 <ul>
-<li><code>type</code> — <code>"database"</code>.</li>
-<li><code>database.connection_string_secret_id</code> — reference to the connection string secret.</li>
-<li><code>database.table</code> — target table (e.g. <code>public.orders</code>).</li>
-<li><code>database.operation</code> — <code>"insert"</code>, <code>"update"</code>, or <code>"upsert"</code>.</li>
+<li><code>database.table</code> — <code>table</code> or <code>schema.table</code>. Required. A bare name is resolved by the role's <code>search_path</code>, as in any SQL; <code>create_insert</code> checks for it in <code>public</code> only, so with another <code>search_path</code> give the schema.</li>
+<li><code>database.mode</code> — <code>create_insert</code> (the default) creates the table from the first row's keys if it does not exist, then inserts; <code>insert</code> inserts into a table that must exist. Columns created by <code>create_insert</code> are <code>DOUBLE PRECISION</code> for numbers, <code>BOOLEAN</code> for booleans and <code>TEXT</code> for the rest. Any other value, <code>upsert</code> included, behaves like <code>insert</code>.</li>
 </ul>
-<p>Column mapping and key selection are configured via the in-app pipeline editor (Property panel).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"database"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"database"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"connection_string_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_pgconn_01"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"db.example.com"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"port"</span><span class="p">:</span><span class="w"> </span><span class="mi">5432</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vrsky_writer"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"6f1c2a9e-0000-4000-8000-000000000002"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"database"</span><span class="p">:</span><span class="w"> </span><span class="s2">"shop"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"sslmode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"require"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="s2">"public.orders"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"operation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"upsert"</span>
+<span class="w">    </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"insert"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h3 id="what-happens-when-a-write-fails">What happens when a write fails<a class="headerlink" href="#what-happens-when-a-write-fails" title="Permanent link">&para;</a></h3>
+<p>The rows of one message go into one target in one transaction: the target gets all of them or none.</p>
+<ul>
+<li><strong>Retried, then dead-lettered.</strong> Anything that stops a target from taking the rows: a database that cannot be opened or reached (connecting gives up after 10 seconds), a row the database refuses (a <code>NOT NULL</code>, check, unique or foreign-key constraint, a value of the wrong type), a lost connection, a failure to check for or create the table, and a node that cannot be written to as configured (no <code>host</code>, or a <code>table</code> that is neither <code>table</code> nor <code>schema.table</code>). Each attempt logs <code>Not written to target database; message not acked, will retry</code> at error level with the <code>node_id</code> and the database's error, and the activity feed shows the error. After five attempts the message is in the connection's DLQ with that error, and can be retried from there once the table, the data or the node is fixed (#705).</li>
+<li><strong>Dropped.</strong> A payload that is not JSON. It is logged (<code>dropping message</code>) and acked; nothing is kept.</li>
+</ul>
+<h3 id="several-destination-nodes">Several destination nodes<a class="headerlink" href="#several-destination-nodes" title="Permanent link">&para;</a></h3>
+<p>When one message goes to several database nodes and one of them fails, the message is retried. A node that already committed the message is skipped on the redelivery, so its table does not get the rows twice, and the message is acked once every node has them. This is remembered by the worker process for seven days (long enough for a retry from the DLQ), for at most 10 000 node-and-message pairs at a time (past that the oldest are forgotten, which means a second write, never a missed one). Editing a node's host, port, user, database or table makes it a new target, which gets the message. Because the memory is per process, a redelivery handled by another process (after a restart or a deploy) writes to every node again, and a commit whose acknowledgement was lost is written again too. Delivery is at least once per target: a table where duplicates matter should have a unique key.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Secrets.</strong> <code>connection_string</code> is a secret field. You enter it as plaintext in the editor; at deploy it is minted into an encrypted tenant secret and replaced with <code>connection_string_secret_id</code>. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
-<li><strong>Schema discovery.</strong> The <code>/schema</code> endpoint (#81) powers the <strong>Discover</strong> button so you can browse tables and columns without leaving the editor.</li>
-<li><strong>Test connection.</strong> Use the <strong>Test connection</strong> button in the editor to validate connectivity before deploying.</li>
-<li><strong>Failed writes.</strong> A payload that is not JSON or a table name that is neither
-  <code>table</code> nor <code>schema.table</code> is dropped (logged, not dead-lettered). A failure
-  to check for or create the table is retried and then dead-lettered. Two
-  things are not retried and not dead-lettered: a row the database refuses
-  (the row is logged and skipped, the other rows of the message are still
-  written), and a target database the destination cannot open or reach. If
-  that leaves no target for the message, it is acked and lost; the worker log
-  says <code>Failed to open target DB</code> or <code>Failed to ping target DB</code>. See the
-  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
+<li><strong>Secrets.</strong> <code>password</code> is a secret field. Any characters work in it, spaces and quotes included. You enter it as plaintext in the editor; at deploy it is minted into an encrypted tenant secret and replaced with <code>password_secret_id</code>. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
+<li><strong>Test connection.</strong> Use the <strong>Test Connection</strong> button in the editor to check host, credentials and database before deploying; it lists the tables in <code>public</code>.</li>
+<li>See the <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a> for how other destinations treat failures.</li>
 </ul>
 
 

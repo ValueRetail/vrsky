@@ -2680,6 +2680,25 @@ activity feed and acked: the message is dropped, not dead-lettered. A URL the
 request cannot be built from is dropped the same way. Which errors reach the
 DLQ for every destination is in the
 <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</p>
+<p><strong>Several HTTP nodes on one connection.</strong> The message is acked only when no
+node failed in a way that is retried. When one node fails and another takes
+the message, the message is retried for the failing node only: a node that
+took it (a <code>2xx</code>, or a <code>4xx</code>, which is final) is not sent it again on the
+next attempts (#730). A node whose request failed on the way (the connection
+dropped, a timeout) has not taken it and is tried again. The DLQ copy's last
+error names every node that still failed, as <code>node &lt;node id&gt;: &lt;error&gt;</code>. That
+header is cut at 512 bytes, so with many failing nodes the later ones show
+only in the worker's log (<code>HTTP destination refused</code>, <code>HTTP request failed</code>
+or <code>HTTP request returned error</code>, with <code>connection_id</code> and <code>node_id</code>). A retry from the DLQ skips the nodes that
+took the message as well.</p>
+<p>This memory is kept by the <code>http-producer</code> process: one entry per node per
+message, up to 10 000 entries, for 7 days (the DLQ's retention). If the
+worker restarts (or a rolling deploy hands the message to the new pod)
+between two attempts, every node is sent the message again. A node whose <code>2xx</code> got lost (a timeout
+after the partner had accepted the request) is sent it again too. So a node
+receives a message at least once; use <code>X-Message-ID</code>, which is the same on
+every attempt, to drop a repeat on the receiving side. Keeping the memory
+across restarts is tracked for the remote agent in #727.</p>
 <h3 id="which-addresses-it-will-call">Which addresses it will call<a class="headerlink" href="#which-addresses-it-will-call" title="Permanent link">&para;</a></h3>
 <p>The destination URL is yours to set, and the request carries your headers and
 OAuth token, so the producer checks where it is going (#660):</p>

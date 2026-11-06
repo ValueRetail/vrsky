@@ -3329,6 +3329,87 @@ disables the relevant controls when the row is the sole owner.</p>
 middleware auto-captures the request; <code>member.role_change</code> and
 <code>member.remove</code> actions include <code>target_user_id</code> and (for role changes)
 <code>new_role</code> in the details column.</p>
+<p>Sign-in events go to a separate security log, the <code>auth_audit_log</code> table:
+one row per event with the user (where known), email, event type, status,
+a reason on failure, the client address and the user agent. Never a token,
+a session id or a password, nor their hashes. Client-supplied text is made
+to fit before the insert (email cut to 255 characters, user agent to 500,
+NUL removed, invalid UTF-8 replaced), so an odd value cannot cost an event
+its row. A row that still cannot be written (the database is down) logs
+<code>auth audit row not written</code> with the event type and the error, and the
+request goes on.</p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>Written by</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>registration</code></td>
+<td>sign-up</td>
+<td><code>success</code>, <code>failed</code></td>
+</tr>
+<tr>
+<td><code>tenant_creation</code>, <code>auto_verify</code></td>
+<td>sign-up</td>
+<td><code>failed</code></td>
+</tr>
+<tr>
+<td><code>login</code></td>
+<td>password login</td>
+<td><code>success</code>, <code>failed</code></td>
+</tr>
+<tr>
+<td><code>oidc_login</code></td>
+<td>OIDC callback</td>
+<td><code>success</code>, <code>failed</code>, <code>denied</code></td>
+</tr>
+<tr>
+<td><code>password_reset_requested</code></td>
+<td>forgot-password</td>
+<td><code>success</code>, <code>not_found</code>, <code>send_failed</code></td>
+</tr>
+<tr>
+<td><code>password_reset</code></td>
+<td>reset-password (using the link)</td>
+<td><code>success</code>, <code>failed</code></td>
+</tr>
+<tr>
+<td><code>password_changed</code> / <code>password_change</code></td>
+<td>change-password</td>
+<td><code>success</code> / <code>failed</code></td>
+</tr>
+<tr>
+<td><code>email_verified</code></td>
+<td>the verification link</td>
+<td><code>success</code>, <code>failed</code></td>
+</tr>
+<tr>
+<td><code>logout</code></td>
+<td>logout</td>
+<td><code>success</code>, <code>failed</code></td>
+</tr>
+<tr>
+<td><code>account_deleted</code></td>
+<td>account deletion</td>
+<td><code>success</code></td>
+</tr>
+<tr>
+<td><code>login</code>, <code>signup</code>, <code>forgot_password</code>, <code>change_password</code></td>
+<td>the failed-attempt limits</td>
+<td><code>blocked</code> (once, when a block starts)</td>
+</tr>
+</tbody>
+</table>
+<p>A failed <code>password_reset</code> or <code>email_verified</code> row says why (<code>invalid token</code>,
+<code>token already used</code>, <code>token expired</code>) and names the user when the token
+was a real one. Logout runs behind the session check, so it always names
+the user: it ends the session the request authenticated with (the
+<code>vrsky_session</code> cookie first, then the <code>Authorization</code> header), and an
+unknown or expired session is a <code>401</code> with no row.</p>
 <h2 id="failed-attempt-limits-on-the-auth-routes">Failed-attempt limits on the auth routes<a class="headerlink" href="#failed-attempt-limits-on-the-auth-routes" title="Permanent link">&para;</a></h2>
 <p><code>POST /api/v1/auth/login</code> and <code>POST /api/v1/auth/register</code> are the two
 unauthenticated routes that do real work per request: a bcrypt check or hash
@@ -3519,7 +3600,10 @@ cannot drift.</p>
 <p>For local development with a mock upstream, the operator can set
 <code>ALLOW_PRIVATE_UPSTREAMS=true</code> on the service to allow private addresses (and
 <code>http</code> for the connectors that are https only), and on <code>management-api</code> for
-the start check. A node cannot set it, and it must stay off in production.</p>
+the start check. <code>docker-compose.yml</code> sets it to true on <code>management-api</code> and
+the connectors that have a mock (the dev stack only, #720); nothing under
+<code>infrastructure/</code> sets it. A node cannot set it, and it must stay off in
+production.</p>
 <h2 id="threat-model">Threat model<a class="headerlink" href="#threat-model" title="Permanent link">&para;</a></h2>
 <p>In scope:
 - Database dump leak → all credentials remain encrypted, requiring the

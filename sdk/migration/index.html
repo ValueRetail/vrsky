@@ -2497,13 +2497,16 @@ them:</p>
   which nothing depended on (neither service had a compose healthcheck).</li>
 <li><strong>db-producer now classifies errors.</strong> Previously it acked everything
   (<code>handleMessage</code> returned no error — a noted follow-up). On the SDK it returns
-  <code>sdk.Retriable</code> for a failed table check or create so it redelivers → DLQ, and
-  <code>sdk.Permanent</code> for a non-JSON payload (poison). A target database that can't
-  be opened or pinged is skipped, and the message is acked once no target is
-  left (it does not redeliver). Per-row insert failures stay best-effort
-  (logged, batch continues), as before. See the
-  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
-<li><strong>db-producer opens target DB pools</strong> during delivery. The SDK runner gained a
+  <code>sdk.Permanent</code> for a non-JSON payload (poison) and <code>sdk.Retriable</code> for
+  everything that stops a target from taking the rows, so the message
+  redelivers and ends in the DLQ: a target that can't be opened or pinged, a
+  row the database refuses, a lost connection, a failed table check or
+  create, and a node with no <code>host</code> or a bad table name (#705). The rows of
+  one target go in one transaction, and a target that committed is skipped
+  when the message comes back for another target. See the
+  <a href="../../connectors/database/#what-happens-when-a-write-fails">database page</a>.</li>
+<li><strong>db-producer opens target DB pools</strong> during delivery, on a target's first
+  message. The SDK runner gained a
   small lifecycle hook — it calls a connector's <code>Stop(ctx)</code> after the
   subscription drains — so db-producer closes those pools cleanly. <code>Base*</code>
   connectors inherit a no-op <code>Stop</code>, so this is inert for everyone else.

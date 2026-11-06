@@ -2669,6 +2669,14 @@ images in <code>docker-compose.yml</code>, the brokers integration.yml starts fr
 (MinIO, fake-gcs, SFTP, Kafka, RabbitMQ) and promtool's <code>prom/prometheus</code>.
 Third-party images go through the mirror without <code>library/</code>, e.g.
 <code>mirror.gcr.io/apache/kafka:3.7.0</code>.</p>
+<p>The guard is an allowlist of registries, not a ban on Docker Hub: <code>mirror.gcr.io/</code>,
+<code>mcr.microsoft.com/</code> (Azurite), <code>ghcr.io/</code> and <code>localhost</code>, matched as a prefix
+with the slash, so <code>mirror.gcr.io.example.com/</code> fails. Besides <code>FROM</code>, it
+checks workflow <code>services:</code>, <code>container:</code> and <code>docker://</code> images, every
+<code>docker run</code>/<code>pull</code>/<code>create</code> in a workflow script, and the images of the
+<code>docker-compose.yml</code> services a workflow starts (with what they depend on).
+<code>vrsky-cli:drill</code>, which <code>dr-drill.yml</code> builds itself, is the one explicit
+exception (<code>TestWorkflowAndComposeImagesPullFromTheMirror</code>, #720).</p>
 <p>Layers are cached in the GitHub Actions cache: one scope for all Go images
 (they share the Go base image, the <code>go mod download</code> layer and the copy of
 <code>src/</code>), one for the UI. Every job reads the cache; only the <code>data-filter</code> and
@@ -2704,7 +2712,9 @@ seconds. A <code>sessionStorage</code> flag keeps it to one try per tab, and the
 clears the flag when it starts.</p>
 <p><code>infrastructure/azure/smoke-prod.sh [deployment …]</code> is the same check run
 by hand: <code>/readyz</code> and the UI answer 200, each named consumer logged
-<em>Restored running pipelines</em>, and nothing that matters is firing. What
+<em>Restored running pipelines</em>, and nothing that matters is firing. Only the
+pods of the deployment's current ReplicaSet count; an old pod still
+terminating after the rollout is not read (#741). What
 matters is VRSky's own alerts (the <code>vrsky-*</code> rule groups) above <code>info</code>
 and anything <code>critical</code> from any group; a stock warning that a fleet
 restart produces by itself, such as <code>KubeClientErrors</code>, does not fail a
