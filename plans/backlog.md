@@ -1248,7 +1248,7 @@ Last updated 2026-10-28.
     run` images in workflows and the compose images CI starts can drift back
     to Docker Hub unnoticed. Found in review of #694. Filed as #720.
 
-175. **Ordered resume for Business Central incremental polls.** A poll that
+175. ~~**Ordered resume for Business Central incremental polls.**~~ (#733) A poll that
     hits the 10 000-page cap (#699) keeps its old watermark, so every later
     poll re-reads and re-sends the same pages and never reaches the rest. BC
     requests carry no `$orderby`, so the feed comes in key order and the
