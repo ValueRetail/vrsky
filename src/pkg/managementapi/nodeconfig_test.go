@@ -908,6 +908,43 @@ func TestDockerfilesRetryModuleDownload(t *testing.T) {
 // baseImageMirror is Google's public pull-through cache of Docker Hub.
 const baseImageMirror = "mirror.gcr.io/"
 
+// allowedImageRegistries are the registries CI and the Dockerfiles may pull
+// from. Each entry is matched as a prefix including its trailing "/" (or ":"
+// for a port), so a lookalike such as mirror.gcr.io.example.com/ does not match.
+// Anything else, Docker Hub included, fails the guards (#720).
+var allowedImageRegistries = []string{
+	baseImageMirror,      // Docker Hub through Google's cache
+	"mcr.microsoft.com/", // Azurite
+	"ghcr.io/",           // GitHub Container Registry
+}
+
+// localhostImageRe matches an image on a registry on the runner itself, with
+// an optional port. A bare `localhost:latest` is Docker Hub's library/localhost.
+var localhostImageRe = regexp.MustCompile(`^localhost(:\d+)?/`)
+
+// localCIImages are images a workflow builds itself before it runs them, so
+// there is nothing to pull.
+var localCIImages = map[string]bool{
+	"vrsky-cli:drill": true, // dr-drill.yml builds it from src/cmd/vrsky-cli
+}
+
+// imageAllowed reports whether an image reference may be pulled: an allowlisted
+// registry, or an image the job builds itself.
+func imageAllowed(image string) bool {
+	if localCIImages[image] {
+		return true
+	}
+	if localhostImageRe.MatchString(image) {
+		return true
+	}
+	for _, r := range allowedImageRegistries {
+		if strings.HasPrefix(image, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // Every Dockerfile pulls its base images from mirror.gcr.io, never from
 // Docker Hub, and BuildKit itself comes from there too (#692).
 //
@@ -985,10 +1022,9 @@ func TestDockerfilesPullBaseImagesFromTheMirror(t *testing.T) {
 }
 
 // dockerHubBases returns each FROM in a Dockerfile whose image would be
-// pulled from Docker Hub. A FROM of scratch or of an earlier stage pulls
-// nothing; an image on another registry (a host with a dot or a port, or
-// localhost) is not Docker Hub. A base built from a variable cannot be checked
-// and is reported too.
+// pulled from outside the allowlist (allowedImageRegistries), Docker Hub
+// included. A FROM of scratch or of an earlier stage pulls nothing. A base
+// built from a variable cannot be checked and is reported too.
 func dockerHubBases(dockerfile string) []string {
 	stages := map[string]bool{}
 	var bad []string
@@ -1009,8 +1045,8 @@ func dockerHubBases(dockerfile string) []string {
 		case strings.Contains(image, "$"):
 			bad = append(bad, fmt.Sprintf("FROM %s (a variable base cannot be checked; write the mirror reference out)", image))
 		case strings.EqualFold(image, "scratch"), stages[strings.ToLower(image)]:
-		case strings.HasPrefix(image, baseImageMirror):
-		case isDockerHubRef(image):
+		case imageAllowed(image):
+		default:
 			bad = append(bad, "FROM "+image)
 		}
 		// Recorded after the check: a stage may not name itself as its base.
@@ -1030,7 +1066,11 @@ func TestDockerHubBases(t *testing.T) {
 		{"stage reference", "FROM mirror.gcr.io/library/node:20-alpine AS Build\nFROM build", nil},
 		{"scratch", "FROM scratch", nil},
 		{"platform flag", "FROM --platform=linux/amd64 mirror.gcr.io/library/alpine:3.19", nil},
-		{"other registry", "FROM mcr.microsoft.com/azure-storage/azurite\nFROM localhost:5000/x\nFROM ghcr.io/o/i:1", nil},
+		{"allowed registries", "FROM mcr.microsoft.com/azure-storage/azurite\nFROM localhost:5000/x\nFROM localhost/x\nFROM ghcr.io/o/i:1", nil},
+		{"lookalike mirror host", "FROM mirror.gcr.io.example.com/library/alpine:3.19", []string{"FROM mirror.gcr.io.example.com/library/alpine:3.19"}},
+		{"lookalike prefix", "FROM ghcr.io.evil.net/o/i\nFROM localhost.evil.net/x\nFROM xmirror.gcr.io/library/alpine", []string{"FROM ghcr.io.evil.net/o/i", "FROM localhost.evil.net/x", "FROM xmirror.gcr.io/library/alpine"}},
+		{"localhost tag is Docker Hub", "FROM localhost:latest", []string{"FROM localhost:latest"}},
+		{"unlisted registry", "FROM quay.io/prometheus/prometheus:v3", []string{"FROM quay.io/prometheus/prometheus:v3"}},
 		{"official image", "FROM golang:1.26-alpine AS builder", []string{"FROM golang:1.26-alpine"}},
 		{"lower-case from", "from alpine:3.19", []string{"FROM alpine:3.19"}},
 		{"platform flag on hub", "FROM --platform=$BUILDPLATFORM alpine", []string{"FROM alpine"}},
@@ -1047,19 +1087,6 @@ func TestDockerHubBases(t *testing.T) {
 			}
 		})
 	}
-}
-
-// isDockerHubRef reports whether an image reference resolves to Docker Hub:
-// no registry host in front (golang:1.26, grafana/loki) or docker.io itself.
-func isDockerHubRef(image string) bool {
-	first, _, hasSlash := strings.Cut(image, "/")
-	if !hasSlash {
-		return true // golang:1.26-alpine → docker.io/library/golang
-	}
-	if first == "docker.io" || first == "index.docker.io" || first == "registry-1.docker.io" {
-		return true
-	}
-	return !strings.ContainsAny(first, ".:") && first != "localhost"
 }
 
 // Every CI job that runs Go must fetch the modules first with retries

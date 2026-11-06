@@ -1240,7 +1240,7 @@ Last updated 2026-10-28.
     instead. Add their checks to the validator. Found in #667, #677, #678 and
     #686.
 
-174. **Tighten the Docker Hub mirror guard.** `TestDockerfilesPullBaseImagesFromTheMirror`
+174. ~~**Tighten the Docker Hub mirror guard.**~~ (#720) `TestDockerfilesPullBaseImagesFromTheMirror`
     (#692) lets any non-Docker-Hub registry through, so a lookalike host
     (`mirror.gcr.io.example.com/...`) would pass; allowlist `mirror.gcr.io/`,
     `mcr.microsoft.com/`, `ghcr.io/` and `localhost`. It also covers only
@@ -1373,7 +1373,7 @@ Last updated 2026-10-28.
     take the builders from `pkg/connectorurl`. Left out of #708 to keep the
     connector edits clear of #704. Filed as #737.
 
-188. **The dev stack's `management-api` has no `ALLOW_PRIVATE_UPSTREAMS`.**
+188. ~~**The dev stack's `management-api` has no `ALLOW_PRIVATE_UPSTREAMS`.**~~ (#720)
     `docker-compose.yml` sets it on `http-producer` and both SAP services, so
     their mocks work, but the management API's start check refuses the same
     URLs: httpbin since #660, mock-sap since #708. Decide whether compose
