@@ -77,6 +77,16 @@ resolves anywhere else, and checks the stub's log is non-empty.
   run still fails (not 429), so nothing is silently skipped.
 - A month where every run is throttled gives no verdict at all. The
   warning shows on each run; the Azure budget e-mail still fires.
+- A fully throttled run waits 10 + 30 + 60 s per group, so it holds the
+  `production` concurrency group for up to ~200 s; a deploy queued behind
+  it waits that long.
+- One group over budget on its own while the other is throttled gives no
+  verdict, on purpose: the script only decides on a complete sum, and the
+  next run (or the one after) has it.
+- Az's tsv can print a credit (`-12.25`) or an exponent (`1e-05`); both
+  are accepted. A negative total still fails in `budget.sh`, which wants a
+  non-negative number; that would take a month of credits larger than
+  the spend.
 
 ## Verify
 

@@ -51,6 +51,7 @@ fi
 case "$line" in
   ok*) v=${line#ok}; v=${v# }; [ -n "$v" ] && echo "$v"; exit 0 ;;
   429) echo 'ERROR: Too Many Requests({"error":{"code":"429","message":"Too many requests. Please retry."}})' >&2; exit 1 ;;
+  aad) echo 'ERROR: AADSTS700024: Client assertion is not within its valid time range.' >&2; exit 1 ;;
   403) echo 'ERROR: Forbidden({"error":{"code":"AuthorizationFailed","message":"The client does not have authorization to perform action Microsoft.CostManagement/query/action."}})' >&2; exit 1 ;;
 esac
 echo "stub az: bad canned response $line" >&2
@@ -70,7 +71,8 @@ type budgetRun struct {
 }
 
 // runBudgetCheck runs the script with canned responses per resource group
-// (one per line: "ok <cost>", "ok" for no rows, "429", "403").
+// (one per line: "ok <cost>", "ok" for no rows, "429", "403", "aad" for a
+// failure whose text carries no HTTP reason).
 func runBudgetCheck(t *testing.T, budget string, responses map[string][]string) budgetRun {
 	t.Helper()
 	bash := "/bin/bash"
@@ -223,6 +225,42 @@ func TestBudgetCheckScript(t *testing.T) {
 			queries:   map[string]int{budgetRG: 1, budgetMC: 1},
 			mention:   []string{"HTTP 403 (Forbidden), code AuthorizationFailed", "::error title=Budget check failed::"},
 			absent:    []string{"spent ", "retry "},
+		},
+		{
+			name:      "a credit is a number",
+			budget:    "1500",
+			responses: map[string][]string{budgetRG: {"ok 100.5"}, budgetMC: {"ok -12.25"}},
+			code:      0,
+			queries:   map[string]int{budgetRG: 1, budgetMC: 1},
+			mention:   []string{"spent 88 of 1500 NOK this month (5%)"},
+			absent:    []string{"::error"},
+		},
+		{
+			name:      "an exponent from az's tsv is a number",
+			budget:    "1500",
+			responses: map[string][]string{budgetRG: {"ok 1e-05"}, budgetMC: {"ok 2.5E+02"}},
+			code:      0,
+			queries:   map[string]int{budgetRG: 1, budgetMC: 1},
+			mention:   []string{"spent 250 of 1500 NOK this month (16%)"},
+			absent:    []string{"::error"},
+		},
+		{
+			name:      "a success that is not a number fails the run",
+			budget:    "1500",
+			responses: map[string][]string{budgetRG: {"ok None"}, budgetMC: {"ok 10"}},
+			code:      1,
+			queries:   map[string]int{budgetRG: 1, budgetMC: 1},
+			mention:   []string{"is not a number ('None')", "::error title=Budget check failed::"},
+			absent:    []string{"spent ", "::warning"},
+		},
+		{
+			name:      "a failure with no HTTP reason fails at once",
+			budget:    "1500",
+			responses: map[string][]string{budgetRG: {"aad", "ok 10"}, budgetMC: {"ok 10"}},
+			code:      1,
+			queries:   map[string]int{budgetRG: 1, budgetMC: 1},
+			mention:   []string{"HTTP unknown, code none", "::error title=Budget check failed::"},
+			absent:    []string{"spent ", "retry ", "::warning"},
 		},
 		{
 			name:      "a 403 is not hidden by a 429 on the other group",

@@ -98,7 +98,8 @@ query_group() {
 total=0
 failed=""
 throttled=""
-num='^[0-9]+([.][0-9]+)?$'
+# az's tsv can print a credit (-12.5) or a tiny amount in exponent form (1e-05).
+num='^-?[0-9]+([.][0-9]*)?([eE][-+]?[0-9]+)?$'
 for rg in "${groups[@]}"; do
   cost=""
   set +e
