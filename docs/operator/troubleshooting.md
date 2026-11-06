@@ -209,7 +209,7 @@ error it hits into one of two kinds:
   and leave only the destination's own line, or none at all: the HTTP
   destination's `4xx` (the feed shows it, the log has `HTTP request returned
   error`), Kafka, RabbitMQ, SFTP and cloud-storage with a missing setting,
-  Salesforce records it skips, and the rows the database destination skips.
+  and the Salesforce records it skips.
   Look in the worker's log in Loki, filtered by `connection_id`, and in the
   connection's activity feed.
 
@@ -218,7 +218,7 @@ Which kind an error gets differs per destination:
 | Destination | Dropped, not in the DLQ | Retried, then in the DLQ |
 |-------------|-------------------------|--------------------------|
 | HTTP | Every `4xx` except `429` (any other answer below `500` too); a URL a request cannot be built from | `5xx`, `429`, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host) |
-| Database | Payload not JSON; table name that is not `table` or `schema.table`; a row the database refuses (the other rows still go in); a target database that cannot be opened or reached, when no other target is left for the message | Failure to check for or create the table |
+| Database | Payload not JSON | A target database that cannot be opened or reached, a row the database refuses (none of the message's rows stay in that target), a lost connection, failure to check for or create the table; a node with no `host` or a table name that is not `table` or `schema.table`. A target that committed is skipped when the message comes back (see the [database page](../connectors/database.md#several-destination-nodes)) |
 | File | Output path outside the workspace's area or any mounted directory | Failure to write the file; failure to read the connection from the database |
 | Cloud storage | No `bucket` | Failure to open the provider or write the object |
 | SFTP | No `host`, `username` or `remote_dir`; no password or key; `filename_template` that cannot be parsed or rendered | Failure to connect (after three tries), to create `remote_dir` or to write the file |

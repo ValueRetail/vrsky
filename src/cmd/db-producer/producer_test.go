@@ -20,7 +20,8 @@ import (
 
 // TestDBProducer_RoundTrip proves the SDK refactor end-to-end with zero Docker:
 // an envelope published into embedded JetStream flows through the SDK runner →
-// dbProducer.Deliver → CREATE TABLE + INSERT against a mocked target database.
+// dbProducer.Deliver → CREATE TABLE + INSERT, in one transaction, against a
+// mocked target database.
 // The management-DB lookup and the target DB are both go-sqlmock; the target
 // opener is injected via the connector's openTarget hook.
 func TestDBProducer_RoundTrip(t *testing.T) {
@@ -47,13 +48,15 @@ func TestDBProducer_RoundTrip(t *testing.T) {
 		t.Fatalf("sqlmock target: %v", err)
 	}
 	defer targetDB.Close()
-	targetMock.MatchExpectationsInOrder(false)
+	// One transaction per target (#705).
+	targetMock.ExpectBegin()
 	targetMock.ExpectQuery("information_schema.tables").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	targetMock.ExpectExec("CREATE TABLE").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	targetMock.ExpectExec("INSERT INTO").
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	targetMock.ExpectCommit()
 
 	p := &dbProducer{
 		openTarget: func(string) (*sql.DB, error) { return targetDB, nil },
@@ -213,6 +216,7 @@ func TestDBProducer_TableNameReachesSQL(t *testing.T) {
 				t.Fatalf("sqlmock: %v", err)
 			}
 			defer targetDB.Close()
+			mock.ExpectBegin()
 			mock.ExpectQuery(regexp.QuoteMeta(
 				"SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name=$2)")).
 				WithArgs(tt.lookupSchema, tt.lookupTable).
@@ -222,6 +226,7 @@ func TestDBProducer_TableNameReachesSQL(t *testing.T) {
 			mock.ExpectExec("^" + regexp.QuoteMeta(`INSERT INTO `+tt.ident+` ("name") VALUES ($1)`) + "$").
 				WithArgs("widget").
 				WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectCommit()
 
 			const connID = "conn-table"
 			p := newCachedProducer(connID, targetDB, tt.table)
@@ -235,9 +240,11 @@ func TestDBProducer_TableNameReachesSQL(t *testing.T) {
 	}
 }
 
-// TestDBProducer_BadTableNameIsPermanent: a malformed table name surfaces in
-// the live log and drops the message, and no SQL reaches the target.
-func TestDBProducer_BadTableNameIsPermanent(t *testing.T) {
+// TestDBProducer_BadTableNameIsDeadLettered: a malformed table name surfaces
+// in the live log and fails the message, so it is retried and dead-lettered
+// rather than dropped (#705: a DLQ entry can be retried once the node is
+// fixed), and no SQL reaches the target.
+func TestDBProducer_BadTableNameIsDeadLettered(t *testing.T) {
 	targetDB, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -247,8 +254,8 @@ func TestDBProducer_BadTableNameIsPermanent(t *testing.T) {
 	const connID = "conn-bad-table"
 	p := newCachedProducer(connID, targetDB, "db.public.orders")
 	err = p.Deliver(context.Background(), dbEnvelope(connID))
-	if !sdk.IsPermanent(err) || !errors.Is(err, errBadTableName) {
-		t.Fatalf("Deliver err = %v, want Permanent errBadTableName", err)
+	if err == nil || sdk.IsPermanent(err) || !errors.Is(err, errBadTableName) {
+		t.Fatalf("Deliver err = %v, want a retryable errBadTableName", err)
 	}
 	var reported bool
 	for _, e := range p.getRecentEvents(connID) {

@@ -39,10 +39,12 @@ func TestConfigRead_FailureIsNotAcked(t *testing.T) {
 				t.Fatalf("sqlmock target: %v", err)
 			}
 			t.Cleanup(func() { _ = targetDB.Close() })
+			targetMock.ExpectBegin()
 			targetMock.ExpectQuery("information_schema.tables").
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 			targetMock.ExpectExec("CREATE TABLE").WillReturnResult(sqlmock.NewResult(0, 0))
 			targetMock.ExpectExec("INSERT INTO").WillReturnResult(sqlmock.NewResult(1, 1))
+			targetMock.ExpectCommit()
 			var mu sync.Mutex
 			var dsn string
 			p := &dbProducer{
