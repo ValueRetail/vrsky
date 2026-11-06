@@ -195,6 +195,9 @@ type BCConfig struct {
 	// lookbackWarned is set once the "lookback_days ignored for a DateTime
 	// cursor" Warn was logged, so it is logged once per process.
 	lookbackWarned bool
+	// unordered is set once BC refused `$orderby` on cursor_field (#733):
+	// later polls ask without it. In memory only, so a restart tries again.
+	unordered bool
 
 	// resendAll makes the next fetch ignore the incremental watermark and the
 	// seen pictures, so everything goes out again — for a till that just
@@ -511,6 +514,7 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		cfg.aheadSeen = c.loadAheadState(ctx, tenantID, connID, cfg.NodeID, logger)
 	}
 
+	from := cursor // the watermark this poll started from, before a lookback widens it
 	watermark := cursorTracker{ceiling: c.clock(), lookbackDays: cfg.effectiveLookback()}
 	if watermark.lookbackDays > 0 && isDateCursor(cursor) {
 		// The stored date is the floor of the watermark, so a window that
@@ -519,46 +523,73 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		watermark.seed(cursor)
 		cursor = shiftDate(cursor, -watermark.lookbackDays)
 	}
-	next := cfg.entityURL(cursor)
+	// An incremental poll asks for the feed in cursor order (#733), so one
+	// that stops early can store how far it got. See stoppedPoll.
+	ordered := cfg.Incremental && !cfg.unordered
+	resending := cfg.resendAll
+	next := cfg.pollURL(cursor, ordered)
 	page, total := 0, 0
 	var pics pictureCounts
 	ahead := map[string]string{} // records dated after now this poll carried
 	inFeed := map[string]bool{}  // record ids this poll carried, for the sweep
+	// stopped is why the poll ended before the last page. The pages before
+	// it stay published.
+	var stopped error
 	for next != "" {
 		if page >= pageCap {
-			logger.Warn("Business Central poll stopped at the page cap while the API still returns @odata.nextLink. "+
-				"The watermark was not advanced, so every later poll re-reads and re-sends the same pages, "+
-				"and the records past the cap are never delivered. Raise or unset page_size, or narrow filter",
-				"page_cap", pageCap, "page_size", cfg.PageSize, "entity", cfg.effectiveEntity(), "records", total)
-			return errPageCap
+			stopped = errPageCap
+			break
 		}
 		page++
 		body, err := c.get(ctx, tok, next, cfg.PageSize)
+		if err != nil && page == 1 && ordered && isBadRequest(err) {
+			// BC refuses $orderby on a field it cannot sort on. If the same
+			// request without it works, that was the reason: poll as before.
+			plain := cfg.pollURL(cursor, false)
+			var perr error
+			if body, perr = c.get(ctx, tok, plain, cfg.PageSize); perr == nil {
+				logger.Warn("Business Central refused $orderby on cursor_field; polling without it until the "+
+					"connector restarts. A poll that stops early (page cap, failed page) then does not advance "+
+					"the watermark", "cursor_field", cfg.effectiveCursorField(), "error", err)
+				cfg.unordered, ordered, next, err = true, false, plain, nil
+			} else {
+				err = perr
+			}
+		}
 		if err != nil {
-			return err
+			stopped = err
+			break
 		}
 		var p odataPage
 		if err := json.Unmarshal(body, &p); err != nil {
-			return fmt.Errorf("parse OData page: %w", err)
+			stopped = fmt.Errorf("parse OData page: %w", err)
+			break
 		}
 		if len(p.Value) > 0 {
 			out := p.Value
 			if cfg.Incremental {
-				out = c.withoutSentAhead(cfg, &watermark, p.Value, ahead, logger)
+				out = c.unsent(cfg, p.Value)
 			}
 			if len(out) > 0 {
 				if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), out); err != nil {
-					return fmt.Errorf("publish records: %w", err)
+					stopped = fmt.Errorf("publish records: %w", err)
+					break
 				}
 			}
+			total += len(out)
 			if cfg.Pictures {
 				n, err := c.publishPictures(ctx, connID, tenantID, cfg, tok, p.Value, inFeed, logger)
 				pics.add(n)
 				if err != nil {
-					return fmt.Errorf("publish pictures: %w", err)
+					stopped = fmt.Errorf("publish pictures: %w", err)
+					break
 				}
 			}
-			total += len(out)
+			// Only a page handled in full moves the watermark, so a stopped
+			// poll resumes before the page it failed on.
+			if cfg.Incremental {
+				c.observePage(cfg, &watermark, p.Value, ahead, logger)
+			}
 		}
 		if p.NextLink == "" {
 			break
@@ -566,8 +597,16 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		// The link comes from the server and the next request carries the
 		// token: it stays on the configured origin (#686).
 		if next, err = cfg.followNext(next, p.NextLink); err != nil {
-			return err
+			stopped = err
+			break
 		}
+	}
+	if stopped != nil {
+		return c.stoppedPoll(ctx, connID, tenantID, cfg, stopState{
+			err: stopped, tracker: &watermark, ahead: ahead, from: from,
+			ordered: ordered, resending: resending, recovering: rec.active,
+			fieldChanged: fieldChanged, fieldUnrecorded: fieldUnrecorded, records: total,
+		}, logger)
 	}
 
 	// An incremental feed carries only records BC marked as modified, and
@@ -665,6 +704,125 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	return nil
 }
 
+// stopState is what stoppedPoll needs to know about a poll that ended before
+// its last page.
+type stopState struct {
+	err     error // why it stopped
+	tracker *cursorTracker
+	ahead   map[string]string // future-dated records it read
+	// ordered: the poll asked for $orderby and BC accepted it.
+	ordered bool
+	// resending: a resend poll, which read from the start of the entity.
+	resending bool
+	// recovering: a read past a frozen watermark (startCursor).
+	recovering bool
+
+	fieldChanged, fieldUnrecorded bool
+	records                       int    // published
+	from                          string // the watermark the poll started from; "" = the start
+}
+
+// stoppedPoll ends a poll that stopped before its last page: the page cap, a
+// next link off the API, a page that failed. The pages before the stop are
+// published. It returns s.err.
+//
+// An incremental poll asked for the feed in cursor order (#733), so every
+// record valued below the last one it read has been read, and it stores the
+// watermark cursorTracker.resumeAt gives and the remembered set
+// stoppedRemembered gives. The next poll then continues where this one
+// stopped instead of reading the same pages again.
+//
+// It stores nothing, as before #733, when the feed cannot be trusted to be in
+// order (BC refused $orderby, or a value went backwards), when nothing was
+// read, and for a recovery read past a frozen watermark, whose check for a
+// re-saved node (recovery.resaved) needs the end of the feed. A resend that
+// stopped with nothing to resume from stays a resend.
+func (c *bcConsumer) stoppedPoll(ctx context.Context, connID, tenantID string, cfg *BCConfig, s stopState, logger *slog.Logger) error {
+	capped := errors.Is(s.err, errPageCap)
+	warnCap := func(resumeFrom string) {
+		if !capped {
+			return
+		}
+		if resumeFrom != "" {
+			logger.Warn("Business Central poll stopped at the page cap while the API still returns @odata.nextLink. "+
+				"The watermark advanced to where the poll stopped, so the next poll continues from there and the "+
+				"records past the cap arrive over the next polls. Raise or unset page_size, or narrow filter, "+
+				"to read the entity in fewer polls",
+				"page_cap", pageCap, "page_size", cfg.PageSize, "entity", cfg.effectiveEntity(), "records", s.records,
+				"resume_from", resumeFrom)
+			return
+		}
+		logger.Warn("Business Central poll stopped at the page cap while the API still returns @odata.nextLink. "+
+			"The watermark was not advanced, so every later poll re-reads and re-sends the same pages, "+
+			"and the records past the cap are never delivered. Raise or unset page_size, or narrow filter",
+			"page_cap", pageCap, "page_size", cfg.PageSize, "entity", cfg.effectiveEntity(), "records", s.records)
+	}
+	t := s.tracker
+	if !cfg.Incremental || !s.ordered || s.recovering || t.atLast == nil {
+		warnCap("")
+		return s.err
+	}
+	if t.unordered {
+		logger.Warn("Business Central returned records out of cursor_field order although the poll asked for "+
+			"$orderby; the poll stopped early and its watermark was not advanced",
+			"cursor_field", cfg.effectiveCursorField(), "error", s.err)
+		warnCap("")
+		return s.err
+	}
+	resumeFrom := t.resumeAt()
+	// A date cursor is read back with `ge`, so a poll that never got past the
+	// watermark day "resumes" from the date it started on. That is no
+	// progress, and the logs must not say otherwise.
+	advanced := resumeFrom != "" && laterCursor(resumeFrom, s.from)
+	if s.resending && resumeFrom == "" {
+		warnCap("")
+		return s.err
+	}
+	replace := s.fieldChanged && resumeFrom == ""
+	remembered := t.stoppedRemembered(cfg.aheadSeen, s.ahead)
+	aheadChanged := !sameAhead(cfg.aheadSeen, remembered)
+	cfg.aheadSeen = remembered
+	c.warnAheadSize(cfg, logger)
+	if resumeFrom != "" || replace || cfg.Pictures || aheadChanged || s.fieldUnrecorded {
+		state, at := cfg.checkpointState(), c.clock().UTC()
+		if err := c.saveProgress(ctx, tenantID, connID, cfg.NodeID, resumeFrom, replace, int64(s.records), state, at, logger); err != nil {
+			// As after a full poll: past a cursor_field change the stored row
+			// still names the old field, so keep what was to be stored.
+			if s.fieldChanged {
+				cfg.unsaved = &pendingSave{cursor: resumeFrom, replace: replace, count: int64(s.records), state: state, at: at}
+			}
+			logger.Error("save the Business Central watermark of a poll that stopped early", "error", err)
+			warnCap("")
+			return s.err
+		}
+	}
+	// The resend read everything up to resumeFrom; the next poll reads the
+	// rest from there, so it is no longer a resend.
+	if s.resending {
+		cfg.resendAll = false
+	}
+	if !advanced {
+		warnCap("")
+	} else if capped {
+		warnCap(resumeFrom)
+	} else {
+		logger.Info("Business Central poll stopped early; the next poll continues from where it stopped",
+			"entity", cfg.effectiveEntity(), "records", s.records, "resume_from", resumeFrom, "error", s.err)
+	}
+	return s.err
+}
+
+// laterCursor reports whether cursor value a is later than b. Any value is
+// later than "" (the start of the entity).
+func laterCursor(a, b string) bool {
+	if b == "" {
+		return true
+	}
+	ta, _, okA := parseCursor(a)
+	tb, _, okB := parseCursor(b)
+	return okA && okB && ta.After(tb)
+}
+
 // cursorTracker keeps the newest cursor-field value seen in a fetch.
 //
 // The raw string is kept beside the parsed time because that string came from
@@ -700,6 +858,69 @@ type cursorTracker struct {
 	lookbackDays int
 	window       map[string]string
 	pruneAt      int
+
+	// Position in the feed, for a poll that stops early (#733). The feed is
+	// asked for in cursor order, so every record valued below last has been
+	// read; records on last may still be on pages not read.
+	last         time.Time         // the last cursor value read
+	lastDateOnly bool              // last is an Edm.Date
+	atLast       map[string]string // records on last (key to value); nil = nothing read
+	belowRaw     string            // the watermark candidate (raw) strictly below last
+	unordered    bool              // a value came after a larger one
+}
+
+// follow moves the feed position on by one record. It runs before observe
+// updates raw, so raw is still the candidate below this record's value.
+func (t *cursorTracker) follow(key, s string, v time.Time, dateOnly bool) {
+	switch {
+	case t.atLast == nil:
+		t.last, t.atLast = v, map[string]string{key: s}
+	case v.Before(t.last):
+		t.unordered = true
+		return
+	case v.After(t.last):
+		t.belowRaw, t.last = t.raw, v
+		clear(t.atLast)
+		t.atLast[key] = s
+	default:
+		t.atLast[key] = s
+	}
+	t.lastDateOnly = dateOnly
+}
+
+// resumeAt is the watermark a poll that stopped early may store: everything
+// up to it has been read. For a DateTime, read back with `gt`, it is the
+// largest value strictly below the last one read, since records on the last
+// value may be on pages the poll did not get to. For a date, read back with
+// `ge`, it is the newest date read, as after a full poll: `ge` reads that day
+// again and the records of it already sent are remembered (atWatermark). ""
+// = nothing to advance to; the stored watermark stays.
+func (t *cursorTracker) resumeAt() string {
+	if t.lastDateOnly {
+		return t.raw
+	}
+	return t.belowRaw
+}
+
+// stoppedRemembered is the remembered set a stopped poll stores. It is what a
+// full poll stores (future-dated records, the watermark day, the lookback
+// window), plus the records on the last value read, which the next poll
+// reads again, plus what was remembered before for values at or after the
+// last one read: the poll did not get back to those, so they are not known
+// to be gone.
+func (t *cursorTracker) stoppedRemembered(prev, ahead map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range prev {
+		if p, _, ok := parseCursor(v); ok && !p.Before(t.last) {
+			out[k] = v
+		}
+	}
+	for _, m := range []map[string]string{ahead, t.atWatermark, t.remembered(), t.atLast} {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // seed starts the tracker at a stored date watermark: newest is its floor.
@@ -823,13 +1044,15 @@ func (t *cursorTracker) observe(records []json.RawMessage, field string) []ahead
 		if !ok {
 			continue
 		}
+		key := recordKey(rec, fields)
+		t.follow(key, s, parsed, dateOnly)
 		if !t.ceiling.IsZero() {
 			limit := t.ceiling
 			if dateOnly {
 				limit = dateCeiling(t.ceiling)
 			}
 			if parsed.After(limit) {
-				ahead = append(ahead, aheadRecord{Key: recordKey(rec, fields), Cursor: s})
+				ahead = append(ahead, aheadRecord{Key: key, Cursor: s})
 				continue
 			}
 		}
@@ -838,16 +1061,14 @@ func (t *cursorTracker) observe(records []json.RawMessage, field string) []ahead
 			t.newest, t.raw, t.dateOnly = parsed, s, dateOnly
 			t.atWatermark = nil
 			if dateOnly {
-				key := recordKey(rec, fields)
 				t.atWatermark = map[string]string{key: s}
 				t.keep(key, s, parsed)
 			}
 		case dateOnly && t.dateOnly && parsed.Equal(t.newest):
-			key := recordKey(rec, fields)
 			t.atWatermark[key] = s
 			t.keep(key, s, parsed)
 		case dateOnly && t.dateOnly && t.lookbackDays > 0:
-			t.keep(recordKey(rec, fields), s, parsed)
+			t.keep(key, s, parsed)
 		}
 	}
 	return ahead
@@ -874,19 +1095,19 @@ func (c *bcConsumer) clock() time.Time {
 	return time.Now()
 }
 
-// withoutSentAhead feeds a page to the watermark and returns the records to
-// publish. A record dated after now does not move the watermark. It is
-// published once; because the watermark stayed behind it, the filter returns
-// it on every poll until the clock catches up, so a record already sent with
-// the same cursor value is left out, including on the poll where the clock
+// observePage feeds a page the poll has handled to the watermark. A record
+// dated after now does not move the watermark. It is published once; because
+// the watermark stayed behind it, the filter returns it on every poll until
+// the clock catches up, so it is remembered in ahead and unsent leaves it out
+// while its cursor value is unchanged, including on the poll where the clock
 // finally reaches it and it becomes the watermark. Edited again, its cursor
 // changes and it goes out again.
 //
 // A record a few seconds ahead is BC's clock running ahead of this pod's: it
 // is held one poll and passes quietly. Only one dated more than
 // maxCursorSkew ahead is logged at Warn, as a likely bad stamp.
-func (c *bcConsumer) withoutSentAhead(cfg *BCConfig, w *cursorTracker, records []json.RawMessage,
-	ahead map[string]string, logger *slog.Logger) []json.RawMessage {
+func (c *bcConsumer) observePage(cfg *BCConfig, w *cursorTracker, records []json.RawMessage,
+	ahead map[string]string, logger *slog.Logger) {
 	field := cfg.effectiveCursorField()
 	for _, h := range w.observe(records, field) {
 		ahead[h.Key] = h.Cursor
@@ -912,6 +1133,14 @@ func (c *bcConsumer) withoutSentAhead(cfg *BCConfig, w *cursorTracker, records [
 			"record_id", h.Key, "cursor_field", field,
 			"cursor_value", h.Cursor, "bound", warnAfter.UTC().Format(layout))
 	}
+}
+
+// unsent is the page without the records already sent with the cursor value
+// they carry now (cfg.aheadSeen): the future-dated ones, the date watermark
+// day, the lookback window, and the records on the last value read by a poll
+// that stopped early.
+func (c *bcConsumer) unsent(cfg *BCConfig, records []json.RawMessage) []json.RawMessage {
+	field := cfg.effectiveCursorField()
 	if len(cfg.aheadSeen) == 0 {
 		return records
 	}
@@ -1215,9 +1444,23 @@ func (c *bcConsumer) get(ctx context.Context, tok *oauthcc.Client, fullURL strin
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("business central %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, &statusError{code: resp.StatusCode, status: resp.Status, body: strings.TrimSpace(string(body))}
 	}
 	return body, nil
+}
+
+// statusError is an API answer outside 2xx.
+type statusError struct {
+	code         int
+	status, body string
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("business central %s: %s", e.status, e.body) }
+
+// isBadRequest reports whether err is BC answering 400.
+func isBadRequest(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.code == http.StatusBadRequest
 }
 
 func (c *bcConsumer) publishRecords(ctx context.Context, connID, tenantID, entity string, records []json.RawMessage) error {
@@ -1343,9 +1586,23 @@ func (cfg *BCConfig) companyURL() string {
 // entityURL builds the first-page API v2.0 URL, scoped to the company. A
 // non-empty cursor narrows it to what changed since the last complete fetch.
 func (cfg *BCConfig) entityURL(cursor string) string {
+	return cfg.pollURL(cursor, false)
+}
+
+// pollURL is entityURL, ordered by cursor_field ascending when ordered is set
+// (#733). $orderby is its own query option, so a configured filter is not
+// touched by it.
+func (cfg *BCConfig) pollURL(cursor string, ordered bool) string {
 	u := fmt.Sprintf("%s/%s", cfg.companyURL(), cfg.effectiveEntity())
+	var q []string
 	if filter := cfg.filterWithCursor(cursor); filter != "" {
-		u += "?$filter=" + url.QueryEscape(filter)
+		q = append(q, "$filter="+url.QueryEscape(filter))
+	}
+	if ordered {
+		q = append(q, "$orderby="+url.QueryEscape(cfg.effectiveCursorField()+" asc"))
+	}
+	if len(q) > 0 {
+		u += "?" + strings.Join(q, "&")
 	}
 	return u
 }
