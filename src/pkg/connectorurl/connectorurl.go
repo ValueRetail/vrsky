@@ -27,9 +27,26 @@ var (
 	brightpearlAccountCode = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
+// BrightpearlBaseURL is the default API root for a datacenter and account
+// code: https://{datacenter}.brightpearlconnect.com/public-api/{account_code}
+// (#732, https://help.brightpearl.com/hc/en-us/articles/212645003-URI-syntax).
+// The old ws-{datacenter}.brightpearl.com host is gone from the current docs.
+// Configs written for it say "eu1" for the EU datacenter, which is "euw1"
+// now, so that value is mapped. It returns "" when either part is empty.
+func BrightpearlBaseURL(datacenter, accountCode string) string {
+	if datacenter == "" || accountCode == "" {
+		return ""
+	}
+	dc := strings.ToLower(datacenter)
+	if dc == "eu1" {
+		dc = "euw1"
+	}
+	return "https://" + dc + ".brightpearlconnect.com/public-api/" + accountCode
+}
+
 // Brightpearl checks where the staff token goes (#667). A base_url override
 // is checked as a URL. Without one the connector calls
-// https://ws-{datacenter}.brightpearl.com/public-api/{account_code}, so
+// https://{datacenter}.brightpearlconnect.com/public-api/{account_code}, so
 // datacenter must be one host label and account_code one path segment;
 // otherwise "x@10.0.0.1/" as a datacenter moves the host.
 func Brightpearl(baseURL, datacenter, accountCode string, allowPrivate bool) error {
@@ -37,7 +54,7 @@ func Brightpearl(baseURL, datacenter, accountCode string, allowPrivate bool) err
 		return safeurl.CheckBaseURL(baseURL, allowPrivate)
 	}
 	if !brightpearlDatacenter.MatchString(datacenter) {
-		return fmt.Errorf("%s must be a single host label such as eu1 or use1", shown("datacenter", datacenter))
+		return fmt.Errorf("%s must be a single host label such as euw1 or use1", shown("datacenter", datacenter))
 	}
 	if !brightpearlAccountCode.MatchString(accountCode) {
 		return fmt.Errorf("%s may only hold letters, digits, - and _", shown("account_code", accountCode))

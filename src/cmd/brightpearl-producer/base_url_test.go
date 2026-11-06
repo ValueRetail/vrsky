@@ -35,14 +35,14 @@ func TestCheckBaseURL(t *testing.T) {
 	}{
 		{"derived default", BrightpearlProducerConfig{Datacenter: "eu1", AccountCode: "acme"}, false, true},
 		{"derived, other datacenter", BrightpearlProducerConfig{Datacenter: "USE1", AccountCode: "acme_2-x"}, false, true},
-		{"override to the default host", BrightpearlProducerConfig{BaseURL: "https://ws-eu1.brightpearl.com/public-api/acme"}, false, true},
-		{"http", BrightpearlProducerConfig{BaseURL: "http://ws-eu1.brightpearl.com/public-api/acme"}, false, false},
+		{"override to the default host", BrightpearlProducerConfig{BaseURL: "https://euw1.brightpearlconnect.com/public-api/acme"}, false, true},
+		{"http", BrightpearlProducerConfig{BaseURL: "http://euw1.brightpearlconnect.com/public-api/acme"}, false, false},
 		{"loopback", BrightpearlProducerConfig{BaseURL: "https://127.0.0.1/x"}, false, false},
 		{"loopback v6", BrightpearlProducerConfig{BaseURL: "https://[::1]/x"}, false, false},
 		{"private 10/8", BrightpearlProducerConfig{BaseURL: "https://10.0.0.1/x"}, false, false},
 		{"cloud metadata", BrightpearlProducerConfig{BaseURL: "https://169.254.169.254/latest/meta-data"}, false, false},
 		{"azure wire server", BrightpearlProducerConfig{BaseURL: "https://168.63.129.16/"}, false, false},
-		{"userinfo", BrightpearlProducerConfig{BaseURL: "https://u:p@ws-eu1.brightpearl.com/public-api/acme"}, false, false},
+		{"userinfo", BrightpearlProducerConfig{BaseURL: "https://u:p@euw1.brightpearlconnect.com/public-api/acme"}, false, false},
 		{"datacenter moves the host", BrightpearlProducerConfig{Datacenter: "x@10.0.0.1/", AccountCode: "acme"}, false, false},
 		{"datacenter adds a domain", BrightpearlProducerConfig{Datacenter: "eu1.evil.example/", AccountCode: "acme"}, false, false},
 		{"account code leaves its segment", BrightpearlProducerConfig{Datacenter: "eu1", AccountCode: "../x"}, false, false},
@@ -96,7 +96,9 @@ func TestDeliver_RefusesBadBaseURL(t *testing.T) {
 		{"metadata service", func(_, _ string) string { return `"base_url":"https://169.254.169.254/latest"` }},
 		{"private network", func(_, _ string) string { return `"base_url":"https://10.0.0.5/x"` }},
 		{"ipv6 loopback", func(_, _ string) string { return `"base_url":"https://[::1]/x"` }},
-		{"userinfo", func(_, _ string) string { return `"base_url":"https://u:p@ws-eu1.brightpearl.com/public-api/acme"` }},
+		{"userinfo", func(_, _ string) string {
+			return `"base_url":"https://u:p@euw1.brightpearlconnect.com/public-api/acme"`
+		}},
 		{"datacenter aimed at the api", func(_, s string) string {
 			return fmt.Sprintf(`"datacenter":%q,"account_code":"acme"`, "x@"+strings.TrimPrefix(s, "https://")+"/")
 		}},
@@ -146,7 +148,7 @@ func TestDeliver_DerivedDefaultStillDelivers(t *testing.T) {
 	if err := deliverWith(t, p, `"datacenter":"eu1","account_code":"acme"`); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	want := "https://ws-eu1.brightpearl.com/public-api/acme/order-service/order"
+	want := "https://euw1.brightpearlconnect.com/public-api/acme/order-service/order"
 	if len(rt.urls) != 1 || rt.urls[0] != want {
 		t.Errorf("requests = %v, want exactly [%s]", rt.urls, want)
 	}

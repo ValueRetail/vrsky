@@ -1173,7 +1173,7 @@ Last updated 2026-10-28.
     incomplete config should be dead-lettered so it can be replayed, is item
     175. Found in review of #668 and #674.
 
-165. **Check the Brightpearl default host.** The connectors build
+165. ~~**Check the Brightpearl default host.**~~ (#732) The connectors build
     `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`, while
     current third-party docs show `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`.
     Check Brightpearl's own API docs and change the default if it moved.
