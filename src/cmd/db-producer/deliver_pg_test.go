@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strconv"
@@ -293,6 +295,15 @@ func TestDeliver_WhatItCannotWriteIsRetried(t *testing.T) {
 			wantRows: 1, // the row that was there before
 		},
 		{
+			name: "node config does not parse",
+			setup: func(t *testing.T) (map[string]any, *target) {
+				return map[string]any{"host": "db", "port": "5432", "table": "items"}, nil
+			},
+			payload:      `{"id":1,"name":"a"}`,
+			wantErr:      "node config does not parse",
+			wantErrorLog: "node config does not parse",
+		},
+		{
 			name: "node has no host",
 			setup: func(t *testing.T) (map[string]any, *target) {
 				return map[string]any{"database": "d", "table": "items", "mode": "insert"}, nil
@@ -335,6 +346,13 @@ func TestDeliver_WhatItCannotWriteIsRetried(t *testing.T) {
 			if tg != nil {
 				if got := tg.count(t, "items"); got != tt.wantRows {
 					t.Errorf("items has %d rows, want %d", got, tt.wantRows)
+				}
+				// A failed transaction gives its connection back: the
+				// target's pool is not left holding one per refused message.
+				if db := e.p.targetCache[connID][0].DB; db == nil {
+					t.Error("target pool was not opened")
+				} else if n := db.Stats().InUse; n != 0 {
+					t.Errorf("target pool has %d connections in use after Deliver, want 0", n)
 				}
 			}
 			if tt.wantErrorLog != "" && !hasErrorLog(e.logs.String(), tt.wantErrorLog) {
@@ -505,5 +523,212 @@ func TestDeliver_SkipIsPerMessage(t *testing.T) {
 	}
 	if got := healthy.count(t, "items"); got != 3 {
 		t.Errorf("healthy target has %d rows, want 3 (one per message)", got)
+	}
+}
+
+// setNodes replaces a connection's producer nodes.
+func (e *pgEnv) setNodes(connID string, nodes ...node) {
+	e.t.Helper()
+	var list []map[string]any
+	for _, n := range nodes {
+		list = append(list, map[string]any{
+			"id": n.id, "type": "producer",
+			"config": map[string]any{"type": "database", "database": n.cfg},
+		})
+	}
+	body, err := json.Marshal(list)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := e.mgmt.Exec(`UPDATE connections SET nodes = $1::jsonb WHERE id = $2`, string(body), connID); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// A node edited to point at another table is a new target: the redelivery
+// writes the message there even though the node committed it to its old
+// table before.
+func TestDeliver_RepointedNodeIsANewTarget(t *testing.T) {
+	e := newPGEnv(t)
+	healthy := newTarget(t)
+	healthy.exec(t, `CREATE TABLE items (id int PRIMARY KEY, name text NOT NULL)`)
+	healthy.exec(t, `CREATE TABLE items_v2 (id int PRIMARY KEY, name text NOT NULL)`)
+	down := node{id: "down", cfg: map[string]any{"host": "127.0.0.1", "port": closedPort(t), "user": "u", "database": "d", "table": "items"}}
+	connID := e.connection(node{id: "healthy", cfg: dbConfig(t, healthy.url, "items", "insert")}, down)
+	env := e.envelope(connID, `{"id":1,"name":"a"}`)
+
+	wantRetried(t, e.p.Deliver(context.Background(), env), "connection refused")
+	if got := healthy.count(t, "items"); got != 1 {
+		t.Fatalf("items has %d rows after the first delivery, want 1", got)
+	}
+
+	// The node is edited and the pipeline redeployed (which evicts the cache).
+	e.setNodes(connID, node{id: "healthy", cfg: dbConfig(t, healthy.url, "items_v2", "insert")}, down)
+	e.p.evictTargetCache(connID)
+
+	wantRetried(t, e.p.Deliver(context.Background(), env), "connection refused")
+	if got := healthy.count(t, "items_v2"); got != 1 {
+		t.Errorf("items_v2 has %d rows after the redelivery, want 1 (a re-pointed node is a new target)", got)
+	}
+	if got := healthy.count(t, "items"); got != 1 {
+		t.Errorf("items has %d rows, want 1", got)
+	}
+}
+
+// oddRole creates a role on the test server whose password has a space, a
+// quote and a backslash, and returns its name and password.
+func oddRole(t *testing.T, password string) string {
+	t.Helper()
+	admin, err := sql.Open("postgres", os.Getenv(testdb.EnvVar))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	role := "dbprod_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	if _, err := admin.Exec(`CREATE ROLE ` + pq.QuoteIdentifier(role) + ` LOGIN PASSWORD ` + pq.QuoteLiteral(password)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(`DROP OWNED BY ` + pq.QuoteIdentifier(role) + `; DROP ROLE IF EXISTS ` + pq.QuoteIdentifier(role)); err != nil {
+			t.Logf("drop role %s: %v", role, err)
+		}
+	})
+	return role
+}
+
+// A password with a space, a quote and a backslash signs in. Before #705's
+// review fix the connection string was `password=%s` unquoted and lib/pq
+// could not parse it.
+func TestDeliver_PasswordWithSpaceAndQuoteSignsIn(t *testing.T) {
+	const password = `hunter2 sec'ret\x`
+	// The role first: its cleanup then runs after the target database (and
+	// the grant in it) is gone.
+	role := oddRole(t, password)
+	e := newPGEnv(t)
+	tg := newTarget(t)
+	tg.exec(t, `CREATE TABLE items (id int PRIMARY KEY, name text NOT NULL)`)
+	tg.exec(t, `GRANT INSERT, SELECT ON items TO `+pq.QuoteIdentifier(role))
+
+	cfg := dbConfig(t, tg.url, "items", "insert")
+	cfg["user"], cfg["password"] = role, password
+	connID := e.connection(node{id: "n1", cfg: cfg})
+	if err := e.p.Deliver(context.Background(), e.envelope(connID, `{"id":1,"name":"a"}`)); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if got := tg.count(t, "items"); got != 1 {
+		t.Errorf("items has %d rows, want 1", got)
+	}
+}
+
+// No part of the password reaches the error the message is dead-lettered
+// with, the log or the activity feed, whatever the failure.
+func TestDeliver_PasswordNeverInErrors(t *testing.T) {
+	const password = `hunter2 s3cretPart'q`
+	fragments := []string{"hunter2", "s3cretPart"}
+	tests := []struct {
+		name    string
+		cfg     func(t *testing.T) map[string]any
+		wantErr string
+	}{
+		{"target unreachable", func(t *testing.T) map[string]any {
+			return map[string]any{"host": "127.0.0.1", "port": closedPort(t), "user": "u", "password": password, "database": "d", "table": "items"}
+		}, "connection refused"},
+		{"wrong password", func(t *testing.T) map[string]any {
+			role := oddRole(t, "the right one")
+			cfg := dbConfig(t, testdb.Empty(t), "items", "insert")
+			cfg["user"], cfg["password"] = role, password
+			return cfg
+		}, "password authentication failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newPGEnv(t)
+			connID := e.connection(node{id: "n1", cfg: tt.cfg(t)})
+			err := e.p.Deliver(context.Background(), e.envelope(connID, `{"id":1,"name":"a"}`))
+			wantRetried(t, err, tt.wantErr)
+			events, _ := json.Marshal(e.p.getRecentEvents(connID))
+			for _, f := range fragments {
+				for what, text := range map[string]string{"error": err.Error(), "log": e.logs.String(), "events": string(events)} {
+					if strings.Contains(text, f) {
+						t.Errorf("%s contains password fragment %q: %s", what, f, text)
+					}
+				}
+			}
+		})
+	}
+}
+
+// A target that accepts the TCP connection and never answers (a stuck
+// server, a proxy that drops what it gets) fails the delivery after the
+// connect timeout instead of holding the worker. targetConnectTimeout is
+// 10 s in production; the test shortens it.
+func TestDeliver_ConnectTimeout(t *testing.T) {
+	if targetConnectTimeout != 10 {
+		t.Fatalf("targetConnectTimeout = %d, want 10", targetConnectTimeout)
+	}
+	old := targetConnectTimeout
+	targetConnectTimeout = 1
+	t.Cleanup(func() { targetConnectTimeout = old })
+
+	// newPGEnv first: cleanups run last-first, so the listener (and the
+	// connections it holds) closes before the producer's Stop, which waits for
+	// a dial still in progress.
+	e := newPGEnv(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var held []net.Conn
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			held = append(held, c) // never read, never answered
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = l.Close()
+		mu.Lock()
+		for _, c := range held {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+
+	connID := e.connection(node{id: "n1", cfg: map[string]any{
+		"host": "127.0.0.1", "port": l.Addr().(*net.TCPAddr).Port, "user": "u", "database": "d", "table": "items",
+	}})
+	done := make(chan error, 1)
+	go func() { done <- e.p.Deliver(context.Background(), e.envelope(connID, `{"id":1,"name":"a"}`)) }()
+	select {
+	case err := <-done:
+		if err == nil || sdk.IsPermanent(err) {
+			t.Fatalf("Deliver err = %v, want retryable", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Deliver still waiting on a target that never answers after 5 s (connect timeout 1 s)")
+	}
+}
+
+// The editor's Test Connection signs in with such a password too.
+func TestTestConnection_PasswordWithSpaceAndQuote(t *testing.T) {
+	const password = `hunter2 sec'ret\x`
+	role := oddRole(t, password)
+	cfg := dbConfig(t, testdb.Empty(t), "items", "insert")
+	cfg["user"], cfg["password"] = role, password
+	body, _ := json.Marshal(cfg)
+	rec := httptest.NewRecorder()
+	testConnectionHandler()(rec, httptest.NewRequest(http.MethodPost, "/test-connection/", bytes.NewReader(body)))
+	var resp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || !resp.OK {
+		t.Fatalf("response %s (decode err %v), want ok", rec.Body.String(), err)
 	}
 }

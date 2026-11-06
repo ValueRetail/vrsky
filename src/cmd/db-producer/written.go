@@ -46,6 +46,7 @@ type writtenKey struct {
 	nodeID     string
 	host       string
 	port       int
+	user       string
 	database   string
 	table      string
 }

@@ -66,7 +66,7 @@ func TestConfigRead_FailureIsNotAcked(t *testing.T) {
 			return p, node, func() bool {
 				mu.Lock()
 				defer mu.Unlock()
-				return targetMock.ExpectationsWereMet() == nil && strings.Contains(dsn, "password="+harness.TestSecret)
+				return targetMock.ExpectationsWereMet() == nil && strings.Contains(dsn, "password='"+harness.TestSecret+"'")
 			}
 		},
 	})

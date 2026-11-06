@@ -87,12 +87,29 @@ entry can be retried once the node is fixed.
 
 Errors on several targets are joined, each prefixed with its node id.
 
+## Review round 1
+
+- The connection string quoted nothing (`password=%s`), so a password with
+  a space broke lib/pq's parser, whose error quotes the part after the
+  space; since this change that error reaches the DLQ header, the feed and
+  the log. `pkg/pgdsn` builds the string with every value quoted; used by
+  db-producer (delivery and Test Connection) and db-consumer (source,
+  test-connection, sample-data, schema).
+- Connecting gives up after 10 s (`connect_timeout`), so a target that
+  drops packets doesn't hold the worker for the OS timeout on every attempt.
+- `TargetConnection.close` marks the target closed; `pool` then returns a
+  retryable error instead of opening a pool on a list that was evicted or
+  replaced, which nothing would close.
+- `user` is part of the skip key, next to host, port, database and table.
+
 ## Affected files
 
 - `src/cmd/db-producer/main.go`: lazy per-target pools, config errors on the
   target, one parse of the payload, per-target transaction, error
   collection, the skip set.
 - `src/cmd/db-producer/written.go` (new): the skip set.
+- `src/pkg/pgdsn` (new) and `src/cmd/db-consumer/{service,server}.go`: the
+  quoted connection string (review round 1).
 - `src/cmd/db-producer/*_test.go`: real-Postgres tests, mock tests updated
   for the transaction.
 - Docs listed above, `plans/backlog.md`.

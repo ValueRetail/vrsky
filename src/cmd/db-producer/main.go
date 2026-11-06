@@ -19,6 +19,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/pgdsn"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -71,6 +72,17 @@ type TargetDBConfig struct {
 	Mode     string `json:"mode"` // "insert", "upsert", "create_insert"
 }
 
+// targetConnectTimeout bounds connecting to a target database (dial, TLS and
+// sign-in), in seconds. Without it a host that drops packets holds the
+// delivery for the OS connect timeout, minutes, on every attempt (#705). A
+// variable so a test can shorten it.
+var targetConnectTimeout = 10
+
+// errTargetEvicted is returned for a target whose cached list was replaced
+// or evicted while a delivery was using it. The delivery is retried and reads
+// the current config.
+var errTargetEvicted = errors.New("target config was reloaded during the delivery; will retry")
+
 // TargetConnection is one database destination node of a connection.
 type TargetConnection struct {
 	NodeID         string
@@ -88,12 +100,18 @@ type TargetConnection struct {
 	DB  *sql.DB
 	dsn string
 	mu  sync.Mutex
+	// closed is set by close: the list this target was in has been evicted
+	// or replaced, so pool must not open a pool nothing would ever close.
+	closed bool
 }
 
 // pool returns the target's pool, opening and pinging it first if needed.
 func (tc *TargetConnection) pool(ctx context.Context, open func(string) (*sql.DB, error)) (*sql.DB, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
+	if tc.closed {
+		return nil, errTargetEvicted
+	}
 	if tc.DB != nil {
 		return tc.DB, nil
 	}
@@ -109,10 +127,12 @@ func (tc *TargetConnection) pool(ctx context.Context, open func(string) (*sql.DB
 	return db, nil
 }
 
-// close closes the target's pool if it was opened.
+// close closes the target's pool if it was opened, and keeps pool from
+// opening another.
 func (tc *TargetConnection) close() {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
+	tc.closed = true
 	if tc.DB != nil {
 		_ = tc.DB.Close()
 		tc.DB = nil
@@ -288,7 +308,8 @@ func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 	for _, tc := range routed {
 		key := writtenKey{
 			connID: connectionID, envelopeID: env.ID, nodeID: tc.NodeID,
-			host: tc.Config.Host, port: tc.Config.Port, database: tc.Config.Database, table: tc.Config.Table,
+			host: tc.Config.Host, port: tc.Config.Port, user: tc.Config.User,
+			database: tc.Config.Database, table: tc.Config.Table,
 		}
 		if written.has(key, at) {
 			p.logger.Info("Target already has this message; skipping it on redelivery",
@@ -595,8 +616,10 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 			cfg.SSLMode = "disable"
 		}
 		tc.Config = cfg
-		tc.dsn = fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode)
+		tc.dsn = pgdsn.Build(pgdsn.Config{
+			Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password,
+			Database: cfg.Database, SSLMode: cfg.SSLMode, ConnectTimeout: targetConnectTimeout,
+		})
 
 		var predID string
 		var predIsConsumer bool
@@ -761,8 +784,10 @@ func testConnectionHandler() http.HandlerFunc {
 		if cfg.SSLMode == "" {
 			cfg.SSLMode = "disable"
 		}
-		connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
-			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode)
+		connStr := pgdsn.Build(pgdsn.Config{
+			Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password,
+			Database: cfg.Database, SSLMode: cfg.SSLMode, ConnectTimeout: 5,
+		})
 		db, err := sql.Open("postgres", connStr)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")

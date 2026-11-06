@@ -12,6 +12,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/pgdsn"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
@@ -148,6 +149,10 @@ type ActiveDBConnection struct {
 	DBConfig     SourceDBConfig
 }
 
+// sourceConnectTimeout bounds connecting to a source database, in seconds,
+// so a host that drops packets fails the start in seconds, not minutes.
+const sourceConnectTimeout = 10
+
 type SourceDBConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
@@ -215,8 +220,10 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 		dbConfig.SSLMode = "disable"
 	}
 
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		dbConfig.Host, dbConfig.Port, dbConfig.User, dbConfig.Password, dbConfig.Database, dbConfig.SSLMode)
+	connStr := pgdsn.Build(pgdsn.Config{
+		Host: dbConfig.Host, Port: dbConfig.Port, User: dbConfig.User, Password: dbConfig.Password,
+		Database: dbConfig.Database, SSLMode: dbConfig.SSLMode, ConnectTimeout: sourceConnectTimeout,
+	})
 
 	sourceDB, err := s.openSource(connStr)
 	if err != nil {
