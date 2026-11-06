@@ -221,21 +221,40 @@ func TestAuthEventsDB_ResetPassword(t *testing.T) {
 	e.noSecrets(t)
 }
 
-func TestAuthEventsDB_Logout(t *testing.T) {
-	e := newAuthEventsEnv(t)
+func (e *authEventsEnv) session(t *testing.T) (raw string, sess *Session) {
+	t.Helper()
 	raw, hashed, err := auth.GenerateSessionToken()
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	sess := &Session{ID: uuid.NewString(), UserID: e.user.ID, TokenHash: hashed, CreatedAt: now,
+	sess = &Session{ID: uuid.NewString(), UserID: e.user.ID, TokenHash: hashed, CreatedAt: now,
 		ExpiresAt: now.Add(time.Hour), LastActivity: now, IsActive: true}
 	if err := e.repo.CreateSession(e.ctx, sess); err != nil {
 		t.Fatal(err)
 	}
-	unknown := "not-a-real-session-token"
-	e.secrets = append(e.secrets, raw, hashed, sess.ID, unknown, auth.HashToken(unknown))
+	e.secrets = append(e.secrets, raw, hashed, sess.ID)
+	return raw, sess
+}
 
+func (e *authEventsEnv) active(t *testing.T, sess *Session) bool {
+	t.Helper()
+	var active bool
+	if err := e.db.QueryRowContext(e.ctx, `SELECT is_active FROM sessions WHERE id = $1`, sess.ID).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	return active
+}
+
+// Logout through the real route, behind SessionAuthMiddleware: it ends the
+// session the middleware validated, and only that one.
+func TestAuthEventsDB_Logout(t *testing.T) {
+	e := newAuthEventsEnv(t)
+	if err := e.repo.VerifyUserEmail(e.ctx, e.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	e.h.RegisterAuthRoutes(mux)
 	logout := func(cookie, bearer string) int {
 		req := e.request(http.MethodPost, "/api/v1/auth/logout", nil)
 		if cookie != "" {
@@ -245,33 +264,119 @@ func TestAuthEventsDB_Logout(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+bearer)
 		}
 		rec := httptest.NewRecorder()
-		e.h.LogoutUser(rec, req)
+		mux.ServeHTTP(rec, req)
 		return rec.Code
 	}
-
-	if code := logout(raw, ""); code != http.StatusOK {
-		t.Fatalf("logout answered %d", code)
-	}
-	e.expect(t, e.next(t, "logout"), "success", "", true)
-	var active bool
-	if err := e.db.QueryRowContext(e.ctx, `SELECT is_active FROM sessions WHERE id = $1`, sess.ID).Scan(&active); err != nil || active {
-		t.Fatalf("session still active (%v)", err)
+	logoutRows := func() int {
+		var n int
+		if err := e.db.QueryRowContext(e.ctx, `SELECT count(*) FROM auth_audit_log WHERE event_type = 'logout'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
 	}
 
-	if code := logout("", unknown); code != http.StatusOK {
-		t.Fatalf("logout of an unknown session answered %d", code)
-	}
-	e.expect(t, e.next(t, "logout"), "failed", "unknown session", false)
+	t.Run("cookie", func(t *testing.T) {
+		raw, sess := e.session(t)
+		if code := logout(raw, ""); code != http.StatusOK {
+			t.Fatalf("logout answered %d", code)
+		}
+		e.expect(t, e.next(t, "logout"), "success", "", true)
+		if e.active(t, sess) {
+			t.Fatal("session still active")
+		}
+	})
 
-	// No token at all names nobody and writes nothing.
-	if code := logout("", ""); code != http.StatusBadRequest {
-		t.Fatalf("logout without a token answered %d", code)
-	}
-	var n int
-	if err := e.db.QueryRowContext(e.ctx, `SELECT count(*) FROM auth_audit_log WHERE event_type = 'logout'`).Scan(&n); err != nil || n != 2 {
-		t.Fatalf("%d logout rows (%v), want 2", n, err)
-	}
+	t.Run("bearer", func(t *testing.T) {
+		raw, sess := e.session(t)
+		if code := logout("", raw); code != http.StatusOK {
+			t.Fatalf("logout answered %d", code)
+		}
+		e.expect(t, e.next(t, "logout"), "success", "", true)
+		if e.active(t, sess) {
+			t.Fatal("session still active")
+		}
+	})
+
+	// The middleware authenticates the cookie first; logout must end that
+	// session, not the one a stale Authorization header names.
+	t.Run("valid cookie and a stale bearer header", func(t *testing.T) {
+		cookieRaw, cookieSess := e.session(t)
+		staleRaw, staleSess := e.session(t)
+		if err := e.repo.InvalidateSession(e.ctx, staleSess.TokenHash); err != nil {
+			t.Fatal(err)
+		}
+		if code := logout(cookieRaw, staleRaw); code != http.StatusOK {
+			t.Fatalf("logout answered %d", code)
+		}
+		e.expect(t, e.next(t, "logout"), "success", "", true)
+		if e.active(t, cookieSess) {
+			t.Fatal("the cookie's session is still active")
+		}
+	})
+
+	// Unknown or missing tokens stop at the middleware (401) and name nobody.
+	t.Run("unknown session or no token", func(t *testing.T) {
+		before := logoutRows()
+		unknown := "not-a-real-session-token"
+		e.secrets = append(e.secrets, unknown, auth.HashToken(unknown))
+		if code := logout("", unknown); code != http.StatusUnauthorized {
+			t.Fatalf("logout of an unknown session answered %d", code)
+		}
+		if code := logout("", ""); code != http.StatusUnauthorized {
+			t.Fatalf("logout without a token answered %d", code)
+		}
+		if n := logoutRows(); n != before {
+			t.Fatalf("%d new logout rows, want 0", n-before)
+		}
+	})
 	e.noSecrets(t)
+}
+
+// A client-supplied value the table cannot store as sent (too long, a NUL,
+// invalid UTF-8) still gives the event its row, cut to fit (#766 review).
+func TestAuthEventsDB_OddInputStillLogged(t *testing.T) {
+	e := newAuthEventsEnv(t)
+	longASCII := "Mozilla/5.0 " + strings.Repeat("x", 600)
+	longMultibyte := strings.Repeat("ø", 501)
+
+	reset := func(ua string) {
+		body, _ := json.Marshal(ResetPasswordRequest{Token: "no-such-token", NewPassword: "brand new password 98765"})
+		req := e.request(http.MethodPost, "/api/v1/auth/reset-password", body)
+		req.Header.Set("User-Agent", ua)
+		e.h.ResetPassword(httptest.NewRecorder(), req)
+	}
+	verify := func(ua string) {
+		req := e.request(http.MethodGet, "/api/v1/auth/verify-email?token=no-such-token", nil)
+		req.Header.Set("User-Agent", ua)
+		e.h.VerifyEmail(httptest.NewRecorder(), req)
+	}
+	login := func(email string) {
+		body, _ := json.Marshal(LoginRequest{Email: email, Password: "whatever 12345"})
+		e.h.LoginUser(httptest.NewRecorder(), e.request(http.MethodPost, "/api/v1/auth/login", body))
+	}
+	longEmail := strings.Repeat("a", 300) + "@example.com"
+
+	cases := []struct {
+		name, event       string
+		send              func()
+		wantEmail, wantUA string
+	}{
+		{"user agent over 500 characters", "password_reset", func() { reset(longASCII) }, "", longASCII[:500]},
+		{"user agent of 501 two-byte characters", "email_verified", func() { verify(longMultibyte) }, "", strings.Repeat("ø", 500)},
+		{"user agent that is not UTF-8", "email_verified", func() { verify("agent\xff\xfe/1") }, "", "agent�/1"},
+		{"email over 255 characters", "login", func() { login(longEmail) }, longEmail[:255], eventsUserAgent},
+		{"email with a NUL", "login", func() { login("owner\x00@example.com") }, "owner@example.com", eventsUserAgent},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			c.send()
+			r := e.next(t, c.event)
+			if r.Status.String != "failed" || r.Email.String != c.wantEmail || r.UserAgent.String != c.wantUA {
+				t.Errorf("row %q email %q ua %q, want failed %q %q",
+					r.Status.String, r.Email.String, r.UserAgent.String, c.wantEmail, c.wantUA)
+			}
+		})
+	}
 }
 
 func TestAuthEventsDB_VerifyEmail(t *testing.T) {

@@ -185,7 +185,12 @@ middleware auto-captures the request; `member.role_change` and
 Sign-in events go to a separate security log, the `auth_audit_log` table:
 one row per event with the user (where known), email, event type, status,
 a reason on failure, the client address and the user agent. Never a token,
-a session id or a password, nor their hashes.
+a session id or a password, nor their hashes. Client-supplied text is made
+to fit before the insert (email cut to 255 characters, user agent to 500,
+NUL removed, invalid UTF-8 replaced), so an odd value cannot cost an event
+its row. A row that still cannot be written (the database is down) logs
+`auth audit row not written` with the event type and the error, and the
+request goes on.
 
 | Event type | Written by | Status |
 |---|---|---|
@@ -203,8 +208,10 @@ a session id or a password, nor their hashes.
 
 A failed `password_reset` or `email_verified` row says why (`invalid token`,
 `token already used`, `token expired`) and names the user when the token
-was a real one. A `logout` for a session the server does not know is
-`failed` with `unknown session` and no user.
+was a real one. Logout runs behind the session check, so it always names
+the user: it ends the session the request authenticated with (the
+`vrsky_session` cookie first, then the `Authorization` header), and an
+unknown or expired session is a `401` with no row.
 
 ## Failed-attempt limits on the auth routes
 

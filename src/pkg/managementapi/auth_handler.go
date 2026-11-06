@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ValueRetail/vrsky/pkg/auth"
 	"github.com/google/uuid"
@@ -367,45 +368,34 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// LogoutUser handles POST /api/v1/auth/logout
+// LogoutUser handles POST /api/v1/auth/logout. It runs behind
+// SessionAuthMiddleware and ends the session the middleware validated: the
+// one this request authenticated with, whichever of cookie or Authorization
+// header carried it.
 func (h *Handler) LogoutUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Accept the session token from either the Authorization header (legacy
-	// API clients) or the vrsky_session cookie (#68 browser sessions).
-	token := extractBearerToken(r)
-	if token == "" {
-		if c, err := r.Cookie(sessionCookieName); err == nil {
-			token = c.Value
-		}
-	}
-
-	// Always clear the cookie so browser logout is idempotent even when
-	// the token is unknown server-side.
+	// Always clear the cookie so browser logout leaves no cookie behind.
 	clearCookie(w, sessionCookieName)
 
-	if token == "" {
-		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "no session token provided", nil)
+	session := GetSessionFromContext(ctx)
+	if session == nil {
+		// Only reachable if the route lost its middleware.
+		writeAuthError(w, http.StatusUnauthorized, "missing or invalid authorization header")
 		return
 	}
-
-	hashedToken := auth.HashToken(token)
-	var userID *string
-	if sess, err := h.repo.GetSessionByTokenHash(ctx, hashedToken); err == nil {
-		userID = &sess.UserID
+	userID := &session.UserID
+	var email string
+	if user := GetUserFromContext(ctx); user != nil {
+		email = user.Email
 	}
-	email := h.auditEmail(ctx, userID)
-	if err := h.repo.InvalidateSession(ctx, hashedToken); err != nil {
+	if err := h.repo.InvalidateSession(ctx, session.TokenHash); err != nil {
 		h.logAuthEvent(ctx, r, userID, email, "logout", "failed", stringPtr(err.Error()))
 		// Don't fail on logout errors.
 		_ = writeJSON(w, http.StatusOK, MessageResponse{Success: true, Message: "logged out"})
 		return
 	}
-	if userID == nil {
-		h.logAuthEvent(ctx, r, nil, "", "logout", "failed", stringPtr("unknown session"))
-	} else {
-		h.logAuthEvent(ctx, r, userID, email, "logout", "success", nil)
-	}
+	h.logAuthEvent(ctx, r, userID, email, "logout", "success", nil)
 	_ = writeJSON(w, http.StatusOK, MessageResponse{Success: true, Message: "logged out successfully"})
 }
 
@@ -654,21 +644,6 @@ func (h *Handler) getAuthenticatedUser(ctx context.Context, r *http.Request) (*U
 	return user, session, nil
 }
 
-// extractBearerToken extracts the bearer token from the Authorization header
-func extractBearerToken(r *http.Request) string {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return ""
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return ""
-	}
-
-	return parts[1]
-}
-
 // getClientIP is the client address for audit rows and sessions (see
 // clientIPAddr); empty when unknown.
 func getClientIP(r *http.Request) string {
@@ -728,17 +703,44 @@ func tokenFailure(err error) string {
 	}
 }
 
+// Column sizes in auth_audit_log (000005_auth_system.up.sql). Postgres
+// counts characters, not bytes.
+const (
+	auditEmailMax     = 255
+	auditUserAgentMax = 500
+)
+
+// auditText makes a client-supplied value storable in auth_audit_log: valid
+// UTF-8, no NUL (Postgres rejects both), at most max characters (0: no
+// limit). Without it a long user agent or an email with a NUL in it makes
+// the insert fail, and the event leaves no row.
+func auditText(s string, max int) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	s = strings.ReplaceAll(s, "\x00", "")
+	if max > 0 && utf8.RuneCountInString(s) > max {
+		s = string([]rune(s)[:max])
+	}
+	return s
+}
+
 // logAuthEvent logs an authentication event to the audit log
 func (h *Handler) logAuthEvent(ctx context.Context, r *http.Request, userID *string, email, eventType, status string, errorReason *string) {
+	if errorReason != nil {
+		errorReason = stringPtr(auditText(*errorReason, 0))
+	}
 	log := &AuthAuditLog{
 		UserID:      userID,
-		Email:       email,
+		Email:       auditText(email, auditEmailMax),
 		EventType:   eventType,
 		Status:      status,
 		ErrorReason: errorReason,
 		IPAddress:   optString(getClientIP(r)),
-		UserAgent:   stringPtr(r.UserAgent()),
+		UserAgent:   stringPtr(auditText(r.UserAgent(), auditUserAgentMax)),
 	}
-	// Ignore errors - audit logging should not fail operations
-	_ = h.repo.CreateAuthAuditLog(ctx, log)
+	// Audit logging never fails the request, but a lost row is logged. Only
+	// the event and the error: the row's contents stay out of the log.
+	if err := h.repo.CreateAuthAuditLog(ctx, log); err != nil {
+		slog.Default().Warn("auth audit row not written",
+			"event_type", eventType, "status", status, "error", err)
+	}
 }
