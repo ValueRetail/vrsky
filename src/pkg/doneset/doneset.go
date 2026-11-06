@@ -54,6 +54,19 @@ const maxNodeIDLen = 255
 // snapshot once half of it changed. Same rule as the file consumer (#426).
 const maxChanges = 512
 
+// verifyEvery and verifyAfter bound how long a Set can keep writing changes on
+// a snapshot nobody reads (#723). ownsSaved looks only at the changes row, and
+// that can say "mine" after another poller's snapshot: its changes reset landed
+// between this Set's read and write and was overwritten, or its reset failed.
+// So after verifyEvery changes-only saves, or verifyAfter since the last
+// check, whichever comes first, the next ownsSaved also reads the snapshot row
+// and compares its Gen. It costs one read of the large row per that many
+// saves, instead of one per poll.
+const (
+	verifyEvery = 8
+	verifyAfter = 5 * time.Minute
+)
+
 // Stamp is the version of a file or object a done name was published as: its
 // size and modification time from the listing. A done name whose listing shows
 // another stamp was replaced, and is published again. Stamps are only compared
@@ -111,6 +124,12 @@ type Set struct {
 	// again after Refresh or Save found another writer's data.
 	gen   string
 	dirty bool
+	// unverified counts the changes-only saves since ownsSaved last compared
+	// the snapshot's Gen with gen; verifiedAt is when it did, or wrote gen.
+	unverified int
+	verifiedAt time.Time
+	// now is the clock; tests replace it.
+	now func() time.Time
 	// present is the last listing passed to Observe.
 	present map[string]Stamp
 	// undecodable is the decode error of a row the last Load set aside.
@@ -129,6 +148,7 @@ func New(store checkpoint.Store, key Key, scope string) *Set {
 		scope:  scope,
 		loaded: store == nil,
 		done:   make(map[string]Stamp),
+		now:    time.Now,
 	}
 }
 
@@ -269,10 +289,26 @@ func (s *Set) mergeSaved(ctx context.Context) error {
 // another poller saved. On an error the Set stays dirty and the next Save
 // tries again.
 func (s *Set) Save(ctx context.Context) error {
-	if s.store == nil || !s.loaded || !s.dirty {
+	if s.store == nil || !s.loaded {
 		return nil
 	}
 	ctx = context.WithoutCancel(ctx)
+	if !s.dirty {
+		// Nothing to write, but a quiet folder may never save again: if the
+		// last check is due, make it, so changes written on a snapshot nobody
+		// reads are saved properly within verifyAfter (#723).
+		if s.gen == "" || !s.verifyDue() {
+			return nil
+		}
+		mine, err := s.ownsSaved(ctx)
+		if err != nil {
+			return err
+		}
+		if mine {
+			return nil
+		}
+		s.dirty = true
+	}
 	// Without a changes row (node id too long) this is never true, so every
 	// save is a merged snapshot.
 	mine, err := s.ownsSaved(ctx)
@@ -304,6 +340,7 @@ func (s *Set) Save(ctx context.Context) error {
 	if err := s.write(ctx, s.changesID(), ch); err != nil {
 		return err
 	}
+	s.unverified++
 	s.dirty = false
 	return nil
 }
@@ -317,6 +354,8 @@ func (s *Set) snapshot(ctx context.Context) error {
 		return err
 	}
 	s.gen = gen
+	s.unverified = 0
+	s.verifiedAt = s.now()
 	s.changed = nil
 	s.dirty = false
 	id := s.changesID()
@@ -332,9 +371,19 @@ func (s *Set) snapshot(ctx context.Context) error {
 	return nil
 }
 
-// ownsSaved reports whether the changes row is on the snapshot this Set wrote
-// last. Only the Set that wrote a snapshot writes changes on it, and Save
-// checks this before each such write, so then nobody else has saved since.
+// verifyDue reports whether the changes-only saves since the last check are
+// enough, in number or in time, to compare the snapshot's Gen again.
+func (s *Set) verifyDue() bool {
+	return s.unverified > 0 && (s.unverified >= verifyEvery || s.now().Sub(s.verifiedAt) >= verifyAfter)
+}
+
+// ownsSaved reports whether the saved set is still this Set's: the changes row
+// is on the snapshot this Set wrote last. Only the Set that wrote a snapshot
+// writes changes on it, and Save checks this before each such write, so then
+// nobody else has saved since. That holds only if no other snapshot came in
+// between this read and the write before it, or with its changes reset
+// failing; so once changes-only saves are due a check (verifyEvery,
+// verifyAfter) the snapshot's Gen is compared too (#723).
 func (s *Set) ownsSaved(ctx context.Context) (bool, error) {
 	if s.gen == "" {
 		return false, nil
@@ -347,7 +396,26 @@ func (s *Set) ownsSaved(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return found && ch.Base == s.gen, nil
+	if !found || ch.Base != s.gen {
+		return false, nil
+	}
+	if !s.verifyDue() {
+		return true, nil
+	}
+	var snap snapshotState
+	found, err = s.read(ctx, s.key.NodeID, &snap)
+	if errors.Is(err, ErrUndecodable) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the done set: %w", err)
+	}
+	if !found || snap.Gen != s.gen {
+		return false, nil
+	}
+	s.unverified = 0
+	s.verifiedAt = s.now()
+	return true, nil
 }
 
 // loadSaved reads the snapshot, and the changes row on top of it when that

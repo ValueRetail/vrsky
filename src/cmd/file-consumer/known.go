@@ -84,6 +84,18 @@ const maxNodeIDLen = 255
 // than twice this gets a snapshot once half of it changed.
 const maxChanges = 512
 
+// verifyEvery and verifyAfter bound how long a watcher can keep writing
+// changes on a snapshot nobody reads (#723). ownsSaved looks only at the
+// changes row, which can still say "mine" after another watcher wrote a
+// snapshot: its changes reset landed between this watcher's read and write and
+// was overwritten, or its reset failed. After verifyEvery changes-only saves,
+// or verifyAfter since the last check, the next ownsSaved also reads the
+// snapshot row and compares its Gen.
+const (
+	verifyEvery = 8
+	verifyAfter = 5 * time.Minute
+)
+
 // savedStamp is a fileStamp as stored in the checkpoint.
 type savedStamp struct {
 	Size      int64 `json:"size"`
@@ -527,6 +539,12 @@ func (s *fileConsumer) savedStampFor(ctx context.Context, ac *ActiveConnection, 
 	return st, has, true
 }
 
+// verifyDue reports whether the changes-only saves since the last check are
+// enough, in number or in time, to compare the snapshot's Gen again (#723).
+func (s *fileConsumer) verifyDue(ac *ActiveConnection) bool {
+	return ac.unverified > 0 && (ac.unverified >= verifyEvery || s.clock().Sub(ac.verifiedAt) >= verifyAfter)
+}
+
 // ownsSaved reports whether the saved set is still this watcher's: its
 // changes row is on the snapshot this watcher wrote last. Only the watcher
 // that wrote a snapshot writes changes on it, and saveKnown checks this before
@@ -540,7 +558,30 @@ func (s *fileConsumer) ownsSaved(ctx context.Context, ac *ActiveConnection) (boo
 	if err != nil {
 		return false, err
 	}
-	return found && ch.Base == ac.savedGen, nil
+	if !found || ch.Base != ac.savedGen {
+		return false, nil
+	}
+	if !s.verifyDue(ac) {
+		return true, nil
+	}
+	// Due (#723): the changes row is on our snapshot, but is our snapshot
+	// still the one readers use?
+	ctx, cancel := context.WithTimeout(ctx, checkpointTimeout)
+	defer cancel()
+	cp, err := s.checkpoints.Get(ctx, ac.TenantID, ac.ConnectionID, ac.NodeID)
+	if err != nil {
+		return false, err
+	}
+	if cp == nil || len(cp.State) == 0 {
+		return false, nil
+	}
+	var st knownState
+	if json.Unmarshal(cp.State, &st) != nil || st.WatchDir != ac.WatchDir || st.Gen != ac.savedGen {
+		return false, nil
+	}
+	ac.unverified = 0
+	ac.verifiedAt = s.clock()
+	return true, nil
 }
 
 // saveKnown writes ac.knownFiles to the checkpoint if it changed since the
@@ -558,17 +599,44 @@ func (s *fileConsumer) ownsSaved(ctx context.Context, ac *ActiveConnection) (boo
 // unless a done name has no stamp: then keepSavedStamps needs the saved set
 // too, and nothing is written until it can be read (#500).
 func (s *fileConsumer) saveKnown(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) {
-	if s.checkpoints == nil || !ac.dirty {
+	if s.checkpoints == nil {
 		return
+	}
+	notMine := false // the idle check below already found the snapshot is not ours
+	if !ac.dirty {
+		// Nothing to write, but a quiet folder may never save again: if the
+		// last check is due, make it, so changes written on a snapshot nobody
+		// reads are saved properly within verifyAfter (#723).
+		if ac.savedGen == "" || !s.verifyDue(ac) {
+			return
+		}
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
+		mine, err := s.ownsSaved(readCtx, ac)
+		cancel()
+		// An undecodable changes row counts as no saved set (#563): this sets
+		// dirty and clears savedGen, so the snapshot below replaces it.
+		if err = s.undecodableAsNone(ac, err, logger); err != nil {
+			logger.Warn("Could not check whether the saved list of published files is current; trying again at a later poll", "error", err)
+			return
+		}
+		if mine {
+			return
+		}
+		ac.dirty = true
+		notMine = true
 	}
 	if ac.savedGen == "" || changesNodeID(ac) == "" ||
 		len(ac.changed) > min(maxChanges, len(ac.knownFiles)/2) {
 		s.saveSnapshotOrLog(ctx, ac, logger)
 		return
 	}
-	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
-	mine, err := s.ownsSaved(readCtx, ac)
-	cancel()
+	var mine bool
+	var err error
+	if !notMine {
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
+		mine, err = s.ownsSaved(readCtx, ac)
+		cancel()
+	}
 	if err != nil || !mine {
 		if err == nil {
 			s.mergeSaved(context.WithoutCancel(ctx), ac, s.currentOrKnown(ac), logger)
@@ -594,6 +662,7 @@ func (s *fileConsumer) saveKnown(ctx context.Context, ac *ActiveConnection, logg
 		logger.Error("Could not save which files were published; retrying next poll", "error", err)
 		return
 	}
+	ac.unverified++
 	ac.dirty = false
 }
 
@@ -641,6 +710,8 @@ func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, l
 		return err
 	}
 	ac.savedGen = gen
+	ac.unverified = 0
+	ac.verifiedAt = s.clock()
 	ac.changed = nil
 	ac.dirty = false
 	id := changesNodeID(ac)
