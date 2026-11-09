@@ -104,9 +104,21 @@ type bcConsumer struct {
 	allowPrivate bool
 
 	active map[string]*poller
-	mu     sync.RWMutex
+	// stopping holds the poller a stop cancelled, per connection, until it
+	// has exited (#769). A cancelled poll still stores its checkpoint, so the
+	// next start's poller waits for it before reading that checkpoint.
+	// Guarded by mu; nil until the first stop.
+	stopping map[string]*poller
+	mu       sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+
+	// orderChecks is what the order probe found (#769): whether BC honours
+	// $orderby on a cursor_field, per tenant, company, entity and field (see
+	// orderKey). In memory only, so a restart probes again. Guarded by
+	// orderMu.
+	orderMu     sync.Mutex
+	orderChecks map[string]bool
 
 	startSub, stopSub, resendSub *nats.Subscription
 }
@@ -116,7 +128,15 @@ type bcConsumer struct {
 type poller struct {
 	cancel context.CancelFunc
 	resend chan struct{} // capacity 1
+	// done is closed once the poller's goroutine has returned, its last
+	// checkpoint save included (#769).
+	done chan struct{}
 }
+
+// exitWaitMargin is added to two save attempts to bound how long a new
+// poller waits for the stopped one of the same connection (exitWait). Tests
+// lower it.
+var exitWaitMargin = 5 * time.Second
 
 // BCConfig is the per-node configuration (config.business_central). client_secret
 // is stored as client_secret_secret_id and resolved to plaintext at start.
@@ -363,16 +383,74 @@ func (c *bcConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &poller{cancel: cancel, resend: make(chan struct{}, 1)}
+	p := &poller{cancel: cancel, resend: make(chan struct{}, 1), done: make(chan struct{})}
 	// A stop that arrived during the work above has taken the claim back and wins.
-	if !claim.Activate(func() { c.active[connectionID] = p }) {
+	var prev *poller
+	if !claim.Activate(func() { c.active[connectionID] = p; prev = c.stopping[connectionID] }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
 	}
 
 	logger.Info("Starting Business Central poller", "entity", cfg.effectiveEntity(), "interval", cfg.PollIntervalSeconds, "pictures", cfg.Pictures)
-	go c.runPoller(ctx, connectionID, tenantID, cfg, p.resend)
+	go c.pollAfter(ctx, prev, p, connectionID, tenantID, cfg, logger)
+}
+
+// pollAfter runs the connection's poller once prev, the poller a stop
+// cancelled for the same connection (nil if none), has exited (#769). A
+// cancelled poll still stores its checkpoint (saveProgress retries on a
+// context the stop does not cancel), so a poller that started at once could
+// read the old checkpoint, poll, and then have its own overwritten by the
+// stopped one. The wait happens here, not in the start command, so the NATS
+// goroutine is not held up. It is bounded by exitWait; past it the poller
+// starts anyway, which at worst sends some records twice.
+//
+// A poller stopped while it waits still waits for prev before it counts as
+// exited, so a quick stop, start, stop, start cannot skip a predecessor.
+func (c *bcConsumer) pollAfter(ctx context.Context, prev, p *poller, connID, tenantID string, cfg *BCConfig, logger *slog.Logger) {
+	defer c.pollerExited(connID, p)
+	if prev != nil {
+		select {
+		case <-prev.done:
+		default:
+			wait := c.exitWait()
+			logger.Info("Waiting for the stopped poller of this connection to exit before polling", "max_wait", wait)
+			timer := time.NewTimer(wait)
+			select {
+			case <-prev.done:
+			case <-timer.C:
+				logger.Warn("The stopped poller of this connection has not exited; polling anyway. "+
+					"Its last checkpoint save may land after this poller's, so some records may be sent twice",
+					"waited", wait)
+			}
+			timer.Stop()
+		}
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	c.runPoller(ctx, connID, tenantID, cfg, p.resend)
+}
+
+// pollerExited marks p as exited: it leaves the stopping map, if it is still
+// the one there, and its done channel closes.
+func (c *bcConsumer) pollerExited(connID string, p *poller) {
+	c.mu.Lock()
+	if c.stopping[connID] == p {
+		delete(c.stopping, connID)
+	}
+	c.mu.Unlock()
+	close(p.done)
+}
+
+// exitWait bounds the wait for a stopped poller: its save's two attempts and
+// a margin for the request the stop cancelled to return.
+func (c *bcConsumer) exitWait() time.Duration {
+	timeout := c.saveTimeout
+	if timeout <= 0 {
+		timeout = defaultSaveTimeout
+	}
+	return 2*timeout + exitWaitMargin
 }
 
 // handleResendCommand asks a running poller to send everything again on an
@@ -415,6 +493,13 @@ func (c *bcConsumer) handleStopCommand(msg *nats.Msg) {
 	if p, ok := c.active[cmd.ConnectionID]; ok {
 		p.cancel()
 		delete(c.active, cmd.ConnectionID)
+		// The next start waits for it to exit (#769).
+		if p.done != nil {
+			if c.stopping == nil {
+				c.stopping = make(map[string]*poller)
+			}
+			c.stopping[cmd.ConnectionID] = p
+		}
 	}
 	c.mu.Unlock()
 }
@@ -524,8 +609,20 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		cursor = shiftDate(cursor, -watermark.lookbackDays)
 	}
 	// An incremental poll asks for the feed in cursor order (#733), so one
-	// that stops early can store how far it got. See stoppedPoll.
+	// that stops early can store how far it got. See stoppedPoll. It relies
+	// on that order only once the probe has confirmed it (orderConfirmed,
+	// #769).
 	ordered := cfg.Incremental && !cfg.unordered
+	confirmed, probed := false, false
+	if ordered {
+		if honoured, known := c.orderVerdict(tenantID, cfg); known && honoured {
+			confirmed = true
+		} else if known {
+			logger.Info("Business Central was found earlier not to keep $orderby on cursor_field; polling without it",
+				"cursor_field", cfg.effectiveCursorField(), "entity", cfg.effectiveEntity())
+			cfg.unordered, ordered = true, false
+		}
+	}
 	resending := cfg.resendAll
 	next := cfg.pollURL(cursor, ordered)
 	page, total := 0, 0
@@ -594,6 +691,17 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		if p.NextLink == "" {
 			break
 		}
+		// Only a poll with another page to read can stop with a resume point,
+		// so this is where the order is first needed: confirm it once.
+		if ordered && !confirmed && !probed {
+			probed = true
+			switch c.probeOrder(ctx, tenantID, cfg, tok, &watermark, logger) {
+			case orderHonoured:
+				confirmed = true
+			case orderIgnored:
+				cfg.unordered, ordered = true, false
+			}
+		}
 		// The link comes from the server and the next request carries the
 		// token: it stays on the configured origin (#686).
 		if next, err = cfg.followNext(next, p.NextLink); err != nil {
@@ -604,7 +712,7 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	if stopped != nil {
 		return c.stoppedPoll(ctx, connID, tenantID, cfg, stopState{
 			err: stopped, tracker: &watermark, ahead: ahead, from: from,
-			ordered: ordered, resending: resending, recovering: rec.active,
+			ordered: ordered && confirmed, resending: resending, recovering: rec.active,
 			fieldChanged: fieldChanged, fieldUnrecorded: fieldUnrecorded, records: total,
 		}, logger)
 	}
@@ -705,7 +813,8 @@ type stopState struct {
 	err     error // why it stopped
 	tracker *cursorTracker
 	ahead   map[string]string // future-dated records it read
-	// ordered: the poll asked for $orderby and BC accepted it.
+	// ordered: the poll asked for $orderby, BC accepted it, and the probe
+	// confirmed BC keeps it (#769).
 	ordered bool
 	// resending: a resend poll, which read from the start of the entity.
 	resending bool
@@ -805,6 +914,130 @@ func (c *bcConsumer) stoppedPoll(ctx context.Context, connID, tenantID string, c
 			"entity", cfg.effectiveEntity(), "records", s.records, "resume_from", resumeFrom, "error", s.err)
 	}
 	return s.err
+}
+
+// orderResult is what probeOrder found.
+type orderResult int
+
+const (
+	orderUnknown  orderResult = iota // the probe could not tell; nothing cached
+	orderHonoured                    // BC keeps $orderby on cursor_field
+	orderIgnored                     // it does not; poll without $orderby
+)
+
+// orderKey is what an order verdict is cached under: the tenant, the company
+// (the API root names the Entra tenant and environment), the entity and the
+// cursor_field. The tenant keeps a verdict from crossing tenants even when two
+// point at the same company.
+func orderKey(tenantID string, cfg *BCConfig) string {
+	return strings.Join([]string{tenantID, cfg.companyURL(), cfg.effectiveEntity(), cfg.effectiveCursorField()}, "\x00")
+}
+
+// orderVerdict is the cached probe result for cfg: honoured, and whether
+// there is one.
+func (c *bcConsumer) orderVerdict(tenantID string, cfg *BCConfig) (honoured, known bool) {
+	c.orderMu.Lock()
+	defer c.orderMu.Unlock()
+	honoured, known = c.orderChecks[orderKey(tenantID, cfg)]
+	return honoured, known
+}
+
+func (c *bcConsumer) setOrderVerdict(tenantID string, cfg *BCConfig, honoured bool) {
+	c.orderMu.Lock()
+	defer c.orderMu.Unlock()
+	if c.orderChecks == nil {
+		c.orderChecks = make(map[string]bool)
+	}
+	c.orderChecks[orderKey(tenantID, cfg)] = honoured
+}
+
+// probeOrder checks, once per process for each orderKey, that BC keeps
+// $orderby on cursor_field (#769). The poll's own check (cursorTracker
+// unordered) sees only the pages it read: a server that ignored the order but
+// happened to return those pages ascending would pass it, and a stopped poll
+// would then store a watermark past records on pages it never read.
+//
+// It asks for one record ascending and one descending, under the configured
+// filter and without the cursor clause, so the two are the smallest and the
+// largest value of the entity. The order holds when the smallest is strictly
+// below the largest and the last value the poll has read lies between them. A
+// server that ignores $orderby answers both with the same record. An entity
+// whose records all share one value fails too; a stopped poll has nothing to
+// resume past there anyway. The last value read is the one compared, not the
+// first: a record edited between page 1 and the probe moves up, which can
+// lift the smallest value above page 1's first but not above its last.
+//
+// A 400 to either request is a "no", as for the ordered first page. Any other
+// failure, or an answer without a readable value, leaves nothing cached: this
+// poll does not rely on the order and the next one probes again. The cost is
+// two requests per key per process, and only on polls with a second page.
+func (c *bcConsumer) probeOrder(ctx context.Context, tenantID string, cfg *BCConfig, tok *oauthcc.Client,
+	t *cursorTracker, logger *slog.Logger) orderResult {
+	field := cfg.effectiveCursorField()
+	ignored := func(msg string, args ...any) orderResult {
+		c.setOrderVerdict(tenantID, cfg, false)
+		logger.Warn("Business Central "+msg+"; polling without $orderby until the connector restarts. "+
+			"A poll that stops early (page cap, failed page) then does not advance the watermark",
+			append([]any{"cursor_field", field, "entity", cfg.effectiveEntity()}, args...)...)
+		return orderIgnored
+	}
+	if t.unordered {
+		return ignored("returned records out of cursor_field order although the poll asked for $orderby")
+	}
+	var ends [2]time.Time
+	var raws [2]string
+	for i, dir := range []string{"asc", "desc"} {
+		body, err := c.get(ctx, tok, cfg.probeURL(dir), 0)
+		if err != nil && isBadRequest(err) {
+			return ignored("refused $orderby "+dir+" on cursor_field", "error", err)
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				logger.Warn("Business Central order check failed; this poll does not rely on the order, the next one checks again",
+					"cursor_field", field, "error", err)
+			}
+			return orderUnknown
+		}
+		v, raw, ok := firstCursor(body, field)
+		if !ok {
+			logger.Warn("Business Central order check got no cursor_field value; this poll does not rely on the order, "+
+				"the next one checks again", "cursor_field", field, "order", dir)
+			return orderUnknown
+		}
+		ends[i], raws[i] = v, raw
+	}
+	lo, hi := ends[0], ends[1]
+	inside, lastRead := true, ""
+	if t.atLast != nil {
+		inside, lastRead = !t.last.Before(lo) && !t.last.After(hi), t.last.UTC().Format(time.RFC3339)
+	}
+	if !lo.Before(hi) || !inside {
+		return ignored("does not keep $orderby on cursor_field: the first record ascending and the first "+
+			"descending do not bracket what the poll read",
+			"first_ascending", raws[0], "first_descending", raws[1], "last_read", lastRead)
+	}
+	c.setOrderVerdict(tenantID, cfg, true)
+	logger.Debug("Business Central keeps $orderby on cursor_field", "cursor_field", field,
+		"first_ascending", raws[0], "first_descending", raws[1])
+	return orderHonoured
+}
+
+// firstCursor is the cursor_field value of the first record of an OData page.
+func firstCursor(body []byte, field string) (time.Time, string, bool) {
+	var p odataPage
+	if err := json.Unmarshal(body, &p); err != nil || len(p.Value) == 0 {
+		return time.Time{}, "", false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(p.Value[0], &fields); err != nil {
+		return time.Time{}, "", false
+	}
+	var s string
+	if raw, ok := fields[field]; !ok || json.Unmarshal(raw, &s) != nil {
+		return time.Time{}, "", false
+	}
+	v, _, ok := parseCursor(s)
+	return v, s, ok
 }
 
 // laterCursor reports whether cursor value a is later than b. Any value is
@@ -1611,6 +1844,17 @@ func (cfg *BCConfig) pollURL(cursor string, ordered bool) string {
 		u += "?" + strings.Join(q, "&")
 	}
 	return u
+}
+
+// probeURL asks for the first record of the entity under the configured
+// filter, ordered by cursor_field in direction dir (asc or desc). See
+// probeOrder.
+func (cfg *BCConfig) probeURL(dir string) string {
+	u := fmt.Sprintf("%s/%s?", cfg.companyURL(), cfg.effectiveEntity())
+	if cfg.Filter != "" {
+		u += "$filter=" + url.QueryEscape(cfg.Filter) + "&"
+	}
+	return u + "$orderby=" + url.QueryEscape(cfg.effectiveCursorField()+" "+dir) + "&$top=1"
 }
 
 // --- DB ---

@@ -479,6 +479,9 @@ func TestFetch_NextLinkStaysOnTheConfiguredOrigin(t *testing.T) {
 					fmt.Fprint(w, `{"access_token":"tok-secret","expires_in":3600}`)
 					return
 				}
+				if answerOrderProbe(w, r, "2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z") {
+					return
+				}
 				mu.Lock()
 				pages = append(pages, r.URL.RequestURI())
 				mu.Unlock()
