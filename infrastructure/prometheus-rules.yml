@@ -121,6 +121,56 @@ groups:
           summary: "TLS certificate {{ $labels.path }} expires in under 14 days"
           description: "Renew the certificate at {{ $labels.path }} before it expires."
 
+      # The Postgres server certificate (#729). cert-manager renews it 90 days
+      # before the end (kubernetes/postgresql/tls.yaml), so under 14 days left
+      # means renewal has failed for over two months, and once it expires
+      # every client on sslmode=verify-full fails. One severity at a time:
+      # warning from 14 days down to 3 (`< 14d >= 3d` filters twice),
+      # critical below 3 and after expiry.
+      #
+      # The metric is cert-manager's view of the Secret, scraped by the
+      # cert-manager PodMonitor (kubernetes/monitoring/podmonitors.yaml) with
+      # honorLabels, so `namespace` is the Certificate's and not
+      # cert-manager's own. Postgres serves the copy it made at its last
+      # start; a renewed Secret with an old copy is `postgres-tls.sh check`'s
+      # "OLDER certificate" line, not this alert. `max by` drops the pod and
+      # instance labels, so a replaced cert-manager pod keeps the alert and
+      # its `for`.
+      - alert: PostgresCertExpiring
+        expr: |
+          (max by (namespace, name) (certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database", name="postgresql-tls"}) - time())
+            < 14 * 86400 >= 3 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres server certificate expires in {{ $value | humanizeDuration }}"
+          description: "cert-manager has not renewed Certificate {{ $labels.name }} in {{ $labels.namespace }}; it should have at 90 days left. When it expires every client on sslmode=verify-full stops connecting. `kubectl describe certificate {{ $labels.name }} -n {{ $labels.namespace }}` says why; after it renews, restart Postgres so it serves the new one (infrastructure/kubernetes/postgresql/README.md)."
+      - alert: PostgresCertExpiring
+        expr: |
+          (max by (namespace, name) (certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database", name="postgresql-tls"}) - time())
+            < 3 * 86400
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres server certificate expires in {{ $value | humanizeDuration }}"
+          description: "cert-manager has not renewed Certificate {{ $labels.name }} in {{ $labels.namespace }}; it should have at 90 days left. When it expires every client on sslmode=verify-full stops connecting. `kubectl describe certificate {{ $labels.name }} -n {{ $labels.namespace }}` says why; after it renews, restart Postgres so it serves the new one (infrastructure/kubernetes/postgresql/README.md)."
+
+      # Without the series PostgresCertExpiring can never fire: the PodMonitor
+      # stopped matching (a cert-manager upgrade that renamed the labels or
+      # the port), or the Certificate is gone. An hour covers a morning start
+      # and a cert-manager pod being replaced; a parked cluster has no
+      # Prometheus to fire anything.
+      - alert: PostgresCertMetricsAbsent
+        expr: absent(certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database", name="postgresql-tls"})
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No expiry metric for the Postgres server certificate"
+          description: "Prometheus has had no certmanager_certificate_expiration_timestamp_seconds for {{ $labels.name }} in {{ $labels.namespace }} for an hour, so PostgresCertExpiring cannot fire. Check the podMonitor/vrsky-monitoring/cert-manager target in Prometheus, and that the cert-manager controller pod still has the labels and the http-metrics port that PodMonitor selects (docs/operator/monitoring.md)."
+
       # Management API 5xx ratio above 5% over 5 minutes.
       - alert: MgmtAPIErrorRate
         expr: |

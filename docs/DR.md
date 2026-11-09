@@ -405,8 +405,9 @@ need the **same `ENCRYPTION_KEY`** as when the dump was taken.
    certificate from `infrastructure/kubernetes/postgresql/tls.yaml` (the
    StatefulSet manifest mounts it) and the strings keep
    `sslmode=verify-full`; if it is somewhere else, set the `sslmode` that
-   server supports (`infrastructure/azure/postgres-tls.sh urls` only knows
-   `verify-full` and `disable`). Then check: log in, list connections, open a connection's credentials (they
+   server supports (`infrastructure/azure/postgres-tls.sh urls` knows
+   `verify-full`, `require` and `disable`, and refuses `disable` while the
+   in-cluster Postgres turns plain connections away, #729). Then check: log in, list connections, open a connection's credentials (they
    decrypt only with the matching `ENCRYPTION_KEY`).
 
 Clean up a rehearsal with

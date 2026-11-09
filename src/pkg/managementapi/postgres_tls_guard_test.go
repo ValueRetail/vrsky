@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -395,17 +396,15 @@ func TestPostgresTLS_ProductionStringsUseVerifyFull(t *testing.T) {
 }
 
 // TestPostgresTLS_NoClientSaysSSLModeDisable: production manifests and
-// scripts must not turn TLS off. The two dev example Secrets are the
-// documented exception (the k3d path does not distribute the CA), and
-// postgres-tls.sh names the word because `urls disable` is the rollback.
+// scripts must not turn TLS off, and since #729 Postgres refuses a client
+// that does, the k3d dev examples included (they say sslmode=require).
+// postgres-tls.sh names the word because `urls disable` exists, guarded.
 func TestPostgresTLS_NoClientSaysSSLModeDisable(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	exceptions := map[string]string{
-		"infrastructure/kubernetes/postgresql/secret.example.yaml":     "dev placeholder; Postgres accepts plain connections as well",
-		"infrastructure/kubernetes/management-api/secret.example.yaml": "dev placeholder; Postgres accepts plain connections as well",
-		"infrastructure/azure/postgres-tls.sh":                         "`urls disable` is the rollback",
-		"infrastructure/kubernetes/postgresql/README.md":               "describes the rollback",
-		"infrastructure/kubernetes/management-api/README.md":           "a local test database for MGMT_TEST_DB_URL, not a deployed client",
+		"infrastructure/azure/postgres-tls.sh":               "`urls disable`, refused while Postgres is hostssl",
+		"infrastructure/kubernetes/postgresql/README.md":     "describes the rollback",
+		"infrastructure/kubernetes/management-api/README.md": "a local test database for MGMT_TEST_DB_URL, not a deployed client",
 	}
 	targets := []string{"infrastructure/kubernetes", "infrastructure/azure", "docs/operator/backup.md", "docs/operator/encryption-at-rest.md"}
 	var scanned int
@@ -489,6 +488,9 @@ func TestPostgresTLS_ScriptRewritesOnlyTheSSLParameters(t *testing.T) {
 			base + "?application_name=a&connect_timeout=5&sslmode=verify-full&sslrootcert=" + ca},
 		{"already verify-full is stable", base + "?sslmode=verify-full&sslrootcert=" + ca, "verify-full", base + "?sslmode=verify-full&sslrootcert=" + ca},
 		{"rollback drops the CA", base + "?sslmode=verify-full&sslrootcert=" + ca, "disable", base + "?sslmode=disable"},
+		// With a root certificate libpq and lib/pq treat require as verify-ca,
+		// so the TLS-without-checking rollback must drop it.
+		{"require drops the CA", base + "?application_name=a&sslmode=verify-full&sslrootcert=" + ca, "require", base + "?application_name=a&sslmode=require"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -532,5 +534,192 @@ func TestPostgresTLS_ScriptNeverPrintsAConnectionString(t *testing.T) {
 	}
 	if regexp.MustCompile(`kubectl\s+patch\s+secret[^\n]*\s-p\s`).MatchString(src) {
 		t.Error("postgres-tls.sh patches a Secret with -p, which puts the value on the command line")
+	}
+}
+
+// pgHBAConfigMap is the ConfigMap statefulset.yaml carries the server's
+// pg_hba.conf in (#729).
+const pgHBAConfigMap = "postgres-hba"
+
+// TestPostgresTLS_RefusesPlainConnections: Postgres reads pg_hba.conf from a
+// ConfigMap in the manifest (hba_file), not from the data volume, so a
+// snapshot restore or a new volume refuses plain connections too (#729). The
+// file has to keep the pod's own way in (the Unix socket the probes, the
+// image's first-start server and `kubectl exec psql` use) and make every
+// other address use TLS.
+func TestPostgresTLS_RefusesPlainConnections(t *testing.T) {
+	docs := readYAMLDocs(t, filepath.Join(k8sRoot(), "postgresql", "statefulset.yaml"))
+	sts := findDoc(t, docs, "StatefulSet", "postgresql")
+	cm := findDoc(t, docs, "ConfigMap", pgHBAConfigMap)
+
+	// One `kubectl apply -f statefulset.yaml` must create the ConfigMap before
+	// the pod that cannot start without it.
+	cmAt, stsAt := -1, -1
+	for i, d := range docs {
+		switch docName(d) {
+		case "ConfigMap/" + pgHBAConfigMap:
+			cmAt = i
+		case "StatefulSet/postgresql":
+			stsAt = i
+		}
+	}
+	if cmAt > stsAt {
+		t.Errorf("ConfigMap %s comes after the StatefulSet in statefulset.yaml; apply would start the pod before its pg_hba.conf exists", pgHBAConfigMap)
+	}
+	if a, b := str(at(cm, "metadata", "namespace")), str(at(sts, "metadata", "namespace")); a != b {
+		t.Errorf("ConfigMap %s is in namespace %q, the StatefulSet in %q", pgHBAConfigMap, a, b)
+	}
+
+	spec := podSpec(sts)
+	main, _ := at(spec, "containers", 0).(map[string]any)
+	args := list(main["args"])
+	hbaFile := ""
+	for i := 0; i+1 < len(args); i++ {
+		if str(args[i]) == "-c" {
+			if k, v, _ := strings.Cut(str(args[i+1]), "="); k == "hba_file" {
+				hbaFile = v
+			}
+		}
+	}
+	if hbaFile == "" {
+		t.Fatalf("postgres is not started with -c hba_file=…; it would read $PGDATA/pg_hba.conf from the volume (args: %v)", args)
+	}
+
+	// The file has to come from that ConfigMap, through a directory mount: a
+	// subPath file never changes after the pod starts, and the documented
+	// emergency rollback edits the ConfigMap and reloads.
+	key := ""
+	for _, m := range list(main["volumeMounts"]) {
+		mp := str(at(m, "mountPath"))
+		if !mountCovers(mp, hbaFile) {
+			continue
+		}
+		if at(m, "subPath") != nil {
+			t.Errorf("the mount at %s uses subPath; an edit of the ConfigMap would never reach the pod", mp)
+		}
+		var vol map[string]any
+		for _, v := range list(spec["volumes"]) {
+			if vm, _ := v.(map[string]any); str(vm["name"]) == str(at(m, "name")) {
+				vol = vm
+			}
+		}
+		if got := str(at(vol, "configMap", "name")); got != pgHBAConfigMap {
+			t.Fatalf("%s is mounted from %v, want ConfigMap %s", hbaFile, vol, pgHBAConfigMap)
+		}
+		if at(vol, "configMap", "optional") == true {
+			t.Errorf("the %s volume is optional; without the file Postgres does not start, so the pod should wait for it", pgHBAConfigMap)
+		}
+		key = strings.TrimPrefix(strings.TrimPrefix(hbaFile, strings.TrimSuffix(mp, "/")), "/")
+		for _, it := range list(at(vol, "configMap", "items")) {
+			if str(at(it, "path")) == key {
+				key = str(at(it, "key"))
+			}
+		}
+	}
+	if key == "" {
+		t.Fatalf("%s is not under any volumeMount of the postgresql container", hbaFile)
+	}
+	hba := str(at(cm, "data", key))
+	if hba == "" {
+		t.Fatalf("ConfigMap %s has no data key %q, the file hba_file names", pgHBAConfigMap, key)
+	}
+	for _, p := range hbaProblems(hba) {
+		t.Error(p)
+	}
+
+	// The probes must reach Postgres the way the local line lets them: over
+	// the socket, so no -h.
+	for _, probe := range []string{"livenessProbe", "readinessProbe"} {
+		cmd := strings.Join(strings.Fields(strings.Join(func() []string {
+			var out []string
+			for _, c := range list(at(main, probe, "exec", "command")) {
+				out = append(out, str(c))
+			}
+			return out
+		}(), " ")), " ")
+		if !strings.Contains(cmd, "pg_isready") {
+			t.Errorf("%s is %q, not pg_isready", probe, cmd)
+		}
+		if strings.Contains(cmd, " -h") || strings.Contains(cmd, "--host") {
+			t.Errorf("%s connects over TCP (%q); pg_hba.conf only trusts the socket and loopback", probe, cmd)
+		}
+	}
+}
+
+// hbaProblems: what is wrong with a pg_hba.conf for this server. Only the pod
+// itself (socket, loopback) may connect without TLS or without a password.
+func hbaProblems(hba string) []string {
+	var probs []string
+	loopback := map[string]bool{"127.0.0.1/32": true, "::1/128": true}
+	localAll, remoteTLS := false, false
+	for n, line := range strings.Split(hba, "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		where := fmt.Sprintf("pg_hba.conf line %d (%q)", n+1, strings.TrimSpace(line))
+		switch f[0] {
+		case "local":
+			if len(f) < 4 {
+				probs = append(probs, where+": too few fields")
+				continue
+			}
+			if f[1] == "all" && f[2] == "all" {
+				localAll = true
+			}
+		case "host", "hostssl", "hostnossl", "hostgssenc":
+			if len(f) < 5 {
+				probs = append(probs, where+": too few fields (an address with a separate netmask is not used here)")
+				continue
+			}
+			addr, method := f[3], f[4]
+			if loopback[addr] {
+				continue
+			}
+			if f[0] != "hostssl" {
+				probs = append(probs, where+": a client from another pod may connect without TLS; use hostssl")
+			}
+			if method == "trust" {
+				probs = append(probs, where+": trust for a non-loopback address lets any pod in without a password")
+			}
+			if f[0] == "hostssl" && f[1] == "all" && f[2] == "all" && addr == "all" && method == "scram-sha-256" {
+				remoteTLS = true
+			}
+		default:
+			probs = append(probs, where+": record type "+f[0]+"; this guard knows local and host* lines only (an include would hide rules from it)")
+		}
+	}
+	if !localAll {
+		probs = append(probs, "no `local all all` line: the probes, the image's first-start server and kubectl exec psql use the socket and would be refused")
+	}
+	if !remoteTLS {
+		probs = append(probs, "no `hostssl all all all scram-sha-256` line: no client from another pod could connect")
+	}
+	return probs
+}
+
+// TestPostgresTLS_HBACheckCatchesPlainRules: hbaProblems itself, on files it
+// must reject and one it must accept.
+func TestPostgresTLS_HBACheckCatchesPlainRules(t *testing.T) {
+	good := "local all all trust\nhost all all 127.0.0.1/32 trust\nhostssl all all all scram-sha-256\n"
+	if p := hbaProblems(good); len(p) > 0 {
+		t.Errorf("rejected a good file: %v", p)
+	}
+	for name, hba := range map[string]string{
+		"host for all addresses":   "local all all trust\nhost all all all scram-sha-256\n",
+		"hostnossl beside hostssl": good + "hostnossl all all 10.0.0.0/8 scram-sha-256\n",
+		"trust over TLS":           "local all all trust\nhostssl all all all trust\n",
+		"no local line":            "hostssl all all all scram-sha-256\n",
+		"an include":               good + "include_dir conf.d\n",
+		// Both let plaintext in on a live server (review of #787).
+		"loopback with a wide mask": good + "host all all 127.0.0.1/0 trust\n",
+		"hostnogssenc":              good + "hostnogssenc all all all trust\n",
+	} {
+		if len(hbaProblems(hba)) == 0 {
+			t.Errorf("%s: accepted\n%s", name, hba)
+		}
 	}
 }

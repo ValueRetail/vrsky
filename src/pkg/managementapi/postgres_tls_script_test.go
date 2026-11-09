@@ -59,7 +59,8 @@ case "$1" in
   exec)
     case "$*" in
       *tls.crt*) cat "$STUB_CA_PEM" ;;
-      *) echo on ;;
+      *pg_hba_file_rules*) echo "${STUB_PLAIN_RULES:-0}" ;;
+      *) echo "${STUB_SSL:-on}" ;;
     esac ;;
   apply | diff) cat > /dev/null ;;
   logs) echo "ssl=true TLSv1.3" ;;
@@ -207,7 +208,7 @@ func writes(calls []string) []string {
 func TestPostgresTLS_WritesNeedConfirm(t *testing.T) {
 	s := newKubeStub(t, 31)
 	for _, args := range [][]string{
-		{"server"}, {"ca-sync"}, {"clients"}, {"urls", "verify-full"}, {"urls", "disable"}, {"canary"}, {"restart"},
+		{"server"}, {"ca-sync"}, {"clients"}, {"urls", "verify-full"}, {"urls", "require"}, {"urls", "disable"}, {"canary"}, {"restart"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			code, out, errOut := s.run(t, nil, args...)
@@ -426,5 +427,52 @@ func TestPostgresTLS_CheckReportsADifferentCertificate(t *testing.T) {
 	_, stdout, _ := s.run(t, []string{"STUB_CA_PEM=" + other}, "check")
 	if !strings.Contains(stdout, "OLDER certificate") {
 		t.Fatalf("check did not notice a different served certificate:\n%s", stdout)
+	}
+}
+
+// Postgres refuses plain connections since #729 (hostssl in the ConfigMap
+// postgres-hba). `urls disable` would then restart every client into a
+// refusal, so it stops before touching a Secret while no pg_hba.conf rule
+// lets a remote client in without TLS; `urls require` is the rollback that
+// still works.
+func TestPostgresTLS_URLsDisableRefusedWhileHostSSL(t *testing.T) {
+	s := newKubeStub(t, 31)
+	code, _, errOut := s.run(t, []string{"CONFIRM=1"}, "urls", "disable")
+	if code == 0 {
+		t.Fatal("urls disable succeeded while Postgres refuses plain connections")
+	}
+	if !strings.Contains(errOut, "urls require") {
+		t.Errorf("the refusal does not point at `urls require`: %q", errOut)
+	}
+	for _, c := range s.calls(t) {
+		if strings.HasPrefix(c, "patch") || strings.HasPrefix(c, "get secret") {
+			t.Errorf("urls disable read or patched a Secret before refusing: %s", c)
+		}
+	}
+
+	// Once a plain rule is back (the documented emergency edit), it runs.
+	code, _, errOut = s.run(t, []string{"CONFIRM=1", "STUB_PLAIN_RULES=1"}, "urls", "disable")
+	if code != 0 {
+		t.Errorf("urls disable with a plain rule in pg_hba.conf exited %d: %s", code, errOut)
+	}
+
+	// require is not gated on pg_hba.conf.
+	code, _, errOut = s.run(t, []string{"CONFIRM=1"}, "urls", "require")
+	if code != 0 {
+		t.Errorf("urls require exited %d: %s", code, errOut)
+	}
+
+	// But it needs TLS on the server, like verify-full.
+	code, _, errOut = s.run(t, []string{"CONFIRM=1", "STUB_SSL=off"}, "urls", "require")
+	if code == 0 {
+		t.Error("urls require succeeded while Postgres has ssl off")
+	}
+	if !strings.Contains(errOut, "ssl on") {
+		t.Errorf("the refusal does not say ssl is off: %q", errOut)
+	}
+	for _, c := range s.calls(t) {
+		if strings.HasPrefix(c, "patch") || strings.HasPrefix(c, "get secret") {
+			t.Errorf("urls require read or patched a Secret with ssl off: %s", c)
+		}
 	}
 }

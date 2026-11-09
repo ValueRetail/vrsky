@@ -133,6 +133,171 @@ tests:
               summary: "TLS certificate /certs/tls.crt expires in under 14 days"
               description: "Renew the certificate at /certs/tls.crt before it expires."
 
+  # PostgresCertExpiring / PostgresCertMetricsAbsent (#729). The series carry
+  # the labels a scrape through the cert-manager PodMonitor gives them
+  # (honorLabels: namespace is the Certificate's); the alerts keep only
+  # namespace and name.
+  #
+  # (a) Seven days left: pending for the first hour, then a warning only.
+  - name: postgres-cert-expiring-warning
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '604800x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PostgresCertExpiring
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: PostgresCertExpiring
+        exp_alerts:
+          - exp_labels:
+              alertname: PostgresCertExpiring
+              severity: warning
+              namespace: vrsky-database
+              name: postgresql-tls
+            exp_annotations:
+              summary: "Postgres server certificate expires in 6d 22h 30m 0s"
+              description: "cert-manager has not renewed Certificate postgresql-tls in vrsky-database; it should have at 90 days left. When it expires every client on sslmode=verify-full stops connecting. `kubectl describe certificate postgresql-tls -n vrsky-database` says why; after it renews, restart Postgres so it serves the new one (infrastructure/kubernetes/postgresql/README.md)."
+      - eval_time: 90m
+        alertname: PostgresCertMetricsAbsent
+        exp_alerts: []
+
+  # (b) Two days left: critical after ten minutes, and no warning beside it.
+  - name: postgres-cert-expiring-critical
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '172800x60'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PostgresCertExpiring
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: PostgresCertExpiring
+        exp_alerts:
+          - exp_labels:
+              alertname: PostgresCertExpiring
+              severity: critical
+              namespace: vrsky-database
+              name: postgresql-tls
+            exp_annotations:
+              summary: "Postgres server certificate expires in 1d 23h 40m 0s"
+              description: "cert-manager has not renewed Certificate postgresql-tls in vrsky-database; it should have at 90 days left. When it expires every client on sslmode=verify-full stops connecting. `kubectl describe certificate postgresql-tls -n vrsky-database` says why; after it renews, restart Postgres so it serves the new one (infrastructure/kubernetes/postgresql/README.md)."
+
+  # (c) Three days and two hours left: a warning, which ends when fewer than
+  #     three days are left (at 120m); the critical one fires ten minutes
+  #     after that.
+  - name: postgres-cert-expiring-escalates
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '266400x200'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: PostgresCertExpiring
+        exp_alerts:
+          - exp_labels:
+              alertname: PostgresCertExpiring
+              severity: warning
+              namespace: vrsky-database
+              name: postgresql-tls
+            exp_annotations:
+              summary: "Postgres server certificate expires in 3d 0h 50m 0s"
+              description: "cert-manager has not renewed Certificate postgresql-tls in vrsky-database; it should have at 90 days left. When it expires every client on sslmode=verify-full stops connecting. `kubectl describe certificate postgresql-tls -n vrsky-database` says why; after it renews, restart Postgres so it serves the new one (infrastructure/kubernetes/postgresql/README.md)."
+      - eval_time: 125m
+        alertname: PostgresCertExpiring
+        exp_alerts: []
+      - eval_time: 135m
+        alertname: PostgresCertExpiring
+        exp_alerts:
+          - exp_labels:
+              alertname: PostgresCertExpiring
+              severity: critical
+              namespace: vrsky-database
+              name: postgresql-tls
+            exp_annotations:
+              summary: "Postgres server certificate expires in 2d 23h 45m 0s"
+              description: "cert-manager has not renewed Certificate postgresql-tls in vrsky-database; it should have at 90 days left. When it expires every client on sslmode=verify-full stops connecting. `kubectl describe certificate postgresql-tls -n vrsky-database` says why; after it renews, restart Postgres so it serves the new one (infrastructure/kubernetes/postgresql/README.md)."
+
+  # (d) Quiet: the Postgres certificate has 200 days left; other
+  #     certificates in the same namespace and elsewhere, and one with the
+  #     same name in another namespace, expire tomorrow and are not this
+  #     alert's.
+  - name: postgres-cert-quiet
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '17280000x150'
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-ui",name="vrsky-ui-tls",issuer_name="letsencrypt-prod",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '86400x150'
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-ca",issuer_name="postgresql-selfsigned",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '86400x150'
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-staging",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '86400x150'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: PostgresCertExpiring
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: PostgresCertMetricsAbsent
+        exp_alerts: []
+
+  # (e) The cert-manager pod is replaced at 41m: the new pod's series has
+  #     other pod and instance labels. The alert keeps its `for` from t=0 and
+  #     fires at 70m; without `max by` it would wait until 101m.
+  - name: postgres-cert-pod-replaced
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '604800x40 stale'
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-b",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.1.7:9402"}'
+        values: '_x41 604800x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: PostgresCertExpiring
+        exp_alerts:
+          - exp_labels:
+              alertname: PostgresCertExpiring
+              severity: warning
+              namespace: vrsky-database
+              name: postgresql-tls
+            exp_annotations:
+              summary: "Postgres server certificate expires in 6d 22h 50m 0s"
+              description: "cert-manager has not renewed Certificate postgresql-tls in vrsky-database; it should have at 90 days left. When it expires every client on sslmode=verify-full stops connecting. `kubectl describe certificate postgresql-tls -n vrsky-database` says why; after it renews, restart Postgres so it serves the new one (infrastructure/kubernetes/postgresql/README.md)."
+      - eval_time: 70m
+        alertname: PostgresCertMetricsAbsent
+        exp_alerts: []
+
+  # (f) cert-manager is scraped, but there is no series for the Postgres
+  #     certificate (the Certificate is gone, or a PodMonitor change dropped
+  #     it): absent fires after an hour and clears once the series is back.
+  - name: postgres-cert-metrics-absent
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-ui",name="vrsky-ui-tls",issuer_name="letsencrypt-prod",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '17280000x120'
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database",name="postgresql-tls",issuer_name="postgresql-ca",issuer_kind="Issuer",issuer_group="cert-manager.io",job="vrsky-monitoring/cert-manager",pod="cert-manager-5d7f-a",container="cert-manager-controller",endpoint="http-metrics",instance="10.244.0.20:9402"}'
+        values: '_x80 31536000x40'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: PostgresCertMetricsAbsent
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: PostgresCertMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              alertname: PostgresCertMetricsAbsent
+              severity: warning
+              namespace: vrsky-database
+              name: postgresql-tls
+            exp_annotations:
+              summary: "No expiry metric for the Postgres server certificate"
+              description: "Prometheus has had no certmanager_certificate_expiration_timestamp_seconds for postgresql-tls in vrsky-database for an hour, so PostgresCertExpiring cannot fire. Check the podMonitor/vrsky-monitoring/cert-manager target in Prometheus, and that the cert-manager controller pod still has the labels and the http-metrics port that PodMonitor selects (docs/operator/monitoring.md)."
+      - eval_time: 90m
+        alertname: PostgresCertMetricsAbsent
+        exp_alerts: []
+
   # 5. MgmtAPIErrorRate — half of all requests are 500s (50% > 5%).
   - name: mgmt-api-error-rate
     interval: 1m

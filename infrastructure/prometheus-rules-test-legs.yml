@@ -20,6 +20,12 @@
   - dlq-growing
   - jetstream-lag-high
   - cert-expiry-soon
+  - postgres-cert-expiring-warning
+  - postgres-cert-expiring-critical
+  - postgres-cert-expiring-escalates
+  - postgres-cert-quiet
+  - postgres-cert-pod-replaced
+  - postgres-cert-metrics-absent
   - mgmt-api-error-rate
   - disk-usage-high
   - connection-in-error

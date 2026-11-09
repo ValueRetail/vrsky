@@ -34,6 +34,46 @@ cluster raises nothing. The webhook and the Teams target are not
 exercised; `/readyz` in the smoke check and `MgmtAPIErrorRate` cover the
 API.
 
+## Postgres server certificate
+
+Every service connects to Postgres with `sslmode=verify-full`, so an expired
+server certificate stops all of them at once (#453). cert-manager renews it 90
+days before the end (`infrastructure/kubernetes/postgresql/tls.yaml`). Two
+alerts watch that it does (#729):
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `PostgresCertExpiring` | under 14 days left, for an hour | warning |
+| `PostgresCertExpiring` | under 3 days left (or expired), for 10 minutes; replaces the warning | critical |
+| `PostgresCertMetricsAbsent` | no expiry metric for the certificate for an hour, so the alert above cannot fire | warning |
+
+They read `certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database", name="postgresql-tls"}`,
+which the PodMonitor `cert-manager` (`infrastructure/kubernetes/monitoring/podmonitors.yaml`)
+scrapes from the cert-manager controller (port `http-metrics`, 9402). It uses
+`honorLabels`, so `namespace` is the Certificate's; without it the label would
+arrive as `exported_namespace`. The labels and port are the ones the v1.13.3
+chart that `install-cert-manager.sh` pins renders; `TestCertManagerPodMonitor`
+fails when that version changes, as a reminder to check them.
+
+The metric is cert-manager's view of the Secret. Postgres serves the copy it
+made when it last started, so a renewed Secret with a Postgres that has not
+restarted since is not this alert's to catch: `postgres-tls.sh check` says
+"Postgres has an OLDER certificate" and a restart fixes it. Production
+restarts it at every cluster start.
+
+When `PostgresCertExpiring` fires: `kubectl describe certificate postgresql-tls -n vrsky-database`
+and the cert-manager logs say why the renewal fails. After it renews, restart
+Postgres (`kubectl rollout restart statefulset/postgresql -n vrsky-database`,
+a minute or more without a database).
+
+When `PostgresCertMetricsAbsent` fires: in Prometheus (Status → Targets) the
+`podMonitor/vrsky-monitoring/cert-manager` target should be up. If there is
+none, compare the controller pod's labels and ports with the PodMonitor:
+`kubectl get pods -n cert-manager -l app.kubernetes.io/component=controller --show-labels`.
+
+Both are in the `vrsky-platform` group, so while one fires the deploy's smoke
+check fails too, like `CertExpirySoon`.
+
 ## Traces (Tempo)
 
 Each message is a trace spanning consumer → producer (and the external call).

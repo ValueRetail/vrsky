@@ -91,6 +91,8 @@ and rollout record: [plans/issue-453-postgres-tls.md](../../../plans/issue-453-p
 | --- | --- |
 | Private CA and server certificate (cert-manager `Issuer`s and `Certificate`s in `vrsky-database`) | `tls.yaml` |
 | `ssl = on`, certificate and key copied by an init container into memory with mode 0600 for uid 70 | `statefulset.yaml` |
+| `pg_hba.conf` that refuses plain connections from other pods (ConfigMap `postgres-hba`, read through `hba_file`, #729) | `statefulset.yaml`, the first document |
+| Expiry alerts on the server certificate (`PostgresCertExpiring`, `PostgresCertMetricsAbsent`) and the cert-manager scrape they need | `infrastructure/prometheus-rules.yml`, `monitoring/podmonitors.yaml` ([monitoring](../../../docs/operator/monitoring.md#postgres-server-certificate)) |
 | The public CA, as ConfigMap `postgres-ca` in `vrsky-platform` and `vrsky-database`, mounted at `/etc/vrsky/postgres-ca` by every client | `infrastructure/azure/postgres-tls.sh ca-sync`; the mounts are in each client's manifest |
 | Connection strings: `?sslmode=verify-full&sslrootcert=/etc/vrsky/postgres-ca/ca.crt` | built by `infrastructure/azure/rotate-secrets.sh`, changed in place by `postgres-tls.sh urls` |
 
@@ -120,8 +122,10 @@ Why these choices:
   certificate") and a `kubectl rollout restart statefulset/postgresql -n
   vrsky-database` fixes it (a minute or more without a database: the disk
   detaches and re-attaches).
-- **Plain connections still work** (`pg_hba.conf` is the image's default, a
-  `host` rule), which is what makes the rollout safe in any order.
+- **Plain connections were accepted during the rollout**, which made it safe
+  in any order. Once every client was on TLS they were refused by hand
+  (2026-11-03), and since #729 by the manifest: see
+  [Plain connections are refused](#plain-connections-are-refused-729).
 
 ### Rolling out (production)
 
@@ -161,11 +165,14 @@ psql "host=localhost port=5432 user=vrsky dbname=vrsky sslmode=verify-full sslro
 
 ### Rollback
 
-Set the strings back and restart. Nothing else needs undoing: the server
-accepts both.
+A client that cannot verify the server (a CA or host name problem): switch
+the strings to TLS without the check and restart. `urls disable` refuses
+while the server turns plain connections away, because every client would
+restart into a refusal; allow plain connections first (below) if you really
+need it.
 
 ```bash
-CONFIRM=1 infrastructure/azure/postgres-tls.sh urls disable
+CONFIRM=1 infrastructure/azure/postgres-tls.sh urls require
 CONFIRM=1 infrastructure/azure/postgres-tls.sh restart
 ```
 
@@ -180,24 +187,97 @@ If you want it anyway, revert the StatefulSet change in git and run
 `postgres-tls.sh server` from that commit: it applies whatever the file says
 (with the production storage class) and restarts Postgres.
 
-### Optional last step: refuse plain connections
+### Plain connections are refused (#729)
 
-Once `check` shows every connection with `ssl=true` for a few days, make
-Postgres turn away the rest. The image's last `pg_hba.conf` rule is
-`host all all all scram-sha-256`; making it `hostssl` keeps the in-pod
-`trust` rules (probes, `kubectl exec psql`) and refuses a client from another
-pod that does not use TLS. This edits the file on the volume, so it is not
-in the manifests (backlog item 156 would move it there):
+Postgres reads its `pg_hba.conf` from the ConfigMap `postgres-hba` (the first
+document in `statefulset.yaml`, started with `-c hba_file=/etc/postgresql/hba/pg_hba.conf`),
+not from the data volume. The file is the image's own with the last rule made
+`hostssl`:
+
+- `local` and loopback (`127.0.0.1`, `::1`) stay `trust`: the probes
+  (`pg_isready` over the socket), the image's first-start server, `kubectl exec
+  psql` and `kubectl port-forward` use them.
+- Everything else is `hostssl all all all scram-sha-256`: TLS and the password.
+  A plain connection gets `no pg_hba.conf entry for host …, no encryption`.
+
+Before #729 the same rule was a hand edit of `$PGDATA/pg_hba.conf` (2026-11-03),
+which a snapshot restore or a new volume would not have had. The file on the
+volume is still there and unused; it is what a rollback falls back to.
+
+`TestPostgresTLS_RefusesPlainConnections` (`src/pkg/managementapi`) fails if a
+rule lets another pod in without TLS or without a password, if the socket line
+goes, or if the file stops coming from the ConfigMap.
+
+**Local k3d:** the dev strings in `secret.example.yaml` (here and in
+`management-api/`) say `sslmode=require`. A git-ignored `secret.yaml` copied
+from an older example still says `sslmode=disable`, and `deploy-vrsky-platform.sh`
+prefers it, so after this change every service on k3d is refused. Change
+`sslmode=disable` to `sslmode=require` in both `secret.yaml` files (or delete
+them to fall back to the examples) and deploy again.
+
+#### Applying it (production, once)
+
+The deploy job never applies this directory. Production already refuses plain
+connections through the hand edit, so nothing changes for the clients; the
+StatefulSet change restarts Postgres (a minute or more without a database while
+the disk moves).
 
 ```bash
-kubectl exec -n vrsky-database postgresql-0 -c postgresql -- sh -c \
-  "sed -i 's/^host all all all /hostssl all all all /' \$PGDATA/pg_hba.conf && psql -U vrsky -d vrsky -c 'SELECT pg_reload_conf()'"
-kubectl exec -n vrsky-database postgresql-0 -c postgresql -- psql -U vrsky -d vrsky -tAc \
-  "SELECT type, address FROM pg_hba_file_rules WHERE address = 'all'"   # hostssl
+# 1. Every client on TLS: no "ssl=false" line under the connection counts.
+infrastructure/azure/postgres-tls.sh check
+
+# 2. What would change: the new ConfigMap postgres-hba, and in the StatefulSet
+#    the hba_file argument and the hba volume. Nothing else.
+DRY_RUN=1 infrastructure/azure/postgres-tls.sh server
+
+# 2b. The rules the volume's file holds today (check prints the same dump).
+#     Expect the ConfigMap's lines: local and 127.0.0.1/::1 trust, then
+#     hostssl all all all scram-sha-256. Anything else on the volume (an extra
+#     host rule, another user or address) goes away with step 3; stop and
+#     add it to the ConfigMap first if it is still needed.
+kubectl exec -n vrsky-database postgresql-0 -c postgresql -- psql -U vrsky -d vrsky -c \
+  'SELECT type, database, user_name, address, netmask, auth_method FROM pg_hba_file_rules'
+
+# 3. Apply and wait for postgresql-0. It ends with ssl, hba_file and the number
+#    of rules that let another pod in without TLS (want: on,
+#    /etc/postgresql/hba/pg_hba.conf, 0).
+CONFIRM=1 infrastructure/azure/postgres-tls.sh server
+
+# 4. Clients back, all on TLS; the same three lines under "server".
+infrastructure/azure/postgres-tls.sh check
+
+# 5. A plain connection from another pod is refused. No password needed: the
+#    refusal comes before authentication. Expect "no pg_hba.conf entry … no
+#    encryption".
+kubectl run pg-plain-test -n vrsky-platform --rm -i --restart=Never --image=postgres:18-alpine -- \
+  psql "host=postgresql.vrsky-database.svc.cluster.local user=vrsky dbname=vrsky sslmode=disable connect_timeout=5" -c 'SELECT 1'
 ```
 
-Undo with the opposite `sed` (`hostssl` to `host`) and another reload. A
-snapshot restore or a new empty volume starts with `host` again.
+#### Undoing it
+
+- **A client has to connect without TLS again (emergency).** No restart: edit
+  the last line of the ConfigMap from `hostssl` to `host`, wait until the pod
+  sees it (a minute or two; the volume is not a `subPath`), reload.
+
+  ```bash
+  kubectl -n vrsky-database edit configmap postgres-hba
+  kubectl exec -n vrsky-database postgresql-0 -c postgresql -- tail -1 /etc/postgresql/hba/pg_hba.conf
+  kubectl exec -n vrsky-database postgresql-0 -c postgresql -- psql -U vrsky -d vrsky -tAc 'SELECT pg_reload_conf()'
+  ```
+
+  The next `postgres-tls.sh server` puts the repo's file back. A file Postgres
+  cannot parse is ignored on a reload (the log says `pg_hba.conf was not
+  reloaded`), but stops Postgres at its next start, so check
+  `SELECT * FROM pg_hba_file_rules WHERE error IS NOT NULL` after an edit.
+  While a `host` line for another address is there, `postgres-tls.sh urls
+  disable` still refuses: it counts any rule that may take plaintext, and one
+  narrow address is not a reason to move every client off TLS.
+- **Postgres does not come back after step 3.**
+  `kubectl -n vrsky-database rollout undo statefulset/postgresql`, then
+  `kubectl -n vrsky-database delete pod postgresql-0` (a rolling update does
+  not replace a pod that never became Ready). Without `hba_file` Postgres reads
+  `$PGDATA/pg_hba.conf` again, which in production says `hostssl` since the
+  hand edit, so clients see no difference. The ConfigMap can stay.
 
 ## Components
 
@@ -208,7 +288,7 @@ snapshot restore or a new empty volume starts with `host` again.
 3. **configmap.yaml** - PostgreSQL environment configuration
 4. **init-schema.sql** - Complete VRSky database schema
 5. **init-configmap.yaml** - Schema initialization script
-6. **statefulset.yaml** - PostgreSQL StatefulSet
+6. **statefulset.yaml** - the ConfigMap `postgres-hba` (`pg_hba.conf`, #729) and the PostgreSQL StatefulSet
 7. **service.yaml** - ClusterIP service
 8. **tls.yaml** - cert-manager `Issuer`s and `Certificate`s for the server's TLS (#453)
 

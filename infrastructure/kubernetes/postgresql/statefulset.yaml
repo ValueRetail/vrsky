@@ -12,11 +12,48 @@
 # nothing deploys today; moving to it needs its own backup (see README.md).
 #
 # TLS (#453): ssl = on, with the certificate cert-manager issues in tls.yaml.
-# Postgres still accepts plain connections as well (pg_hba.conf is unchanged),
-# so a client on sslmode=disable keeps working while the clients move over;
-# README.md has the order and the later step that refuses plain ones. The
-# production StatefulSet is applied by hand
-# (infrastructure/azure/postgres-tls.sh server), not by the deploy job.
+# Plain connections from other pods are refused (#729): Postgres reads its
+# pg_hba.conf from the ConfigMap below (hba_file), not from the data volume,
+# so a snapshot restore or a new volume refuses them too. The production
+# StatefulSet is applied by hand (infrastructure/azure/postgres-tls.sh
+# server), not by the deploy job; README.md has the steps and the rollback.
+#
+# The ConfigMap is in this file, ahead of the StatefulSet, so every
+# `kubectl apply -f statefulset.yaml` creates it before the pod that needs it.
+# Postgres refuses to start without the file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-hba
+  namespace: vrsky-database
+  labels:
+    app: postgresql
+    component: database
+data:
+  # The image's own lines (initdb in postgres:18-alpine), with the last rule
+  # made hostssl. That is what production's file on the volume has said since
+  # the hand edit of 2026-11-03, so applying this changes nothing for clients.
+  #
+  # - local and loopback stay trust: the entrypoint's first-start server
+  #   (no TCP), the pg_isready probes and `kubectl exec psql` use the Unix
+  #   socket; `kubectl port-forward` arrives on 127.0.0.1.
+  # - every other address must use TLS, and still needs the password
+  #   (scram-sha-256).
+  #
+  # Postgres reads this at start and on pg_reload_conf(). The volume is not a
+  # subPath, so an edit here reaches the pod within a minute or two and a
+  # reload picks it up (README.md, rollback). A file Postgres cannot parse
+  # stops it at start; on a reload it keeps the old rules.
+  pg_hba.conf: |
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+    local   all             all                                     trust
+    host    all             all             127.0.0.1/32            trust
+    host    all             all             ::1/128                 trust
+    local   replication     all                                     trust
+    host    replication     all             127.0.0.1/32            trust
+    host    replication     all             ::1/128                 trust
+    hostssl all             all             all                     scram-sha-256
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -90,6 +127,9 @@ spec:
             - ssl_key_file=/etc/postgresql/tls/tls.key
             - -c
             - ssl_min_protocol_version=TLSv1.2
+            # The ConfigMap postgres-hba above, instead of $PGDATA/pg_hba.conf.
+            - -c
+            - hba_file=/etc/postgresql/hba/pg_hba.conf
           ports:
             - containerPort: 5432
               name: postgres
@@ -121,6 +161,11 @@ spec:
               mountPath: /var/lib/postgresql/data
             - name: tls
               mountPath: /etc/postgresql/tls
+              readOnly: true
+            # A directory mount, not a subPath: a subPath file never changes
+            # after the pod starts, and the rollback edits the ConfigMap.
+            - name: hba
+              mountPath: /etc/postgresql/hba
               readOnly: true
             # NOTE: init-schema.sql is intentionally NOT mounted. golang-migrate
             # (management-api entrypoint) is the single source of truth for the
@@ -172,6 +217,11 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 1Mi
+        # pg_hba.conf (#729). Not optional: without it Postgres does not
+        # start, and a pod stuck in ContainerCreating says why more plainly.
+        - name: hba
+          configMap:
+            name: postgres-hba
 
   volumeClaimTemplates:
     - metadata:
