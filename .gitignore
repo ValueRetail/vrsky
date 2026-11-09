@@ -38,7 +38,7 @@ build/
 
 # `go build .` inside src/cmd/<name>/ leaves a binary named <name> in that
 # directory. One anchored line per command in src/cmd/, so a stray binary is
-# ignored and no tracked file is. TestGitignoreCoversServiceBinaries
+# ignored and no tracked file is. TestGitignoreCoversCmdBinaries
 # (pkg/managementapi) fails when a command is missing here.
 /src/cmd/alert-responder/alert-responder
 /src/cmd/api-consumer/api-consumer
