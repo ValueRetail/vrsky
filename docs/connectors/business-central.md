@@ -314,13 +314,16 @@ node sees) is skipped and the converted record is written.
       process for each tenant, company, entity and `cursor_field`. The first
       poll that reads a cursor value and gets a second page asks for one
       record ascending and one descending (`$top=1`, the configured filter,
-      no cursor clause). The answers decide it:
-        - The same record both ways: BC ignores `$orderby` (an edit between
-          the two requests can change the value, not the record). No.
-        - Two records on one value, and the poll so far read only that value:
-          nothing is decided. That poll does not advance if it stops, and the
-          next poll checks again. An entity whose records all share one
-          value has nothing to resume past anyway.
+      no cursor clause). The answers decide it, in this order:
+        - One value at both ends, and the poll so far read only that value:
+          nothing is decided, whichever records came back. That poll does not
+          advance if it stops, and the next poll checks again. An entity whose
+          records all share one value has nothing to resume past anyway, and
+          a BC that breaks ties by key in both directions answers both with
+          the same record there.
+        - Otherwise, the same record both ways: BC ignores `$orderby` (an
+          edit between the two requests can change the value, not the
+          record). No.
         - Otherwise the order holds when the value ascending is below the
           value descending and the last value the poll read lies between
           them. If not: no.

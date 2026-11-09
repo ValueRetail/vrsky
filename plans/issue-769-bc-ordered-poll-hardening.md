@@ -40,11 +40,13 @@ Follow-up to #733 / PR #755 (`plans/issue-733-bc-ordered-resume.md`).
   ends included. The last value, not the first: a record edited between page
   1 and the probe moves up, which can lift the probed minimum above page 1's
   first value but not above its last.
-- **Same record both ways** is a "no" and is cached: a server that ignores
-  `$orderby` answers both with it, and an edit between the two requests can
-  change its value but not its key (review round 1).
-- **Different records on one value**, with the last value read on it too,
-  decides nothing (round 1): the entity may hold one value for now.
+- **One value at both ends**, with the last value read on it too, decides
+  nothing, whichever records came back (rounds 1 and 2): the entity may hold
+  one value for now, and a BC that breaks ties by key ascending both ways
+  answers both probes with the same record there. Checked first.
+- **Otherwise, the same record both ways** is a "no" and is cached: a server
+  that ignores `$orderby` answers both with it, and an edit between the two
+  requests can change its value but not its key (review round 1).
 - **Inconclusive probe** (a failed request other than 400, an empty answer, an
   unreadable value): nothing is cached, this poll is treated as unordered for
   a stop (stores nothing, as before #733), and the next multi-page poll probes

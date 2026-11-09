@@ -979,12 +979,13 @@ func (c *bcConsumer) setOrderVerdict(tenantID string, cfg *BCConfig, honoured bo
 //
 // It asks for one record ascending and one descending, under the configured
 // filter and without the cursor clause, so the two are the smallest and the
-// largest value of the entity. A server that ignores $orderby answers both
-// with the same record, whatever its value (an edit between the two requests
-// can change the value, not the record): that is a "no". Otherwise the order
-// holds when orderBrackets says so. Two records on one value, with the last
-// value read on it too, decide nothing: every record may share that value for
-// now, and there is nothing to resume past until they do not.
+// largest value of the entity. One value at both ends, with the last value
+// read on it too, decides nothing, whichever records came back: every record
+// may share that value for now, and there is nothing to resume past until they
+// do not. Otherwise a server that ignores $orderby answers both with the same
+// record (an edit between the two requests can change its value, not the
+// record): that is a "no". Otherwise the order holds when orderBrackets says
+// so.
 //
 // A 400 to either request is a "no", as for the ordered first page. Any other
 // failure, or an answer without a readable value, leaves nothing cached: this
@@ -1030,14 +1031,18 @@ func (c *bcConsumer) probeOrder(ctx context.Context, tenantID string, cfg *BCCon
 	if haveLast {
 		lastRead = t.last.UTC().Format(time.RFC3339)
 	}
-	if keys[0] == keys[1] {
-		return ignored("does not keep $orderby on cursor_field: it answered ascending and descending with "+
-			"the same record", "record", keys[0], "first_ascending", raws[0], "first_descending", raws[1])
-	}
+	// One value at both ends, and nothing read off it, decides nothing,
+	// whichever records came back: a BC that keeps the order but breaks ties
+	// by key ascending both ways answers both with the same record when every
+	// record holds one value.
 	if lo.Equal(hi) && (!haveLast || t.last.Equal(lo)) {
 		logger.Info("Business Central order check found one cursor_field value at both ends; this poll does not "+
 			"rely on the order, the next one checks again", "cursor_field", field, "value", raws[0])
 		return orderUnknown
+	}
+	if keys[0] == keys[1] {
+		return ignored("does not keep $orderby on cursor_field: it answered ascending and descending with "+
+			"the same record", "record", keys[0], "first_ascending", raws[0], "first_descending", raws[1])
 	}
 	if !orderBrackets(lo, hi, t.last, haveLast) {
 		return ignored("does not keep $orderby on cursor_field: the first record ascending and the first "+

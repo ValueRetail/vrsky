@@ -219,11 +219,13 @@ func orderedOff(t *testing.T, c *bcConsumer, bc *orderedBC, cfg *BCConfig) {
 	}
 }
 
-// A date cursor, with BC ignoring $orderby and page 1 all on one date: the
-// probe's two answers and the last value read are all that date (review of
-// #789). A check that let lo == hi pass would store 2026-01-06 on the first
-// capped poll, and e and f would never be sent.
-func TestOrderProbe_OneDateOnPageOneIsCaught(t *testing.T) {
+// A date cursor, with BC ignoring $orderby and page 1 all on one date: both
+// probes answer with the same record on that date, and the last value read
+// is that date too (review of #789). One value at both ends decides nothing,
+// so no capped poll stores a resume point, and e and f, older than page 1,
+// are still sent. A check that took this for a yes would store 2026-01-06 on
+// the first capped poll and never send e and f.
+func TestOrderProbe_OneDateOnPageOneStoresNothing(t *testing.T) {
 	lowerPageCap(t, 2)
 	recs := map[string]string{
 		"a": "2026-01-05", "b": "2026-01-05", "c": "2026-01-05", "d": "2026-01-06",
@@ -240,7 +242,15 @@ func TestOrderProbe_OneDateOnPageOneIsCaught(t *testing.T) {
 		}
 		published = append(published, ids...)
 	}
-	orderedOff(t, c, bc, cfg)
+	if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil && cp.LastProcessedMessageID != "" {
+		t.Errorf("watermark %q stored by a capped poll whose order check decided nothing", cp.LastProcessedMessageID)
+	}
+	if _, known := c.orderVerdict("tenant-1", cfg); known {
+		t.Error("a verdict was cached from probes that found one value")
+	}
+	if n := len(bc.probeQueries()); n != 4 {
+		t.Errorf("%d probe requests over two polls, want 4 (asked again)", n)
+	}
 	pageCap = maxPagesPerPoll
 	ids, err := pollOnce(t, c, got, mu, cfg)
 	if err != nil {
@@ -251,6 +261,61 @@ func TestOrderProbe_OneDateOnPageOneIsCaught(t *testing.T) {
 		if !strings.Contains(","+sorted(published)+",", ","+id+",") {
 			t.Errorf("record %s never published; published %v", id, published)
 		}
+	}
+}
+
+// The two probes answer with different records and the value ascending is
+// above the value descending: the order is not kept, whatever the records.
+func TestOrderProbe_InvertedEndsTurnOrderOff(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	var mu sync.Mutex
+	var firsts []url.Values
+	var apiURL string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// lo and hi swapped: ascending answers the later value.
+		if answerOrderProbe(w, r, "2026-10-03T00:00:00Z", "2026-10-01T00:00:00Z") {
+			return
+		}
+		if r.URL.Query().Get("page") == "2" {
+			fmt.Fprint(w, `{"value":[{"number":"C","lastModifiedDateTime":"2026-10-02T12:00:00Z"}]}`)
+			return
+		}
+		mu.Lock()
+		firsts = append(firsts, r.URL.Query())
+		mu.Unlock()
+		fmt.Fprintf(w, `{"value":[{"number":"A","lastModifiedDateTime":"2026-10-02T08:00:00Z"},`+
+			`{"number":"B","lastModifiedDateTime":"2026-10-02T10:00:00Z"}],"@odata.nextLink":"%s?page=2"}`, apiURL)
+	}))
+	defer api.Close()
+	apiURL = api.URL + "/companies(GUID)/items"
+
+	c, _, _ := newTestConsumer()
+	logs := &stLogBuf{}
+	c.logger = slog.New(slog.NewTextHandler(logs, nil))
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: api.URL, TokenURL: tokenSrv.URL, Incremental: true, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(http.DefaultClient)
+	for i := 0; i < 2; i++ {
+		if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+			t.Fatalf("poll %d: %v", i+1, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(firsts) != 2 || firsts[0].Get("$orderby") == "" {
+		t.Fatalf("first-page requests %v, want two, the first ordered", firsts)
+	}
+	if ob, ok := firsts[1]["$orderby"]; ok {
+		t.Errorf("poll 2 still asked $orderby=%v after inverted probe answers", ob)
+	}
+	if honoured, known := c.orderVerdict("tenant-1", cfg); !known || honoured {
+		t.Errorf("cached verdict = (%v, known %v), want a cached no", honoured, known)
+	}
+	if !strings.Contains(logs.String(), "do not bracket what the poll read") {
+		t.Errorf("no Warn about the bracket: %s", logs)
 	}
 }
 
@@ -377,32 +442,48 @@ func TestSetOrderVerdict_NoIsFinal(t *testing.T) {
 	}
 }
 
-// Every record on one value, BC honouring the order and answering the two
-// probes with different records: nothing is decided. The node keeps asking
+// Every record on one value, BC honouring the order: nothing is decided,
+// whether the two probes answer with different records or, when BC breaks
+// ties by key ascending both ways, with the same one. The node keeps asking
 // for the order, stores no resume point, and probes again on the next poll.
+// On a date field a stopped poll's resume point would be that date, so the
+// watermark check bites there.
 func TestOrderProbe_OneValueDecidesNothing(t *testing.T) {
-	lowerPageCap(t, 2)
-	v := mins(-60)
-	bc, c, got, mu, _ := orderedFixture(t, lmField, 2, map[string]string{"a": v, "b": v, "c": v, "d": v, "e": v})
-	cfg := bc.cfg()
-	for i := 0; i < 2; i++ {
-		if _, err := pollOnce(t, c, got, mu, cfg); !errors.Is(err, errPageCap) {
-			t.Fatalf("poll %d: err = %v, want errPageCap", i+1, err)
-		}
-	}
-	if _, known := c.orderVerdict("tenant-1", cfg); known {
-		t.Error("a verdict was cached from probes that found one value")
-	}
-	if n := len(bc.probeQueries()); n != 4 {
-		t.Errorf("%d probe requests over two polls, want 4 (asked again)", n)
-	}
-	for i, q := range bc.firstPageQueries() {
-		if q.Get("$orderby") != lmField+" asc" {
-			t.Errorf("poll %d asked $orderby=%q, want it kept", i+1, q.Get("$orderby"))
-		}
-	}
-	if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil && cp.LastProcessedMessageID != "" {
-		t.Errorf("watermark %q stored", cp.LastProcessedMessageID)
+	for _, tc := range []struct {
+		name, field, value string
+		tiesByKeyAsc       bool
+	}{
+		{"DateTime, ties reversed descending", lmField, mins(-60), false},
+		{"DateTime, ties by key ascending both ways", lmField, mins(-60), true},
+		{"date, ties reversed descending", dateField, "2026-01-05", false},
+		{"date, ties by key ascending both ways", dateField, "2026-01-05", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lowerPageCap(t, 2)
+			v := tc.value
+			bc, c, got, mu, _ := orderedFixture(t, tc.field, 2, map[string]string{"a": v, "b": v, "c": v, "d": v, "e": v})
+			bc.tiesByKeyAsc = tc.tiesByKeyAsc
+			cfg := bc.cfg()
+			for i := 0; i < 2; i++ {
+				if _, err := pollOnce(t, c, got, mu, cfg); !errors.Is(err, errPageCap) {
+					t.Fatalf("poll %d: err = %v, want errPageCap", i+1, err)
+				}
+			}
+			if _, known := c.orderVerdict("tenant-1", cfg); known {
+				t.Error("a verdict was cached from probes that found one value")
+			}
+			if n := len(bc.probeQueries()); n != 4 {
+				t.Errorf("%d probe requests over two polls, want 4 (asked again)", n)
+			}
+			for i, q := range bc.firstPageQueries() {
+				if q.Get("$orderby") != tc.field+" asc" {
+					t.Errorf("poll %d asked $orderby=%q, want it kept", i+1, q.Get("$orderby"))
+				}
+			}
+			if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil && cp.LastProcessedMessageID != "" {
+				t.Errorf("watermark %q stored", cp.LastProcessedMessageID)
+			}
+		})
 	}
 }
 

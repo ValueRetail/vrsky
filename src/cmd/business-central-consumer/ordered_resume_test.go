@@ -67,6 +67,9 @@ type orderedBC struct {
 	// afterProbe, when set, runs (under the lock) after a probe is
 	// answered, with its direction; a test edits recs in it.
 	afterProbe func(dir string)
+	// tiesByKeyAsc makes a descending probe break ties by key ascending,
+	// like an ascending one, instead of reversing them.
+	tiesByKeyAsc bool
 	// hold, when set, runs before a page request takes the lock, with its
 	// $skiptoken; a test blocks a page in it.
 	hold func(token string, r *http.Request)
@@ -188,7 +191,7 @@ func (b *orderedBC) serve(w http.ResponseWriter, r *http.Request) {
 // probe answers an order probe: `$orderby=<field> asc|desc&$top=n`, sorted
 // unless the fake ignores $orderby, in which case it is key order either way.
 // Descending reverses the key order of ties too, as `ORDER BY field DESC,
-// key DESC` would.
+// key DESC` would, unless tiesByKeyAsc is set.
 func (b *orderedBC) probe(w http.ResponseWriter, q url.Values) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -222,7 +225,7 @@ func (b *orderedBC) probe(w http.ResponseWriter, q url.Values) {
 		switch {
 		case b.ignoreOrder:
 			return ids[i] < ids[j]
-		case dir == "desc" && vi == vj:
+		case dir == "desc" && vi == vj && !b.tiesByKeyAsc:
 			return ids[i] > ids[j]
 		case dir == "desc":
 			return b.less(vj, vi)
