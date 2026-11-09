@@ -1410,36 +1410,37 @@ Last updated 2026-10-28.
     type parameter, together with #727, which makes it survive a restart.
     Found in #730 and #735. Filed as #758.
 
-193. **The edge CA bundle for inbound webhook mTLS is kept by hand.** The
+194. **The edge CA bundle for inbound webhook mTLS is kept by hand.** The
     Secret `webhook-client-ca` must hold every tenant's webhook client CA
     (#454), so a tenant who adds or rotates one waits for an operator.
     Build it from the connections instead: the management API (or a small
     job) collects each running webhook connection's resolved `client_ca`
     and writes the Secret. Needs RBAC to write one Secret in
-    `vrsky-platform`: PR plus `agent:needs-human`. Found in #454.
+    `vrsky-platform`: PR plus `agent:needs-human`. Found in #454. Filed as #798.
 
-194. **Two tenants with the same client CA can reach each other's mTLS
+195. **Two tenants with the same client CA can reach each other's mTLS
     webhooks.** The worker checks a caller's certificate against the
     connection's CA only, so a CA that two tenants share (a public CA, a
     parent company's) opens both. Add an optional per-connection pin
     (subject, SAN or SHA-256 fingerprint) to the `tls` block and check it
-    after the chain. Applies to the direct-TLS mode too. Found in #454.
+    after the chain. Applies to the direct-TLS mode too. Found in #454. Filed as #797.
 
-195. **The builder doesn't know about inbound mTLS.** A Webhook (HTTP)
+196. **The builder doesn't know about inbound mTLS.** A Webhook (HTTP)
     source has no client CA field (`tls.client_ca_secret_id` is API only),
     and its panel shows `https://vrsky.valueretail.no/webhook/<id>` even for
     a connection that requires a client certificate, where that URL always
     answers 401. Add the field and show `https://mtls.vrsky.valueretail.no/webhook/<id>`
     for such a connection (`ui/src/config/env.ts`, the source panel in
-    `PropertyEditor.tsx`). Found in #454.
+    `PropertyEditor.tsx`). Found in #454. Filed as #798.
 
-196. **The webhook consumer reads its edge certificate once.** cert-manager
+197. **The webhook consumer reads its edge certificate once.** cert-manager
     renews `webhook-edge-server` 90 days before it ends, but the consumer
     loads the files at start (#454), so a pod that runs past the old
     certificate's end breaks the hop from the ingress (mTLS webhooks get
     502). Parking restarts pods daily, which hides it. Reload on change
     (`tls.Config.GetCertificate` reading the mounted files when they change),
     or alert on the served certificate's expiry. Found in review of #454.
+    Filed as #799.
 
 ## Human
 

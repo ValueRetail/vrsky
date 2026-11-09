@@ -579,7 +579,7 @@ self-signed cert (dev only) — mTLS security here comes from verifying the
   `untrusted_edge`; the last two only on the edge port).
 - A tenant's certificate opens only connections whose CA it chains to. Two
   tenants who configure the same CA can reach each other's mTLS webhooks
-  (backlog item 194 adds a per-connection pin).
+  (#797 adds a per-connection pin).
 
 ### Verify (compose)
 
