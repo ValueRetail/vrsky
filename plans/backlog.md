@@ -1325,7 +1325,7 @@ Last updated 2026-10-28.
     API path retries every non-`2xx`, a `4xx` too, so the two paths disagree.
     Found in #698. Filed as #735.
 
-182. ~~**`sdk.RateLimited` carries a delay nothing reads.**~~ (#721) `sdk.RetryAfter` has
+182. **`sdk.RateLimited` carries a delay nothing reads.** `sdk.RetryAfter` has
     no caller; the SDK NAKs and the redelivery follows the fixed backoff
     (1 s, 5 s, 30 s, 2 min) whatever `Retry-After` or the 5 s that Visma,
     Brightpearl, Business Central and SAP pass. Either honour it (NAK with a

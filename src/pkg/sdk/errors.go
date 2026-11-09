@@ -14,9 +14,8 @@ import (
 //   - nil               → ack (success)
 //   - Retriable(err)    → NAK; messaging retries with backoff, then DLQs
 //   - Permanent(err)    → ack + log (poison message; retrying can't help)
-//   - RateLimited(err, d) → NAK with delay d (at least 1 s, at most the
-//                         largest backoff step, 2 min); counts as an attempt,
-//                         then DLQs like Retriable
+//   - RateLimited(err)  → NAK; treated like Retriable today, with the delay
+//                         recorded for future use
 //   - any other error   → Retriable by default (safer than dropping)
 //   - ConfigUnavailable(err) → NAK like Retriable, plus an Error log line with
 //                         the connection id (see ErrConfigUnavailable)
@@ -41,10 +40,6 @@ type rateLimitedError struct {
 func (e *rateLimitedError) Error() string { return e.cause.Error() }
 func (e *rateLimitedError) Unwrap() error { return e.cause }
 
-// NakDelay is how pkg/messaging reads the delay: it NAKs the message with it
-// (clamped to 1 s .. the largest backoff step) instead of without one (#721).
-func (e *rateLimitedError) NakDelay() time.Duration { return e.after }
-
 // Retriable marks an error as transient — the SDK will NAK so the message is
 // redelivered (and eventually DLQ'd if it keeps failing).
 func Retriable(err error) error {
@@ -65,12 +60,9 @@ func Permanent(err error) error {
 }
 
 // RateLimited marks an error caused by downstream throttling; `after` is how
-// long to wait before retrying. The SDK NAKs the message with that delay,
-// raised to at least 1 s and cut to the largest step of the redelivery
-// schedule (2 min by default). JetStream adds the schedule's growth on later
-// attempts, so the wait is never shorter than `after`. Each redelivery counts
-// toward the five attempts, and the fifth failure dead-letters the message,
-// as for Retriable.
+// long to wait before retrying. Currently treated as Retriable at the
+// transport layer (the messaging backoff schedule applies); the delay is
+// preserved for callers that inspect it.
 func RateLimited(err error, after time.Duration) error {
 	if err == nil {
 		return nil

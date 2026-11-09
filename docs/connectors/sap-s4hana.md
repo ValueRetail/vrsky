@@ -123,10 +123,8 @@ result. There is no setting for it.
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `503`/`5xx`/network errors retry and go to the DLQ once the retries are
-used up. A `429` or `503` comes back after 5 s (the connector does not read
-`Retry-After`); later attempts wait longer, see
-[Which failed messages reach the DLQ](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq). Other `4xx` answers to the write, `401`/`403` auth
+and `503`/`5xx`/network errors retry with backoff and go to the DLQ once the
+retries are used up. Other `4xx` answers to the write, `401`/`403` auth
 failures included, are permanent: the message is acked and dropped (the error
 is logged), not retried and not dead-lettered. So is an incomplete node
 config or a payload that is not JSON. The token fetch comes first, though:

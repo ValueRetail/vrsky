@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 	"time"
 
@@ -13,41 +12,9 @@ import (
 )
 
 // Handler is the callback shape data-flow workers implement.
-// Returning nil acks the message. Returning a non-nil error NAKs it; after
-// MaxDeliveryAttempts the message moves to the DLQ. An error that asks for a
-// delay (it, or an error it wraps, has a method NakDelay() time.Duration, as
-// sdk.RateLimited's does) is NAK'd with that delay, see nakDelay.
+// Returning nil acks the message. Returning a non-nil error NAKs it with
+// backoff; after MaxDeliveryAttempts the message moves to the DLQ.
 type Handler func(ctx context.Context, msg *nats.Msg) error
-
-// minNakDelay is the shortest delay a handler error can ask for. Anything
-// shorter, zero included, is raised to it, so a throttled target is never
-// retried in a hot loop.
-const minNakDelay = time.Second
-
-// nakDelayer is a handler error that asks for its message to come back after a
-// delay rather than at once (sdk.RateLimited, #721).
-type nakDelayer interface{ NakDelay() time.Duration }
-
-// nakDelay returns the delay err asks for, clamped to at least minNakDelay and
-// at most the largest step of backoff (2 min with DefaultBackoff), and whether
-// it asks for one at all.
-//
-// JetStream (nats-server 2.15) measures a NAK delay from the point where the
-// attempt's ack wait began counting down from Backoff[0], and redelivers once
-// the attempt's own step, Backoff[n-1], has passed from there. So the wait
-// for delivery n is the delay plus Backoff[n-1]-Backoff[0]: never shorter than
-// the delay asked for, longer on later attempts of a growing schedule.
-func nakDelay(err error, backoff []time.Duration) (time.Duration, bool) {
-	var nd nakDelayer
-	if !errors.As(err, &nd) {
-		return 0, false
-	}
-	d := max(nd.NakDelay(), minNakDelay)
-	if len(backoff) > 0 {
-		d = min(d, slices.Max(backoff))
-	}
-	return d, true
-}
 
 // SubscriberOpts configures a per-worker subscription on the main stream.
 type SubscriberOpts struct {
@@ -609,16 +576,6 @@ func (s *Subscriber) dispatch(m *nats.Msg) {
 		return
 	}
 
-	if d, ok := nakDelay(err, s.opts.Backoff); ok {
-		s.opts.Logger.Warn("Handler error, will retry after the delay it asked for",
-			"durable", s.opts.DurableName, "error", err, "retry_after", d)
-		if nerr := m.NakWithDelay(d); nerr != nil {
-			// The message comes back when its ack wait runs out instead.
-			s.opts.Logger.Warn("NAK with delay failed",
-				"durable", s.opts.DurableName, "error", nerr)
-		}
-		return
-	}
 	s.opts.Logger.Warn("Handler error, will retry",
 		"durable", s.opts.DurableName, "error", err)
 	_ = m.Nak()

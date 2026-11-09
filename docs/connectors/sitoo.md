@@ -194,10 +194,7 @@ Delivery failures are classified for correct retry behaviour: `2xx` acks;
 `429`, `5xx`/network errors and a `base_url` the connector refuses (below)
 are retried and go to the DLQ once the retries are used up, so a message
 refused for its `base_url` can be replayed from the DLQ once the node is
-fixed. A `429` comes back after the wait Sitoo asks for
-(`X-Rate-Limit-Reset`, else `Retry-After`, else 5 s), kept between 1 s and
-2 min; later attempts wait longer, see
-[Which failed messages reach the DLQ](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq). `4xx` (bad request/data) and
+fixed. `4xx` (bad request/data) and
 `401`/`403` (auth) are permanent: the message is logged and dropped, not
 retried and not dead-lettered. So is a payload that is not JSON, a Sitoo
 webhook event notification (it is not a resource) and an incomplete node

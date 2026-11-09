@@ -193,25 +193,10 @@ Deleting a connection does not — the builder asks before creating a new one.
 Only some failures do. A destination (a producer in the code) sorts every
 error it hits into one of two kinds:
 
-- **Retried.** The message is delivered again, five attempts in all. After
-  the fifth attempt it is copied to the connection's DLQ with the last
+- **Retried.** The message is delivered again after 1 s, 5 s, 30 s and 2 min.
+  After the fifth attempt it is copied to the connection's DLQ with the last
   error, the attempt count and the worker's name, and kept there for 7 days.
-  Retry it from the DLQ once the cause is fixed. How soon it comes back
-  depends on the error:
-  - A rate limit (`429` from Sitoo or Front Systems; `429` or `503` from
-    Visma, Brightpearl, Business Central or SAP) comes back after the wait
-    the destination asked for. Sitoo and Front Systems read it from the
-    answer (`X-Rate-Limit-Reset` or `Retry-After`) and wait 5 s when it has
-    none; the other four always wait 5 s. The SDK keeps that wait between
-    1 s and 2 min. JetStream adds the growth of the backoff schedule on
-    later attempts, so a 5 s wait becomes 5 s, 9 s, 34 s and 124 s: about
-    three minutes from the first attempt to the DLQ. The worker logs
-    `Handler error, will retry after the delay it asked for` with
-    `retry_after`.
-  - Any other retried error comes back at once, on the worker's next
-    fetch, so the five attempts usually take under a second. The backoff
-    schedule (1 s, 5 s, 30 s, 2 min) only applies when a worker stops
-    answering for a message, for example when it crashes mid-delivery.
+  Retry it from the DLQ once the cause is fixed.
 - **Dropped.** The error is marked permanent, because trying the same message
   again cannot work (a `4xx` from the target, an incomplete node, a payload
   that is not JSON). The message is acked and nothing is kept. There is no
