@@ -9,10 +9,11 @@
 #   check              read-only: what is on, what is missing, who still talks
 #                      to Postgres without TLS
 #   server             apply tls.yaml and statefulset.yaml: Postgres gets a
-#                      certificate and ssl = on. Restarts Postgres: a minute
-#                      or more with no database (the disk detaches and
-#                      re-attaches). It still accepts plain connections
-#                      afterwards.
+#                      certificate, ssl = on and its pg_hba.conf from the
+#                      ConfigMap postgres-hba (#729), which refuses plain
+#                      connections from other pods. Restarts Postgres: a
+#                      minute or more with no database (the disk detaches and
+#                      re-attaches).
 #   ca-sync            copy the PUBLIC ca.crt into the ConfigMap postgres-ca in
 #                      vrsky-platform and vrsky-database. Run again whenever the
 #                      CA certificate is renewed (every nine years).
@@ -23,7 +24,9 @@
 #   urls <mode>        set sslmode in the connection strings of the Secrets
 #                      postgres-credentials (vrsky-platform and vrsky-database)
 #                      and vrsky-backup-config (BACKUP_DB_URL). Mode is
-#                      verify-full (with sslrootcert) or disable (the rollback).
+#                      verify-full (with sslrootcert), require (TLS without
+#                      checking the server: the rollback) or disable (no TLS;
+#                      refused while Postgres turns plain connections away).
 #                      Running pods keep the old value until `restart`.
 #   canary             run one throwaway pod in vrsky-platform that connects with
 #                      sslmode=verify-full and the mounted CA, using the live
@@ -90,7 +93,7 @@ act() {
   "$@"
 }
 
-# retarget_url <url> <verify-full|disable> — the URL with its sslmode (and
+# retarget_url <url> <verify-full|require|disable> — the URL with its sslmode (and
 # sslrootcert) replaced; every other query parameter stays. Prints the result
 # on stdout, so call it only into a variable.
 retarget_url() {
@@ -111,8 +114,10 @@ retarget_url() {
   done
   case "$mode" in
     verify-full) out="${out}sslmode=verify-full&sslrootcert=${CA_PATH}" ;;
+    # No sslrootcert: with one, libpq and lib/pq treat require as verify-ca.
+    require) out="${out}sslmode=require" ;;
     disable) out="${out}sslmode=disable" ;;
-    *) die "unknown mode '$mode' (verify-full or disable)" ;;
+    *) die "unknown mode '$mode' (verify-full, require or disable)" ;;
   esac
   printf '%s?%s' "$base" "$out"
 }
@@ -182,6 +187,11 @@ cronjob_has_ca() {
 
 pg_sql() { kubectl exec -n "$DB_NS" "$PG_POD" -c postgresql -- psql -U vrsky -d vrsky -tAc "$1"; }
 
+# The pg_hba.conf rules that let a client from another pod in without TLS.
+# 0 means Postgres refuses plain connections (the loopback lines are the pod's
+# own: probes, kubectl exec, port-forward).
+PLAIN_RULES_SQL="SELECT count(*) FROM pg_hba_file_rules WHERE type IN ('host', 'hostnossl') AND address NOT IN ('127.0.0.1', '::1')"
+
 cmd_server() {
   write_gate
   kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 \
@@ -209,6 +219,8 @@ cmd_server() {
   # update does not replace a pod that never became Ready).
   kubectl rollout status statefulset/postgresql -n "$DB_NS" --timeout=600s
   say "ssl is $(pg_sql 'SHOW ssl')"
+  say "hba_file is $(pg_sql 'SHOW hba_file')"
+  say "pg_hba.conf rules that let another pod in without TLS: $(pg_sql "$PLAIN_RULES_SQL") (want 0)"
 }
 
 cmd_ca_sync() {
@@ -264,8 +276,16 @@ require_clients_ready() {
 
 cmd_urls() {
   local mode="${1:-}"
-  case "$mode" in verify-full | disable) ;; *) die "usage: urls <verify-full|disable>" ;; esac
+  case "$mode" in verify-full | require | disable) ;; *) die "usage: urls <verify-full|require|disable>" ;; esac
   write_gate
+  if [ "$mode" = disable ]; then
+    # Fail closed: against hostssl, every client restarted on sslmode=disable
+    # would be turned away.
+    local plain
+    plain="$(pg_sql "$PLAIN_RULES_SQL" | tr -d '[:space:]')" || die "could not read pg_hba_file_rules"
+    [ -n "$plain" ] && [ "$plain" != 0 ] \
+      || die "Postgres refuses plain connections (pg_hba.conf from the ConfigMap postgres-hba, #729), so no client could connect on sslmode=disable. Use 'urls require' (TLS without checking the server), or allow plain connections first (infrastructure/kubernetes/postgresql/README.md, Rollback)"
+  fi
   if [ "$mode" = verify-full ]; then
     # Fail closed: the strings must not point at a server or a CA that is not there.
     [ "$(pg_sql 'SHOW ssl' | tr -d '[:space:]')" = on ] || die "Postgres does not have ssl on yet (run 'server')"
@@ -390,6 +410,8 @@ cmd_check() {
 
   echo "--- server"
   echo "    ssl = $(pg_sql 'SHOW ssl' 2>/dev/null | tr -d '[:space:]')"
+  echo "    hba_file = $(pg_sql 'SHOW hba_file' 2>/dev/null | tr -d '[:space:]')"
+  echo "    pg_hba.conf rules that let another pod in without TLS: $(pg_sql "$PLAIN_RULES_SQL" 2>/dev/null | tr -d '[:space:]') (0: plain connections are refused)"
   echo "    network client connections by ssl (a session on the unix socket, like this one, is not counted):"
   pg_sql "SELECT '      ssl=' || s.ssl || '  ' || count(*) FROM pg_stat_ssl s JOIN pg_stat_activity a USING (pid) WHERE a.backend_type = 'client backend' AND a.client_addr IS NOT NULL GROUP BY s.ssl ORDER BY s.ssl DESC" 2>/dev/null || echo "      (could not query)"
   echo "    client addresses WITHOUT ssl (match them to pods with: kubectl get pods -A -o wide):"

@@ -262,7 +262,8 @@ Only on an empty cluster, in this order:
    Postgres has TLS from step 1; `infrastructure/azure/rotate-secrets.sh`
    (which you run before real data goes in) copies the CA to the client
    namespaces and builds `verify-full` strings. Until then the dev Secrets
-   keep plain connections, which the server still accepts.
+   use `sslmode=require` (TLS without checking the server): the server
+   refuses plain connections from other pods (#729).
 4. `PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh`:
    monitoring and the alert rules. It stops unless the `vrsky-monitoring`
    namespace and its `alerts-webhook-token` and `grafana-admin` Secrets
