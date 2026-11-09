@@ -31,6 +31,39 @@ const (
 // server error are not ErrNotFound. Test for it with errors.Is.
 var ErrNotFound = errors.New("objectstore: object not found")
 
+// ErrVersionChanged is wrapped by DeleteIf and CopyIf when the object under
+// the key is not at the version given: it was written again since that
+// version was read. Test for it with errors.Is.
+var ErrVersionChanged = errors.New("objectstore: object version changed")
+
+// Conditional is implemented by backends that can delete or copy an object
+// only while it is still at a given Version, in the same request (#718). It
+// closes the moment between a Stat and the delete in which a new upload under
+// the same key would be removed unread. All three backends implement it; test
+// fakes and wrappers need not, and callers fall back to Delete and Copy.
+//
+// A store that ignores the condition (the pinned MinIO does for DeleteObject)
+// deletes anyway, so callers keep their own Stat check.
+type Conditional interface {
+	// DeleteIf removes key only while its Version is version. Otherwise the
+	// error wraps ErrVersionChanged; a missing key wraps ErrNotFound.
+	DeleteIf(ctx context.Context, key, version string) error
+	// CopyIf copies srcKey to dstKey only while srcKey's Version is version,
+	// with the same errors as DeleteIf. The destination is written
+	// unconditionally.
+	CopyIf(ctx context.Context, srcKey, dstKey, version string) error
+}
+
+// versionChanged wraps a provider's precondition failure as ErrVersionChanged.
+func versionChanged(err error) error {
+	return fmt.Errorf("%w: %w", ErrVersionChanged, err)
+}
+
+// quotedETag is an Object.Version from S3 or Azure as an If-Match value.
+func quotedETag(version string) string {
+	return `"` + version + `"`
+}
+
 // notFound wraps a provider SDK error that says the object is missing so that
 // errors.Is(err, ErrNotFound) holds and the original error stays in the chain.
 func notFound(err error) error {

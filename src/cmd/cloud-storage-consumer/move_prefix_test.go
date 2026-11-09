@@ -188,7 +188,7 @@ func TestAfterAction_NeverCopiesOntoOwnKey(t *testing.T) {
 			fs := &fakeStore{objects: map[string][]byte{tt.key: []byte("x")}}
 			c := &cloudConsumer{}
 			cfg := &cloudConfig{AfterAction: "move", MovePrefix: tt.movePrefix}
-			err := c.afterAction(context.Background(), fs, cfg, tt.key)
+			err := c.afterAction(context.Background(), fs, cfg, tt.key, "")
 
 			if tt.wantDst == "" {
 				if err == nil {

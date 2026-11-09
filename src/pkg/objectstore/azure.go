@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
@@ -205,6 +206,53 @@ func (a *azureStore) Copy(ctx context.Context, srcKey, dstKey string) error {
 		return fmt.Errorf("azure copy %q->%q: %w", srcKey, dstKey, err)
 	}
 	return nil
+}
+
+var _ Conditional = (*azureStore)(nil)
+
+// DeleteIf deletes the blob with If-Match on its ETag (#718); Azure answers a
+// changed blob with 412 ConditionNotMet.
+func (a *azureStore) DeleteIf(ctx context.Context, key, version string) error {
+	if _, err := a.client.DeleteBlob(ctx, a.container, key, &azblob.DeleteBlobOptions{
+		AccessConditions: azureIfMatch(version),
+	}); err != nil {
+		return fmt.Errorf("azure delete %q: %w", key, azureCondErr(err))
+	}
+	return nil
+}
+
+// CopyIf is Copy with If-Match on the source's download, so the blob that is
+// copied is the one at version.
+func (a *azureStore) CopyIf(ctx context.Context, srcKey, dstKey, version string) error {
+	resp, err := a.client.DownloadStream(ctx, a.container, srcKey, &azblob.DownloadStreamOptions{
+		AccessConditions: azureIfMatch(version),
+	})
+	if err != nil {
+		return fmt.Errorf("azure get %q: %w", srcKey, azureCondErr(err))
+	}
+	defer resp.Body.Close()
+	ct := ""
+	if resp.ContentType != nil {
+		ct = *resp.ContentType
+	}
+	if err := a.PutStream(ctx, dstKey, resp.Body, ct); err != nil {
+		return fmt.Errorf("azure copy %q->%q: %w", srcKey, dstKey, err)
+	}
+	return nil
+}
+
+func azureIfMatch(version string) *blob.AccessConditions {
+	etag := azcore.ETag(quotedETag(version))
+	return &blob.AccessConditions{ModifiedAccessConditions: &blob.ModifiedAccessConditions{IfMatch: &etag}}
+}
+
+// azureCondErr marks the answers to a conditional request: ConditionNotMet is
+// a changed blob, BlobNotFound a missing one.
+func azureCondErr(err error) error {
+	if bloberror.HasCode(err, bloberror.ConditionNotMet) {
+		return versionChanged(err)
+	}
+	return azureGetErr(err)
 }
 
 // Close is a no-op: the azblob client holds no resources requiring release.

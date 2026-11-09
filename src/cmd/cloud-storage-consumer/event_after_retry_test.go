@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/doneset"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
@@ -357,17 +358,17 @@ func TestEventAfterRetry_QueueFull(t *testing.T) {
 	logs := &nfLog{}
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	// An hour's backoff: nothing is retried while the test fills the queue.
-	q := newAfterRetryQueue(logger, "delete", "bkt", afterRetryTuning{base: time.Hour, capacity: 2}, statSame,
-		func(context.Context, string) error { return nil })
+	q := newAfterRetryQueue(logger, "delete", "bkt", afterRetryTuning{base: time.Hour, capacity: 2}, doneset.MatchTime, statSame,
+		func(context.Context, string, string) error { return nil })
 
 	boom := errors.New("boom")
-	q.failed("in/1", objectStamp{}, boom)
-	q.failed("in/2", objectStamp{}, boom)
-	q.failed("in/2", objectStamp{}, boom) // already queued: still two
+	q.failed("in/1", doneset.Stamp{}, boom)
+	q.failed("in/2", doneset.Stamp{}, boom)
+	q.failed("in/2", doneset.Stamp{}, boom) // already queued: still two
 	if q.len() != 2 {
 		t.Fatalf("len = %d, want 2", q.len())
 	}
-	q.failed("in/3", objectStamp{}, boom)
+	q.failed("in/3", doneset.Stamp{}, boom)
 	if q.len() != 2 {
 		t.Fatalf("len = %d after the third key, want 2", q.len())
 	}
@@ -390,7 +391,7 @@ func TestEventAfterRetry_QueueFull(t *testing.T) {
 	}
 	// A key forgotten makes room.
 	q.forget("in/1")
-	q.failed("in/3", objectStamp{}, boom)
+	q.failed("in/3", doneset.Stamp{}, boom)
 	if _, queued := q.items["in/3"]; !queued {
 		t.Fatal("in/3 not queued after room was made")
 	}
@@ -401,9 +402,9 @@ func TestEventAfterRetry_QueueFull(t *testing.T) {
 func TestEventAfterRetry_ForgetOnSuccess(t *testing.T) {
 	var calls atomic.Int32
 	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "bkt",
-		afterRetryTuning{base: 30 * time.Millisecond}, statSame,
-		func(context.Context, string) error { calls.Add(1); return nil })
-	q.failed("in/a", objectStamp{}, errors.New("boom"))
+		afterRetryTuning{base: 30 * time.Millisecond}, doneset.MatchTime, statSame,
+		func(context.Context, string, string) error { calls.Add(1); return nil })
+	q.failed("in/a", doneset.Stamp{}, errors.New("boom"))
 	q.forget("in/a")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -421,9 +422,9 @@ func TestEventAfterRetry_ForgetOnSuccess(t *testing.T) {
 func TestEventAfterRetry_StopDuringBackoff(t *testing.T) {
 	logs := &nfLog{}
 	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(logs, nil)), "delete", "bkt",
-		afterRetryTuning{base: time.Hour}, statSame,
-		func(context.Context, string) error { t.Error("retried before the backoff ran out"); return nil })
-	q.failed("in/a", objectStamp{}, errors.New("boom"))
+		afterRetryTuning{base: time.Hour}, doneset.MatchTime, statSame,
+		func(context.Context, string, string) error { t.Error("retried before the backoff ran out"); return nil })
+	q.failed("in/a", doneset.Stamp{}, errors.New("boom"))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); q.run(ctx) }()
@@ -464,8 +465,8 @@ func TestEventAfterRetry_StopWhileRetrying(t *testing.T) {
 }
 
 func TestEventAfterRetry_Backoff(t *testing.T) {
-	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "b", afterRetryTuning{}, statSame,
-		func(context.Context, string) error { return nil })
+	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "b", afterRetryTuning{}, doneset.MatchTime, statSame,
+		func(context.Context, string, string) error { return nil })
 	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute,
 		32 * time.Minute, time.Hour, time.Hour}
 	for i, w := range want {
@@ -490,17 +491,17 @@ func TestEventAfterRetry_RequeuedDuringTry(t *testing.T) {
 		{"old try fails for the last time", errors.New("503 old")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			newer := objectStamp{version: "2"}
+			newer := doneset.Stamp{Version: "2"}
 			var q *afterRetryQueue
 			// maxRetries 1: a failure of the old try is its last.
 			q = newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "bkt",
-				afterRetryTuning{base: time.Hour, maxRetries: 1}, statSame,
-				func(context.Context, string) error {
+				afterRetryTuning{base: time.Hour, maxRetries: 1}, doneset.MatchTime, statSame,
+				func(context.Context, string, string) error {
 					// The key is published again and its new after-action fails.
 					q.failed("in/a", newer, errors.New("503 new"))
 					return tc.result
 				})
-			q.failed("in/a", objectStamp{}, errors.New("boom"))
+			q.failed("in/a", doneset.Stamp{}, errors.New("boom"))
 			q.attempt(context.Background(), "in/a")
 			q.mu.Lock()
 			defer q.mu.Unlock()
