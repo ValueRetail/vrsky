@@ -133,7 +133,9 @@ Salesforce to process it (#760):
   attempt. The message stays in flight meanwhile. A job that is not done by
   then fails the attempt (`bulk job 750… still InProgress after 2m0s`); the
   retry goes on waiting for the same job. After five attempts the message
-  is dead-lettered, and a retry from the DLQ picks the job up again.
+  is dead-lettered. A retry from the DLQ picks the job up again only when
+  the same worker process handles it within seven days; see
+  [Retrying a Bulk message from the DLQ](#retrying-a-bulk-message-from-the-dlq).
 - **Refused records.** When the job is done the node reads its failed
   results. Each record Salesforce refused is named by its index with
   Salesforce's code and message (`record[3]: REQUIRED_FIELD_MISSING:
@@ -150,13 +152,36 @@ Salesforce to process it (#760):
   its job right away.
 - **Results the node cannot read.** Salesforce returns result rows in no
   fixed order, so the node matches each row to its record by the uploaded
-  values. A row that matches no record, results larger than 32 MiB, or
-  fewer rows than the job reports fail the delivery, and nothing is sent
-  again: the message ends in the DLQ instead of risking duplicates. Look the
-  job up in Salesforce (Setup, Bulk Data Load Jobs) by the id in the error.
+  values (field names in any case). A row that matches no record, results
+  larger than 32 MiB, fewer rows than the job reports, or a complete job
+  that processed fewer records than it was given fail the delivery, and
+  nothing is sent again: the message ends in the DLQ instead of risking
+  duplicates. Look the job up in Salesforce (Setup, Bulk Data Load Jobs) by
+  the id in the error.
+- **A record with nothing to send.** When the batch has a single field, a
+  record without a value for it would be an empty CSV row, which Salesforce
+  skips. The node does not send it and names it (`record[2]: nothing to
+  send`); the message is retried and then dead-lettered like any refused
+  record.
 
 While a job is being waited for, the node handles no other message: the
 SDK delivers one message at a time per worker.
+
+### Retrying a Bulk message from the DLQ
+
+What the node knows about a message's records and job lives in the worker
+process for seven days. A retry from the DLQ is only as safe as that
+memory:
+
+- **Same process, within seven days.** Records that went in are skipped
+  and a remembered job is picked up again. A message that was dead-lettered
+  because its results could not be matched fails the same way again: fix
+  it by hand in Salesforce instead of retrying.
+- **After a restart or a deploy.** The memory is gone, so the retry sends
+  every record again in a new job, and an `insert` duplicates the records
+  that went in the first time. Don't retry a Bulk `insert` from the DLQ
+  after a restart without first checking in Salesforce which of its records
+  are already there. An `upsert` with an external id is safe to retry.
 
 See the
 [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq)

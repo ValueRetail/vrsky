@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,7 +34,8 @@ type reply struct {
 // fakeSF is a fake Salesforce org. REST writes are keyed by the record's
 // Name, Bulk API calls by "create:<object>", "upload:<object>",
 // "close:<object>", "abort:<object>" and "state:<object>" (a job's state
-// reads, answered JobComplete with nothing failed). respond gets the key and
+// reads, answered JobComplete with every uploaded row processed and none
+// failed). respond gets the key and
 // how many times it was called before (0 on the first call); returning false
 // answers with success. bulk_test.go has a stateful fake for the Bulk API.
 type fakeSF struct {
@@ -40,13 +43,14 @@ type fakeSF struct {
 	srv     *httptest.Server
 	respond func(key string, n int) (reply, bool)
 
-	mu    sync.Mutex
-	calls map[string]int
+	mu       sync.Mutex
+	calls    map[string]int
+	uploaded map[string]int // object → rows in its last upload
 }
 
 func newFakeSF(t *testing.T, respond func(key string, n int) (reply, bool)) *fakeSF {
 	t.Helper()
-	f := &fakeSF{t: t, respond: respond, calls: map[string]int{}}
+	f := &fakeSF{t: t, respond: respond, calls: map[string]int{}, uploaded: map[string]int{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -75,6 +79,14 @@ func (f *fakeSF) serve(w http.ResponseWriter, r *http.Request) {
 		obj := strings.TrimSuffix(strings.TrimPrefix(path[strings.Index(path, "/jobs/ingest/job-"):], "/jobs/ingest/job-"), "/batches")
 		key = "upload:" + obj
 		ok = reply{status: http.StatusCreated}
+		rows, err := csv.NewReader(bytes.NewReader(body)).ReadAll()
+		if err != nil || len(rows) == 0 {
+			f.t.Errorf("fake Salesforce: upload is not CSV: %v", err)
+		} else {
+			f.mu.Lock()
+			f.uploaded[obj] = len(rows) - 1
+			f.mu.Unlock()
+		}
 	case r.Method == http.MethodPatch && strings.Contains(path, "/jobs/ingest/job-"):
 		obj := strings.TrimPrefix(path[strings.Index(path, "/jobs/ingest/job-"):], "/jobs/ingest/job-")
 		key = "close:" + obj
@@ -85,7 +97,10 @@ func (f *fakeSF) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.Contains(path, "/jobs/ingest/job-"):
 		obj := strings.TrimPrefix(path[strings.Index(path, "/jobs/ingest/job-"):], "/jobs/ingest/job-")
 		key = "state:" + obj
-		ok = reply{status: http.StatusOK, body: fmt.Sprintf(`{"id":"job-%s","state":"JobComplete","numberRecordsProcessed":1,"numberRecordsFailed":0}`, obj)}
+		f.mu.Lock()
+		processed := f.uploaded[obj]
+		f.mu.Unlock()
+		ok = reply{status: http.StatusOK, body: fmt.Sprintf(`{"id":"job-%s","state":"JobComplete","numberRecordsProcessed":%d,"numberRecordsFailed":0}`, obj, processed)}
 	case strings.Contains(path, "/sobjects/"):
 		var rec map[string]any
 		if err := json.Unmarshal(body, &rec); err != nil {

@@ -58,6 +58,11 @@ type fakeBulk struct {
 	applyClose bool
 	// echo rewrites a result row's uploaded values before it is sent.
 	echo func(vals []string) []string
+	// upperHeader sends result headers in upper case.
+	upperHeader bool
+	// lose drops the last rows of an upload unseen, as a CSV reader skips
+	// an empty line: the job completes with fewer records processed.
+	lose int
 
 	jobs  []*fakeJob
 	calls map[string]int
@@ -135,7 +140,8 @@ func (f *fakeBulk) process(j *fakeJob) {
 		limit = f.processLimit
 	}
 	nameCol := indexOf(j.header, "Name")
-	for n, r := range j.rows {
+	rows := j.rows[:len(j.rows)-min(f.lose, len(j.rows))]
+	for n, r := range rows {
 		if n >= limit {
 			j.unprocessed = append([][]string{f.echoed(r)}, j.unprocessed...)
 			continue
@@ -283,11 +289,22 @@ func (f *fakeBulk) serve(w http.ResponseWriter, r *http.Request) {
 			j.id, j.state, j.processed, failed, j.errorMsg)
 	case "failedResults":
 		w.Header().Set("Content-Type", "text/csv")
-		_, _ = w.Write(writeCSV(append([]string{"sf__Id", "sf__Error"}, j.header...), j.failed))
+		_, _ = w.Write(writeCSV(f.resultHeader(append([]string{"sf__Id", "sf__Error"}, j.header...)), j.failed))
 	case "unprocessedrecords":
 		w.Header().Set("Content-Type", "text/csv")
-		_, _ = w.Write(writeCSV(j.header, j.unprocessed))
+		_, _ = w.Write(writeCSV(f.resultHeader(j.header), j.unprocessed))
 	}
+}
+
+func (f *fakeBulk) resultHeader(h []string) []string {
+	if !f.upperHeader {
+		return h
+	}
+	out := make([]string, len(h))
+	for i, c := range h {
+		out[i] = strings.ToUpper(c)
+	}
+	return out
 }
 
 // newBulkProducer is a test producer that sends every message through the
@@ -374,33 +391,171 @@ func TestBulk_RefusedRecordsAreRetriedAndOthersNotResent(t *testing.T) {
 	}
 }
 
-// Records with the same values are matched one result row each: only one
-// of two identical records is named and sent again.
+// Records with the same values are matched one result row each: as many
+// of the identical records are named and sent again as were refused.
 func TestBulk_IdenticalRecordsMatchedOncePerRow(t *testing.T) {
-	f := newFakeBulk(t)
-	refused := 0
-	f.refuse = func(row map[string]string) string {
-		if row["Name"] == "x" && refused == 0 {
-			refused++
-			return "UNABLE_TO_LOCK_ROW:locked:--"
-		}
-		return ""
+	cases := []struct {
+		name      string
+		refuseX   int // how many x rows the job refuses
+		want      string
+		wantRetry string
+		wantTaken int // x taken in, over both attempts
+	}{
+		{name: "one of two refused", refuseX: 1, want: "1 of 3", wantRetry: "x", wantTaken: 2},
+		{name: "both refused", refuseX: 2, want: "2 of 3", wantRetry: "x,x", wantTaken: 2},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeBulk(t)
+			refused := 0
+			f.refuse = func(row map[string]string) string {
+				if row["Name"] == "x" && refused < tc.refuseX {
+					refused++
+					return "UNABLE_TO_LOCK_ROW:locked:--"
+				}
+				return ""
+			}
+			p := newBulkProducer(t, f, "insert")
+			env := testEnvelope(`[{"Name":"x"},{"Name":"x"},{"Name":"y"}]`)
+
+			err := p.Deliver(context.Background(), env)
+			checkRetryable(t, err)
+			checkContains(t, err, []string{tc.want, "UNABLE_TO_LOCK_ROW"}, []string{"record[2]"})
+			if err := p.Deliver(context.Background(), env); err != nil {
+				t.Fatalf("retry = %v, want nil", err)
+			}
+			jobs := f.jobNames()
+			if len(jobs) != 2 || strings.Join(jobs[1], ",") != tc.wantRetry {
+				t.Fatalf("jobs %v, want a second job with %s", jobs, tc.wantRetry)
+			}
+			if got := f.takenOf("x"); got != tc.wantTaken {
+				t.Errorf("x taken in %d times, want %d", got, tc.wantTaken)
+			}
+		})
+	}
+}
+
+// A record a single-column CSV cannot carry (no value for that column, or
+// no fields at all) is refused here and never counted as written: the CSV
+// writer would make it an empty line, which readers skip.
+func TestBulk_RecordTheCSVCannotCarryIsRefused(t *testing.T) {
+	cases := []struct {
+		name      string
+		payload   string
+		want      []string
+		not       []string
+		wantJob   string // Names in the one job, "" for none
+		wantTaken []string
+	}{
+		{name: "empty value", payload: `[{"Name":"a"},{"Name":""},{"Name":"c"}]`,
+			want: []string{"1 of 3", "record[1]: nothing to send"}, not: []string{"record[0]", "record[2]"},
+			wantJob: "a,c", wantTaken: []string{"a", "c"}},
+		{name: "null value", payload: `[{"Name":"a"},{"Name":null}]`,
+			want: []string{"1 of 2", "record[1]: nothing to send"}, wantJob: "a", wantTaken: []string{"a"}},
+		{name: "empty record", payload: `[{"Name":"a"},{}]`,
+			want: []string{"1 of 2", "record[1]: nothing to send"}, wantJob: "a", wantTaken: []string{"a"}},
+		{name: "no fields at all", payload: `[{},{}]`,
+			want: []string{"2 of 2", "record[0]: nothing to send", "record[1]: nothing to send"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeBulk(t)
+			p := newBulkProducer(t, f, "insert")
+			env := testEnvelope(tc.payload)
+			for attempt := 1; attempt <= 3; attempt++ {
+				err := p.Deliver(context.Background(), env)
+				checkRetryable(t, err)
+				checkContains(t, err, tc.want, tc.not)
+			}
+			jobs := f.jobNames()
+			wantJobs := 1
+			if tc.wantJob == "" {
+				wantJobs = 0
+			}
+			if len(jobs) != wantJobs || (wantJobs == 1 && strings.Join(jobs[0], ",") != tc.wantJob) {
+				t.Fatalf("jobs %v, want %d job(s) holding %q", jobs, wantJobs, tc.wantJob)
+			}
+			for _, name := range tc.wantTaken {
+				if got := f.takenOf(name); got != 1 {
+					t.Errorf("%s taken in %d times, want 1", name, got)
+				}
+			}
+		})
+	}
+}
+
+// A job that completes having processed fewer records than it was given
+// lost some: the delivery fails, the job is kept, nothing is sent again.
+func TestBulk_CompleteJobProcessedFewerIsNotAcked(t *testing.T) {
+	f := newFakeBulk(t)
+	f.lose = 1
 	p := newBulkProducer(t, f, "insert")
-	env := testEnvelope(`[{"Name":"x"},{"Name":"x"},{"Name":"y"}]`)
+	env := testEnvelope(threeRecords)
+	for attempt := 1; attempt <= 3; attempt++ {
+		err := p.Deliver(context.Background(), env)
+		checkRetryable(t, err)
+		checkContains(t, err, []string{"processed 2 of the 3 records"}, nil)
+	}
+	if got := f.count("create"); got != 1 {
+		t.Errorf("%d jobs created, want 1", got)
+	}
+	if got := p.jobs.size(); got != 1 {
+		t.Errorf("job memory holds %d jobs, want 1 (kept)", got)
+	}
+	for _, name := range []string{"r0", "r1"} {
+		if got := f.takenOf(name); got != 1 {
+			t.Errorf("%s taken in %d times, want 1", name, got)
+		}
+	}
+}
+
+// A value with \r\n comes back from the results as \n (a CSV reader
+// normalises it inside a quoted field); the refused record is still found,
+// named and retried.
+func TestBulk_RefusedRecordWithCRLFValue(t *testing.T) {
+	f := newFakeBulk(t)
+	f.refuse = refuseNames(map[string]string{"r0": "INVALID_FIELD:bad note:--"})
+	p := newBulkProducer(t, f, "insert")
+	env := testEnvelope(`[{"Name":"r0","Note":"a\r\nb"},{"Name":"r1","Note":"x"}]`)
 
 	err := p.Deliver(context.Background(), env)
 	checkRetryable(t, err)
-	checkContains(t, err, []string{"1 of 3", "UNABLE_TO_LOCK_ROW"}, []string{"record[2]"})
+	checkContains(t, err, []string{"1 of 2", "record[0]: INVALID_FIELD: bad note"}, []string{"match no record", "record[1]"})
+	f.set(func(f *fakeBulk) { f.refuse = nil })
 	if err := p.Deliver(context.Background(), env); err != nil {
 		t.Fatalf("retry = %v, want nil", err)
 	}
 	jobs := f.jobNames()
-	if len(jobs) != 2 || strings.Join(jobs[1], ",") != "x" {
-		t.Fatalf("jobs %v, want a second job with one x", jobs)
+	if len(jobs) != 2 || strings.Join(jobs[1], ",") != "r0" {
+		t.Fatalf("jobs %v, want a retry job with r0", jobs)
 	}
-	if got := f.takenOf("x"); got != 2 {
-		t.Errorf("x taken in %d times, want 2", got)
+	if got := f.takenOf("r1"); got != 1 {
+		t.Errorf("r1 taken in %d times, want 1", got)
+	}
+}
+
+// Salesforce field names are not case-sensitive, and the result header may
+// spell a column differently from the upload: rows still match.
+func TestBulk_ResultHeaderCaseIgnored(t *testing.T) {
+	cases := []struct {
+		name     string
+		endState string
+		limit    int
+		want     []string
+	}{
+		{name: "failed results", endState: jobComplete, want: []string{"1 of 3", "record[1]: INVALID_FIELD: bad"}},
+		{name: "unprocessed records", endState: jobFailed, limit: 2, want: []string{"2 of 3", "record[1]: INVALID_FIELD: bad", "record[2]: not processed"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeBulk(t)
+			f.upperHeader, f.endState, f.processLimit = true, tc.endState, tc.limit
+			f.refuse = refuseNames(map[string]string{"r1": "INVALID_FIELD:bad:--"})
+			p := newBulkProducer(t, f, "insert")
+			err := p.Deliver(context.Background(), testEnvelope(threeRecords))
+			checkRetryable(t, err)
+			checkContains(t, err, tc.want, []string{"match no record", "record[0]"})
+		})
 	}
 }
 
@@ -562,8 +717,8 @@ func TestBulk_PollBound(t *testing.T) {
 	f.inProgress = -1
 	p := newBulkProducer(t, f, "insert")
 	p.bulkPollInitial = 5 * time.Millisecond
-	p.bulkPollMax = 40 * time.Millisecond
-	p.bulkPollTimeout = 200 * time.Millisecond
+	p.bulkPollMax = 200 * time.Millisecond
+	p.bulkPollTimeout = 250 * time.Millisecond
 	env := testEnvelope(threeRecords)
 
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -572,14 +727,15 @@ func TestBulk_PollBound(t *testing.T) {
 		err := p.Deliver(context.Background(), env)
 		took := time.Since(start)
 		checkRetryable(t, err)
-		checkContains(t, err, []string{"still InProgress after 200ms"}, nil)
-		if took < 200*time.Millisecond || took > 2*time.Second {
-			t.Errorf("attempt %d took %s, want the 200ms bound", attempt, took)
+		checkContains(t, err, []string{"still InProgress after 250ms"}, nil)
+		// Waits of 5, 10, 20, 40, 80 ms, then the last one is cut to the
+		// 95 ms left: about 250 ms. Unclipped it would be 160 ms, 315 ms.
+		if took < 250*time.Millisecond || took > 290*time.Millisecond {
+			t.Errorf("attempt %d took %s, want the 250ms bound (under 290ms)", attempt, took)
 		}
-		// Backoff 5, 10, 20, 40, 40, ... ms: about 8 reads in 200 ms. A fixed
-		// 5 ms interval would make about 40.
-		if got := f.count("state") - reads; got < 3 || got > 12 {
-			t.Errorf("attempt %d read the job state %d times, want 3 to 12", attempt, got)
+		// Six reads with backoff; a fixed 5 ms interval would make about 60.
+		if got := f.count("state") - reads; got < 4 || got > 8 {
+			t.Errorf("attempt %d read the job state %d times, want 4 to 8", attempt, got)
 		}
 	}
 	if got := f.count("create"); got != 1 {
@@ -597,6 +753,43 @@ func TestBulk_PollBound(t *testing.T) {
 		if got := f.takenOf(name); got != 1 {
 			t.Errorf("%s taken in %d times, want 1", name, got)
 		}
+	}
+}
+
+// A delivery whose context ends while it waits for the job stops waiting at
+// once, fails with a retryable error and keeps the job, so the retry polls
+// it.
+func TestBulk_ContextEndsDuringPoll(t *testing.T) {
+	f := newFakeBulk(t)
+	f.inProgress = -1
+	p := newBulkProducer(t, f, "insert")
+	p.bulkPollInitial = 10 * time.Second // the first wait outlasts the test
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// Cancel once the job is closed and the wait has begun (or after 5 s).
+		for end := time.Now().Add(5 * time.Second); f.count("close") < 1 && time.Now().Before(end); {
+			time.Sleep(time.Millisecond)
+		}
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	start := time.Now()
+	err := p.Deliver(ctx, testEnvelope(threeRecords))
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("Deliver returned %s after the cancel, want at once", took)
+	}
+	checkRetryable(t, err)
+	checkContains(t, err, []string{"context canceled"}, nil)
+	if got := p.jobs.size(); got != 1 {
+		t.Errorf("job memory holds %d jobs, want 1", got)
+	}
+	f.set(func(f *fakeBulk) { f.inProgress = 0 })
+	p.bulkPollInitial = time.Millisecond
+	if err := p.Deliver(context.Background(), testEnvelope(threeRecords)); err != nil {
+		t.Fatalf("retry = %v, want nil", err)
+	}
+	if got := f.count("create"); got != 1 {
+		t.Errorf("%d jobs created, want 1", got)
 	}
 }
 
@@ -756,5 +949,21 @@ func TestHarness_BulkLongJobOneDelivery(t *testing.T) {
 	}
 	if n := f.count("state"); n != 6 {
 		t.Errorf("state read %d times, want 6 (one delivery)", n)
+	}
+}
+
+// bulkCSV refuses a CSV that does not read back as one row per record, the
+// guard behind sendable: an empty single-column row would be skipped.
+func TestBulkCSV_ReadBackRowCount(t *testing.T) {
+	recs := []map[string]any{{"Name": "a"}, {"Name": ""}, {"Name": "c\r\nd"}}
+	if _, _, _, err := bulkCSV(recs, []int{0, 1, 2}); err == nil || !strings.Contains(err.Error(), "reads back as 2 rows") {
+		t.Errorf("bulkCSV with an empty single-column row: err = %v, want a read-back error", err)
+	}
+	_, header, rows, err := bulkCSV(recs, []int{0, 2})
+	if err != nil {
+		t.Fatalf("bulkCSV: %v", err)
+	}
+	if strings.Join(header, ",") != "Name" || len(rows) != 2 || rows[1][0] != "c\nd" {
+		t.Errorf("read back header %q rows %q, want Name and the normalised c\\nd", header, rows)
 	}
 }

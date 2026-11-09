@@ -83,3 +83,16 @@ From `src/`: `go build ./...`, `go vet ./...`, `golangci-lint run ./...`,
 the root `make lint-tenant` and `make lint-connector`. Mutation checks on
 the job memory (lost close), the failed-results handling, the poll bound
 and the abort on a failed upload.
+
+## Review round 1 (PR #777)
+
+- A complete job that processed fewer records than it was given fails the
+  delivery and keeps the job (nothing resent). The uploaded CSV is read back
+  before the create and must give one row per record; a record a
+  single-column CSV cannot carry (no value) is refused locally as
+  `nothing to send`.
+- The matcher compares result rows with the uploaded CSV read back through
+  `csv.Reader`, so `\r\n` inside a value is normalised on both sides.
+- Result headers are matched without regard to case.
+- Docs: what a DLQ retry of a Bulk message does in the same process and
+  after a restart.
