@@ -6,15 +6,19 @@
 package tlsconfig
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net/url"
 	"time"
 )
 
@@ -79,6 +83,79 @@ func VerifyClientCert(chain []*x509.Certificate, clientCA []byte) error {
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	})
 	return err
+}
+
+// EdgeServerConfig builds the server side of the hop from ingress-nginx to the
+// webhook consumer (#454). The listener presents serverCert/Key and accepts
+// only a client that presents a certificate chaining to edgeCA with the
+// client-auth EKU: the certificate ingress-nginx sends with proxy-ssl-secret.
+// A request on such a connection came through the ingress, which is what lets
+// the worker trust the ssl-client-cert header it carries.
+func EdgeServerConfig(serverCert, serverKey, edgeCA []byte) (*tls.Config, error) {
+	cert, err := tls.X509KeyPair(serverCert, serverKey)
+	if err != nil {
+		return nil, fmt.Errorf("server keypair: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(edgeCA) {
+		return nil, fmt.Errorf("edge CA: no certificates parsed")
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    pool,
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
+// MaxForwardedCertLen bounds the ssl-client-cert header ParseForwardedCert
+// accepts. A URL-escaped leaf certificate is a few KiB; 16 KiB leaves room for
+// large RSA keys and long extensions.
+const MaxForwardedCertLen = 16 << 10
+
+// ParseForwardedCert parses the client certificate ingress-nginx forwards in
+// the ssl-client-cert header ($ssl_client_escaped_cert: the leaf as PEM,
+// URL-escaped). It accepts exactly one CERTIFICATE block and nothing else
+// besides whitespace, and refuses on any decode or parse failure. The errors
+// never quote the header, so they are safe to log.
+func ParseForwardedCert(escaped string) (*x509.Certificate, error) {
+	if escaped == "" {
+		return nil, fmt.Errorf("forwarded certificate: empty")
+	}
+	if len(escaped) > MaxForwardedCertLen {
+		return nil, fmt.Errorf("forwarded certificate: longer than %d bytes", MaxForwardedCertLen)
+	}
+	// PathUnescape, not QueryUnescape: a literal '+' in the base64 must stay
+	// '+', not become a space.
+	raw, err := url.PathUnescape(escaped)
+	if err != nil {
+		return nil, fmt.Errorf("forwarded certificate: not URL-escaped PEM")
+	}
+	block, rest := pem.Decode([]byte(raw))
+	if block == nil {
+		return nil, fmt.Errorf("forwarded certificate: no PEM block")
+	}
+	if block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("forwarded certificate: PEM block is %q, want CERTIFICATE", block.Type)
+	}
+	if len(block.Headers) != 0 {
+		return nil, fmt.Errorf("forwarded certificate: PEM block has headers")
+	}
+	if len(bytes.TrimSpace(rest)) != 0 {
+		return nil, fmt.Errorf("forwarded certificate: data after the certificate")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("forwarded certificate: not a valid X.509 certificate")
+	}
+	return cert, nil
+}
+
+// Fingerprint is the SHA-256 of the certificate's DER, hex-encoded: what logs
+// name a client certificate by, instead of its contents.
+func Fingerprint(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.Raw)
+	return hex.EncodeToString(sum[:])
 }
 
 // ClientConfig builds a client-side *tls.Config. When clientCert/Key are both
