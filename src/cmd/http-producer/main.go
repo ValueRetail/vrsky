@@ -63,9 +63,13 @@ type httpProducer struct {
 	// in Configure and never set by a node. defaultClient serves nodes without
 	// mTLS; it is built on first use, so a producer that was not configured
 	// still gets a guarded client and never a plain http.Client.
-	allowPrivate  bool
-	defaultOnce   sync.Once
-	defaultClient *http.Client
+	allowPrivate bool
+	// requestTimeout bounds one request end to end (connect, TLS, waiting for
+	// the answer, reading the body). Zero means defaultRequestTimeout; tests
+	// set a short one.
+	requestTimeout time.Duration
+	defaultOnce    sync.Once
+	defaultClient  *http.Client
 
 	// sent remembers the nodes that took a message whose delivery failed on
 	// another node, so its redelivery skips them (#730, see sentSet). Created
@@ -151,6 +155,12 @@ func (p *httpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 	return nil
 }
 
+// defaultRequestTimeout is how long one request to a target may take. A target
+// that accepts the connection and never answers fails the delivery after this,
+// as an ordinary retriable error (NAK, then the DLQ), so it cannot hold the
+// dispatch goroutine (#763).
+const defaultRequestTimeout = 30 * time.Second
+
 // newClient builds the guarded client every delivery uses. A tenant may point a
 // node at a public API over http or https, so the scheme is not restricted; the
 // dial refuses blocked addresses either way, on every hop. Redirects stay on the
@@ -159,7 +169,11 @@ func (p *httpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 // outbound call is a child span of the pipeline trace and carries traceparent
 // (a no-op when tracing is off).
 func (p *httpProducer) newClient(tlsCfg *tls.Config) *http.Client {
-	c := safeurl.NewClientWith(30*time.Second, safeurl.Options{
+	timeout := p.requestTimeout
+	if timeout <= 0 {
+		timeout = defaultRequestTimeout
+	}
+	c := safeurl.NewClientWith(timeout, safeurl.Options{
 		AllowPrivate:      p.allowPrivate,
 		SameHostRedirects: true,
 		TLSConfig:         tlsCfg,
