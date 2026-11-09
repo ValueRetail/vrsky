@@ -208,6 +208,13 @@ volume is still there and unused; it is what a rollback falls back to.
 rule lets another pod in without TLS or without a password, if the socket line
 goes, or if the file stops coming from the ConfigMap.
 
+**Local k3d:** the dev strings in `secret.example.yaml` (here and in
+`management-api/`) say `sslmode=require`. A git-ignored `secret.yaml` copied
+from an older example still says `sslmode=disable`, and `deploy-vrsky-platform.sh`
+prefers it, so after this change every service on k3d is refused. Change
+`sslmode=disable` to `sslmode=require` in both `secret.yaml` files (or delete
+them to fall back to the examples) and deploy again.
+
 #### Applying it (production, once)
 
 The deploy job never applies this directory. Production already refuses plain
@@ -222,6 +229,14 @@ infrastructure/azure/postgres-tls.sh check
 # 2. What would change: the new ConfigMap postgres-hba, and in the StatefulSet
 #    the hba_file argument and the hba volume. Nothing else.
 DRY_RUN=1 infrastructure/azure/postgres-tls.sh server
+
+# 2b. The rules the volume's file holds today (check prints the same dump).
+#     Expect the ConfigMap's lines: local and 127.0.0.1/::1 trust, then
+#     hostssl all all all scram-sha-256. Anything else on the volume (an extra
+#     host rule, another user or address) goes away with step 3; stop and
+#     add it to the ConfigMap first if it is still needed.
+kubectl exec -n vrsky-database postgresql-0 -c postgresql -- psql -U vrsky -d vrsky -c \
+  'SELECT type, database, user_name, address, netmask, auth_method FROM pg_hba_file_rules'
 
 # 3. Apply and wait for postgresql-0. It ends with ssl, hba_file and the number
 #    of rules that let another pod in without TLS (want: on,
@@ -254,6 +269,9 @@ kubectl run pg-plain-test -n vrsky-platform --rm -i --restart=Never --image=post
   cannot parse is ignored on a reload (the log says `pg_hba.conf was not
   reloaded`), but stops Postgres at its next start, so check
   `SELECT * FROM pg_hba_file_rules WHERE error IS NOT NULL` after an edit.
+  While a `host` line for another address is there, `postgres-tls.sh urls
+  disable` still refuses: it counts any rule that may take plaintext, and one
+  narrow address is not a reason to move every client off TLS.
 - **Postgres does not come back after step 3.**
   `kubectl -n vrsky-database rollout undo statefulset/postgresql`, then
   `kubectl -n vrsky-database delete pod postgresql-0` (a rolling update does

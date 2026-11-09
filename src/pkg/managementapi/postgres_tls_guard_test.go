@@ -714,6 +714,9 @@ func TestPostgresTLS_HBACheckCatchesPlainRules(t *testing.T) {
 		"trust over TLS":           "local all all trust\nhostssl all all all trust\n",
 		"no local line":            "hostssl all all all scram-sha-256\n",
 		"an include":               good + "include_dir conf.d\n",
+		// Both let plaintext in on a live server (review of #787).
+		"loopback with a wide mask": good + "host all all 127.0.0.1/0 trust\n",
+		"hostnogssenc":              good + "hostnogssenc all all all trust\n",
 	} {
 		if len(hbaProblems(hba)) == 0 {
 			t.Errorf("%s: accepted\n%s", name, hba)

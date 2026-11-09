@@ -60,7 +60,7 @@ case "$1" in
     case "$*" in
       *tls.crt*) cat "$STUB_CA_PEM" ;;
       *pg_hba_file_rules*) echo "${STUB_PLAIN_RULES:-0}" ;;
-      *) echo on ;;
+      *) echo "${STUB_SSL:-on}" ;;
     esac ;;
   apply | diff) cat > /dev/null ;;
   logs) echo "ssl=true TLSv1.3" ;;
@@ -460,5 +460,19 @@ func TestPostgresTLS_URLsDisableRefusedWhileHostSSL(t *testing.T) {
 	code, _, errOut = s.run(t, []string{"CONFIRM=1"}, "urls", "require")
 	if code != 0 {
 		t.Errorf("urls require exited %d: %s", code, errOut)
+	}
+
+	// But it needs TLS on the server, like verify-full.
+	code, _, errOut = s.run(t, []string{"CONFIRM=1", "STUB_SSL=off"}, "urls", "require")
+	if code == 0 {
+		t.Error("urls require succeeded while Postgres has ssl off")
+	}
+	if !strings.Contains(errOut, "ssl on") {
+		t.Errorf("the refusal does not say ssl is off: %q", errOut)
+	}
+	for _, c := range s.calls(t) {
+		if strings.HasPrefix(c, "patch") || strings.HasPrefix(c, "get secret") {
+			t.Errorf("urls require read or patched a Secret with ssl off: %s", c)
+		}
 	}
 }

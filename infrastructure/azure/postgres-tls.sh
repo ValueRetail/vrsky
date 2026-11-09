@@ -187,10 +187,21 @@ cronjob_has_ca() {
 
 pg_sql() { kubectl exec -n "$DB_NS" "$PG_POD" -c postgresql -- psql -U vrsky -d vrsky -tAc "$1"; }
 
-# The pg_hba.conf rules that let a client from another pod in without TLS.
-# 0 means Postgres refuses plain connections (the loopback lines are the pod's
-# own: probes, kubectl exec, port-forward).
-PLAIN_RULES_SQL="SELECT count(*) FROM pg_hba_file_rules WHERE type IN ('host', 'hostnossl') AND address NOT IN ('127.0.0.1', '::1')"
+# The pg_hba.conf rules that may let a client from another pod in without
+# TLS. 0 means Postgres refuses plain connections. Not counted: local (the
+# socket), hostssl, hostgssenc (encrypted), and host rules for exactly one
+# loopback address (127.0.0.1/32, ::1/128; the pod's own probes, kubectl exec,
+# port-forward). Counted: every other host, hostnossl or hostnogssenc rule,
+# including a loopback address with a wider mask (127.0.0.1/0 is everyone),
+# and any line Postgres could not parse. A narrow rule such as
+# `host … 10.1.2.3/32` counts too, so `urls disable` refuses on it. That is
+# deliberate: one address taking plain connections does not make it safe to
+# move every client to sslmode=disable.
+PLAIN_RULES_SQL="SELECT count(*) FROM pg_hba_file_rules WHERE (type NOT IN ('local', 'hostssl', 'hostgssenc') AND NOT (coalesce(address, '') IN ('127.0.0.1', '::1') AND coalesce(netmask, '') IN ('255.255.255.255', 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff'))) OR error IS NOT NULL"
+
+# Every rule as Postgres parsed it, for a human to read before and after
+# `server`. Addresses and auth methods only; nothing secret.
+HBA_RULES_SQL="SELECT line_number, type, array_to_string(database, ','), array_to_string(user_name, ','), coalesce(address, ''), coalesce(netmask, ''), auth_method, coalesce(error, '') FROM pg_hba_file_rules ORDER BY line_number"
 
 cmd_server() {
   write_gate
@@ -285,6 +296,9 @@ cmd_urls() {
     plain="$(pg_sql "$PLAIN_RULES_SQL" | tr -d '[:space:]')" || die "could not read pg_hba_file_rules"
     [ -n "$plain" ] && [ "$plain" != 0 ] \
       || die "Postgres refuses plain connections (pg_hba.conf from the ConfigMap postgres-hba, #729), so no client could connect on sslmode=disable. Use 'urls require' (TLS without checking the server), or allow plain connections first (infrastructure/kubernetes/postgresql/README.md, Rollback)"
+  fi
+  if [ "$mode" = require ]; then
+    [ "$(pg_sql 'SHOW ssl' | tr -d '[:space:]')" = on ] || die "Postgres does not have ssl on (run 'server'); clients on sslmode=require could not connect"
   fi
   if [ "$mode" = verify-full ]; then
     # Fail closed: the strings must not point at a server or a CA that is not there.
@@ -412,6 +426,8 @@ cmd_check() {
   echo "    ssl = $(pg_sql 'SHOW ssl' 2>/dev/null | tr -d '[:space:]')"
   echo "    hba_file = $(pg_sql 'SHOW hba_file' 2>/dev/null | tr -d '[:space:]')"
   echo "    pg_hba.conf rules that let another pod in without TLS: $(pg_sql "$PLAIN_RULES_SQL" 2>/dev/null | tr -d '[:space:]') (0: plain connections are refused)"
+  echo "    pg_hba.conf as Postgres reads it (line|type|database|user|address|netmask|method|error):"
+  pg_sql "$HBA_RULES_SQL" 2>/dev/null | sed 's/^/      /' || echo "      (could not query)"
   echo "    network client connections by ssl (a session on the unix socket, like this one, is not counted):"
   pg_sql "SELECT '      ssl=' || s.ssl || '  ' || count(*) FROM pg_stat_ssl s JOIN pg_stat_activity a USING (pid) WHERE a.backend_type = 'client backend' AND a.client_addr IS NOT NULL GROUP BY s.ssl ORDER BY s.ssl DESC" 2>/dev/null || echo "      (could not query)"
   echo "    client addresses WITHOUT ssl (match them to pods with: kubectl get pods -A -o wide):"

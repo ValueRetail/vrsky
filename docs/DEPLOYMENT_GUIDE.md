@@ -353,6 +353,12 @@ imports nine connectors as `localhost:5000/vrsky/...`, which nothing on k3d
 deploys (the connector manifest names ACR and only
 `deploy-connectors-azure.sh` applies it).
 
+Postgres refuses plain connections (#729), so the dev connection strings say
+`sslmode=require`. A git-ignored `secret.yaml` copied from an older example
+(in `infrastructure/kubernetes/postgresql/` or `management-api/`) still says
+`sslmode=disable` and is used ahead of the example: change it to
+`sslmode=require`, or delete it, before deploying.
+
 `deploy-vrsky-platform.sh` doesn't deploy the UI; apply
 `infrastructure/kubernetes/ui/` yourself. The pod then runs the image's own
 nginx config, which serves the SPA but doesn't proxy `/api` to the management
