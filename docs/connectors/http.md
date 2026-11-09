@@ -126,7 +126,8 @@ A request is cut off after 30 seconds, whether the target never accepts the
 connection or accepts it and never answers. That counts as a network error:
 it is retried and dead-lettered like one, and a node that timed out is not
 marked as having taken the message (#763). The 30 seconds is fixed; it is not
-a node setting.
+a node setting. The same 30 seconds bounds a very large streamed payload
+today, so an upload that takes longer is cut off and dead-lettered (#774).
 
 A `5xx`, a `429`, a network error and a failure to get an OAuth token are
 retried on the usual backoff and then dead-lettered with the payload. Any

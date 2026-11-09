@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -46,8 +46,10 @@ func timeoutProducer() *httpProducer {
 func TestSend_NoAnswerFailsWithinTheTimeout(t *testing.T) {
 	srv := hangingServer(t)
 	p := timeoutProducer()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	start := time.Now()
-	err := p.sendHTTPRequest(context.Background(), "conn-1", &HTTPConfig{URL: srv.URL, Method: "POST"}, testEnv(), nil)
+	err := p.sendHTTPRequest(ctx, "conn-1", &HTTPConfig{URL: srv.URL, Method: "POST"}, testEnv(), nil)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("want an error from a target that never answers")
@@ -55,8 +57,9 @@ func TestSend_NoAnswerFailsWithinTheTimeout(t *testing.T) {
 	if elapsed > 3*time.Second {
 		t.Errorf("took %v, want about the 200ms timeout", elapsed)
 	}
-	if sdk.IsPermanent(err) {
-		t.Errorf("a timeout must be retried, got permanent error: %v", err)
+	var ne net.Error
+	if !errors.Is(err, context.DeadlineExceeded) && !(errors.As(err, &ne) && ne.Timeout()) {
+		t.Errorf("want a timeout error, got %v", err)
 	}
 }
 
@@ -83,16 +86,20 @@ func TestDeliver_TimedOutNodeIsNotMarkedTaken(t *testing.T) {
 		{NodeID: "slow", URL: hang.URL, Method: "POST"},
 	}
 	p.configCacheTime["conn-1"] = time.Now()
-	env := func() *envelope.Envelope { e := testEnv(); return e }()
+	env := testEnv()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	err := p.Deliver(context.Background(), env)
+	err := p.Deliver(ctx, env)
 	if err == nil {
 		t.Fatal("want an error: one node timed out")
 	}
-	if sdk.IsPermanent(err) || errors.Is(err, context.Canceled) {
-		t.Fatalf("want a retriable error, got %v", err)
+	// The SDK acks a Permanent error and NAKs anything else, so "not
+	// permanent" and "caused by the timeout" is what makes it retried.
+	if sdk.IsPermanent(err) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want a retriable timeout error, got %v", err)
 	}
-	if err2 := p.Deliver(context.Background(), env); err2 == nil {
+	if err2 := p.Deliver(ctx, env); err2 == nil {
 		t.Fatal("the slow node still hangs; want an error on the retry")
 	}
 	if n := okHits.Load(); n != 1 {
