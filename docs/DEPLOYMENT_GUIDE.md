@@ -262,7 +262,8 @@ Only on an empty cluster, in this order:
    Postgres has TLS from step 1; `infrastructure/azure/rotate-secrets.sh`
    (which you run before real data goes in) copies the CA to the client
    namespaces and builds `verify-full` strings. Until then the dev Secrets
-   keep plain connections, which the server still accepts.
+   use `sslmode=require` (TLS without checking the server): the server
+   refuses plain connections from other pods (#729).
 4. `PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh`:
    monitoring and the alert rules. It stops unless the `vrsky-monitoring`
    namespace and its `alerts-webhook-token` and `grafana-admin` Secrets
@@ -351,6 +352,12 @@ manifests pull with `imagePullPolicy: IfNotPresent`.
 imports nine connectors as `localhost:5000/vrsky/...`, which nothing on k3d
 deploys (the connector manifest names ACR and only
 `deploy-connectors-azure.sh` applies it).
+
+Postgres refuses plain connections (#729), so the dev connection strings say
+`sslmode=require`. A git-ignored `secret.yaml` copied from an older example
+(in `infrastructure/kubernetes/postgresql/` or `management-api/`) still says
+`sslmode=disable` and is used ahead of the example: change it to
+`sslmode=require`, or delete it, before deploying.
 
 `deploy-vrsky-platform.sh` doesn't deploy the UI; apply
 `infrastructure/kubernetes/ui/` yourself. The pod then runs the image's own

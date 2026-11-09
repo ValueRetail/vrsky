@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // s3Store is the S3 (and S3-compatible, e.g. MinIO) ObjectStore backend.
@@ -244,6 +246,73 @@ func (s *s3Store) Copy(ctx context.Context, srcKey, dstKey string) error {
 		return fmt.Errorf("s3 copy %q->%q: %w", srcKey, dstKey, err)
 	}
 	return nil
+}
+
+var _ Conditional = (*s3Store)(nil)
+
+// DeleteIf deletes key with If-Match on its ETag (#718); S3 answers a changed
+// object with 412 PreconditionFailed. A store that does not implement the
+// header (501 NotImplemented) gets a plain delete instead, as before the
+// header was sent: the caller has just checked the object. The pinned MinIO
+// accepts the header and ignores it.
+func (s *s3Store) DeleteIf(ctx context.Context, key, version string) error {
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket:  aws.String(s.bucket),
+		Key:     aws.String(key),
+		IfMatch: aws.String(quotedETag(version)),
+	})
+	if s3NotImplemented(err) {
+		return s.Delete(ctx, key)
+	}
+	if err != nil {
+		return fmt.Errorf("s3 delete %q: %w", key, s3CondErr(err))
+	}
+	return nil
+}
+
+// CopyIf copies with x-amz-copy-source-if-match on the source's ETag, and
+// falls back like DeleteIf.
+func (s *s3Store) CopyIf(ctx context.Context, srcKey, dstKey, version string) error {
+	_, err := s.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:            aws.String(s.bucket),
+		CopySource:        aws.String(s.bucket + "/" + escapeKey(srcKey)),
+		Key:               aws.String(dstKey),
+		CopySourceIfMatch: aws.String(quotedETag(version)),
+	})
+	if s3NotImplemented(err) {
+		return s.Copy(ctx, srcKey, dstKey)
+	}
+	if err != nil {
+		return fmt.Errorf("s3 copy %q->%q: %w", srcKey, dstKey, s3CondErr(err))
+	}
+	return nil
+}
+
+// s3CondErr marks the answers to a conditional request: 412 is a changed
+// object, NoSuchKey a missing one.
+func s3CondErr(err error) error {
+	var re *smithyhttp.ResponseError
+	if errors.As(err, &re) && re.HTTPStatusCode() == http.StatusPreconditionFailed {
+		return versionChanged(err)
+	}
+	var api smithy.APIError
+	if errors.As(err, &api) && api.ErrorCode() == "PreconditionFailed" {
+		return versionChanged(err)
+	}
+	return s3GetErr(err)
+}
+
+// s3NotImplemented reports a store that does not implement a request header.
+func s3NotImplemented(err error) bool {
+	if err == nil {
+		return false
+	}
+	var re *smithyhttp.ResponseError
+	if errors.As(err, &re) && re.HTTPStatusCode() == http.StatusNotImplemented {
+		return true
+	}
+	var api smithy.APIError
+	return errors.As(err, &api) && api.ErrorCode() == "NotImplemented"
 }
 
 // escapeKey URL-encodes an object key segment-by-segment, preserving "/".

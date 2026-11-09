@@ -104,3 +104,97 @@ func hasString(ss []string, want string) bool {
 	}
 	return false
 }
+
+// TestCertManagerPodMonitor: the Postgres certificate alerts (#729) read a
+// metric only the cert-manager PodMonitor brings in. Pin the PodMonitor to
+// the controller pod as the pinned chart renders it, with honorLabels so the
+// metric keeps the Certificate's namespace.
+func TestCertManagerPodMonitor(t *testing.T) {
+	docs := readYAMLDocs(t, filepath.Join(k8sRoot(), "monitoring", "podmonitors.yaml"))
+	pm := findDoc(t, docs, "PodMonitor", "cert-manager")
+	if got := str(at(pm, "metadata", "namespace")); got != "vrsky-monitoring" {
+		t.Errorf("PodMonitor cert-manager is in %q, want vrsky-monitoring beside the others", got)
+	}
+
+	// The namespace, labels and port come from the cert-manager chart that
+	// install-cert-manager.sh installs. Another chart version may name them
+	// differently; then check the chart and update both.
+	installRaw, err := os.ReadFile(filepath.Join(k8sRoot(), "ingress", "install-cert-manager.sh"))
+	if err != nil {
+		t.Fatalf("read install-cert-manager.sh: %v", err)
+	}
+	install := string(installRaw)
+	if !strings.Contains(install, "--version v1.13.3") {
+		t.Error("install-cert-manager.sh no longer pins cert-manager v1.13.3: check that chart's controller pod labels and metrics port name against PodMonitor cert-manager, then update this test")
+	}
+	if !strings.Contains(install, "--namespace cert-manager") {
+		t.Error("install-cert-manager.sh no longer installs into namespace cert-manager, which PodMonitor cert-manager watches")
+	}
+
+	var nsOK bool
+	for _, n := range list(at(pm, "spec", "namespaceSelector", "matchNames")) {
+		nsOK = nsOK || str(n) == "cert-manager"
+	}
+	if !nsOK {
+		t.Errorf("PodMonitor cert-manager does not select namespace cert-manager: %v", at(pm, "spec", "namespaceSelector"))
+	}
+	for k, want := range map[string]string{
+		"app.kubernetes.io/name":      "cert-manager",
+		"app.kubernetes.io/component": "controller",
+	} {
+		if got := str(at(pm, "spec", "selector", "matchLabels", k)); got != want {
+			t.Errorf("PodMonitor cert-manager selects %s=%q, want %q (the controller pod; cainjector and webhook have no certificate metrics)", k, got, want)
+		}
+	}
+	eps := list(at(pm, "spec", "podMetricsEndpoints"))
+	if len(eps) != 1 {
+		t.Fatalf("PodMonitor cert-manager has %d endpoints, want 1", len(eps))
+	}
+	if got := str(at(eps[0], "port")); got != "http-metrics" {
+		t.Errorf("endpoint port %q, want http-metrics (containerPort 9402 in the chart)", got)
+	}
+	// Without honorLabels Prometheus moves the metric's namespace label to
+	// exported_namespace and sets namespace=cert-manager; the rules match on
+	// namespace="vrsky-database" and would never see a sample.
+	if at(eps[0], "honorLabels") != true {
+		t.Error("endpoint lacks honorLabels: true; the certificate's namespace would become exported_namespace")
+	}
+}
+
+// TestPostgresCertAlertsMatchTheCertificate: the rules name the Certificate
+// and namespace by string. Pin them to tls.yaml, so a rename of either does
+// not leave both alerts watching nothing (the absent alert would fire, but an
+// hour late and only in production).
+func TestPostgresCertAlertsMatchTheCertificate(t *testing.T) {
+	tls := readYAMLDocs(t, filepath.Join(k8sRoot(), "postgresql", "tls.yaml"))
+	cert := findDoc(t, tls, "Certificate", pgTLSSecret)
+	matcher := `certmanager_certificate_expiration_timestamp_seconds{namespace="` +
+		str(at(cert, "metadata", "namespace")) + `", name="` + str(at(cert, "metadata", "name")) + `"}`
+
+	rules := readYAMLDocs(t, filepath.Join("..", "..", "..", "infrastructure", "prometheus-rules.yml"))
+	if len(rules) != 1 {
+		t.Fatalf("prometheus-rules.yml has %d documents, want 1", len(rules))
+	}
+	severities := map[string][]string{}
+	for _, g := range list(rules[0]["groups"]) {
+		for _, r := range list(at(g, "rules")) {
+			name := str(at(r, "alert"))
+			if name != "PostgresCertExpiring" && name != "PostgresCertMetricsAbsent" {
+				continue
+			}
+			if !strings.HasPrefix(str(at(g, "name")), "vrsky-") {
+				t.Errorf("%s is in group %q; the platform alerts live in vrsky-* groups", name, str(at(g, "name")))
+			}
+			if !strings.Contains(str(at(r, "expr")), matcher) {
+				t.Errorf("%s expr does not select %s:\n%s", name, matcher, str(at(r, "expr")))
+			}
+			severities[name] = append(severities[name], str(at(r, "labels", "severity")))
+		}
+	}
+	if got := strings.Join(severities["PostgresCertExpiring"], ","); got != "warning,critical" {
+		t.Errorf("PostgresCertExpiring severities = %q, want warning,critical", got)
+	}
+	if got := strings.Join(severities["PostgresCertMetricsAbsent"], ","); got != "warning" {
+		t.Errorf("PostgresCertMetricsAbsent severities = %q, want warning", got)
+	}
+}

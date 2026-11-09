@@ -1104,7 +1104,7 @@ Last updated 2026-10-28.
     legacy `PUT /api/v1/tenants/{id}/plan` and quota routes have the same
     gap. File them under the path's `tenant_id`. Found in review of #637.
 
-156. **Postgres TLS: the loose ends of #453.** (1) Refusing plain
+156. ~~**Postgres TLS: the loose ends of #453.**~~ (#729) (1) Refusing plain
     connections is an edit of `pg_hba.conf` on the volume
     (`infrastructure/kubernetes/postgresql/README.md`, "Optional last step").
     Move it into the manifests with `hba_file` pointing at a ConfigMap, after
@@ -1186,7 +1186,7 @@ Last updated 2026-10-28.
     retries. Stamp before the fetch and compare before the first after-action
     too. Found in review of #676.
 
-167. **Conditional deletes for the cloud-storage after-action.** The stamp
+167. ~~**Conditional deletes for the cloud-storage after-action.**~~ (#718) The stamp
     check leaves a window between the Stat and the delete (for a `move`,
     through the copy). Close it where the store supports it: Azure `If-Match`
     on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
@@ -1306,7 +1306,7 @@ Last updated 2026-10-28.
     `sdk.Retriable` for the first, and decide what a refused row should do
     (dead-letter the message with the row's error?). Found in #698.
 
-180. **The Sitoo destination drops a message for a refused `base_url`.**
+180. ~~**The Sitoo destination drops a message for a refused `base_url`.**~~ (#721)
     `sitoo-producer` returns `sdk.Permanent` from `safeurl.CheckBaseURL`,
     while the HTTP, Visma, Brightpearl, Front Systems, SAP and Business
     Central destinations retry and dead-letter, so the message can be replayed
@@ -1379,7 +1379,7 @@ Last updated 2026-10-28.
     URLs: httpbin since #660, mock-sap since #708. Decide whether compose
     sets it on `management-api` too. Found in #708. Filed as #720.
 
-189. **The poll-mode after-action retry runs blind.** The #640 retry pass
+189. ~~**The poll-mode after-action retry runs blind.**~~ (#718) The #640 retry pass
     calls `afterAction` for a key that is done at the listing's stamp,
     without a Stat check, so an object replaced with the same size within
     the same second (S3 listings have whole seconds), or replaced between the
@@ -1388,14 +1388,14 @@ Last updated 2026-10-28.
     one), or make the same Stat check as the first after-action (#707) in
     `retryAfterAction`. Found in review of #710. Filed as #718.
 
-190. **GCS metadata edits read as replacements.** The stamp check before a
+190. ~~**GCS metadata edits read as replacements.**~~ (#718) The stamp check before a
     cloud-storage after-action compares `Updated`, which GCS changes on a
     metadata-only edit (labels, content type) while the generation stays.
     Such an object is left (event mode) or published once more (poll mode).
     On GCS compare generation and size and ignore `Updated`. Found in review
     of #710. Filed as #718.
 
-191. **Salesforce Bulk API jobs are never checked.** `bulkWrite` creates,
+191. ~~**Salesforce Bulk API jobs are never checked.**~~ (#760) `bulkWrite` creates,
     fills and closes the job and acks; it does not poll the job state or
     read `failedResults`, so a record the job refuses while Salesforce
     processes it reaches no queue and no log. A close whose answer is lost
@@ -1411,6 +1411,12 @@ Last updated 2026-10-28.
     may import (`make lint-connector` allows it), keyed by a comparable
     type parameter, together with #727, which makes it survive a restart.
     Found in #730 and #735. Filed as #758.
+
+193. **A large streamed HTTP upload is cut off after 30 s.** `DeliverStream`
+    uses the same client, whose 30 s timeout covers the whole request, so an
+    upload that takes longer ends in the DLQ. Give the streamed path a
+    timeout that scales with the size or bounds idle time instead. Found in
+    #773. Filed as #774.
 
 ## Human
 

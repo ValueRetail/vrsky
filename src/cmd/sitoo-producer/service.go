@@ -113,9 +113,11 @@ func (p *sitooProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 
 	// base_url is tenant config; refuse one the connector must not call. The
 	// client's dial-time check is the enforcement, this is the early error.
+	// Retriable, as in the other destinations: the message is dead-lettered
+	// and can be replayed once the node is fixed (#721).
 	if cfg.BaseURL != "" {
 		if err := safeurl.CheckBaseURL(cfg.BaseURL, p.allowPrivate); err != nil {
-			return sdk.Permanent(fmt.Errorf("sitoo producer base_url refused for connection %s: %w", env.IntegrationID, err))
+			return sdk.Retriable(fmt.Errorf("sitoo producer base_url refused for connection %s: %w", env.IntegrationID, err))
 		}
 	}
 

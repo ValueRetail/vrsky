@@ -83,6 +83,11 @@ var targetConnectTimeout = 10
 // the current config.
 var errTargetEvicted = errors.New("target config was reloaded during the delivery; will retry")
 
+// errConnectAborted is what callers waiting on a connect get when that
+// connect ended without a result (open or ping panicked). The delivery is
+// retried and connects again.
+var errConnectAborted = errors.New("connecting to the target database was aborted; will retry")
+
 // TargetConnection is one database destination node of a connection.
 type TargetConnection struct {
 	NodeID         string
@@ -103,18 +108,77 @@ type TargetConnection struct {
 	// closed is set by close: the list this target was in has been evicted
 	// or replaced, so pool must not open a pool nothing would ever close.
 	closed bool
+	// connecting is the open in flight, if any (guarded by mu).
+	connecting *poolCall
+}
+
+// poolCall is one in-flight open of a target's pool. Concurrent first uses
+// wait on it instead of opening a pool each.
+type poolCall struct {
+	done chan struct{}
+	db   *sql.DB
+	err  error
 }
 
 // pool returns the target's pool, opening and pinging it first if needed.
+// The connect (up to the 10 s connect timeout) runs outside tc.mu, so close
+// (eviction on the NATS command goroutine, Stop) never waits behind it. Only
+// one caller connects; the others wait for its result. If the target was
+// closed meanwhile the new pool is closed and the caller gets errTargetEvicted.
 func (tc *TargetConnection) pool(ctx context.Context, open func(string) (*sql.DB, error)) (*sql.DB, error) {
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
 	if tc.closed {
+		tc.mu.Unlock()
 		return nil, errTargetEvicted
 	}
 	if tc.DB != nil {
-		return tc.DB, nil
+		db := tc.DB
+		tc.mu.Unlock()
+		return db, nil
 	}
+	if call := tc.connecting; call != nil {
+		tc.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.db, call.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	// err stays errConnectAborted unless the connect returns.
+	call := &poolCall{done: make(chan struct{}), err: errConnectAborted}
+	tc.connecting = call
+	tc.mu.Unlock()
+	// Deferred so that a panic in open or ping (recovered and NAKed by the
+	// subscriber) still clears the connect and wakes its waiters. Without it
+	// every later pool call on this target would wait on done forever.
+	defer func() {
+		tc.mu.Lock()
+		tc.connecting = nil
+		tc.mu.Unlock()
+		close(call.done)
+	}()
+
+	db, err := tc.connect(ctx, open)
+
+	tc.mu.Lock()
+	switch {
+	case err != nil:
+		call.db, call.err = nil, err
+	case tc.closed:
+		// Evicted while connecting: nothing would ever close this pool.
+		_ = db.Close()
+		call.db, call.err = nil, errTargetEvicted
+	default:
+		tc.DB = db
+		call.db, call.err = db, nil
+	}
+	tc.mu.Unlock()
+	return call.db, call.err
+}
+
+// connect opens and pings a pool. A failed open is closed and not kept.
+func (tc *TargetConnection) connect(ctx context.Context, open func(string) (*sql.DB, error)) (*sql.DB, error) {
 	db, err := open(tc.dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open target database %s:%d: %w", tc.Config.Host, tc.Config.Port, err)
@@ -123,7 +187,6 @@ func (tc *TargetConnection) pool(ctx context.Context, open func(string) (*sql.DB
 		_ = db.Close()
 		return nil, fmt.Errorf("reach target database %s:%d: %w", tc.Config.Host, tc.Config.Port, err)
 	}
-	tc.DB = db
 	return db, nil
 }
 

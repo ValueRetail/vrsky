@@ -171,7 +171,10 @@ With `after_action` `delete` or `move`, in both modes, the consumer reads
 the object's size, last-modified time and version (ETag on S3 and Azure,
 generation on GCS) before it fetches it, and again right before the delete
 or move (#707). If they changed, someone uploaded a new version under the
-same key while the old one was being published. The consumer leaves the new
+same key while the old one was being published. On GCS only the size and
+the generation count: a metadata-only change (labels, content type) moves
+the last-modified time but not the generation, so it is not a new version
+(#718). The consumer leaves the new
 version where it is and logs a warning. In poll mode it says `object
 replaced since published; left for the next poll`: the object is not
 counted as published, so the next poll publishes the new version, even one
@@ -180,17 +183,29 @@ for its own notification`, and that bucket notification brings it in. An object 
 failed read counts as a failed after-action, retried as below.
 
 So each object with `delete` or `move` takes two metadata reads (a HEAD on
-S3) besides the fetch. A replacement uploaded in the instant between the
-second read and the delete can still be removed unpublished; for a `move`
-that window lasts through the copy, which on Azure means downloading and
-re-uploading the blob. A metadata-only change on GCS (labels, content type) changes the
-last-modified time, so it counts as a replacement: the object is left or
-published once more, not lost. Before #707 only retries made this check.
+S3) besides the fetch. The delete itself, and for a `move` the copy, then
+names the version that was read, so the store refuses it if the object was
+written again in between (#718): `If-Match` on the ETag on S3 and Azure
+(for Azure on the copy's download), `ifGenerationMatch` and
+`ifSourceGenerationMatch` on GCS. A refused delete or copy is handled like
+the check above: the new version is left and logged as replaced. If a
+`move`'s copy worked and only its delete is refused, the destination holds
+the version that was published.
+
+Not every S3-compatible store honours the condition. MinIO (checked against
+the release in the dev stack) accepts `If-Match` on a delete and deletes
+anyway, and a store that answers `501 NotImplemented` gets a plain delete or
+copy. There, as before #718, a new version uploaded in the instant between
+the second read and the delete can still be removed unpublished. MinIO does
+honour the condition on the copy of a `move`. A store that answers `400` to
+`If-Match` on a delete gets no fallback: every `delete` or `move` there fails
+and backs off as a failed after-action. Nothing is lost, but the objects stay
+in the bucket ([#791](https://github.com/ValueRetail/vrsky/issues/791)).
 
 ### What gets published, and when again (poll mode)
 
 In poll mode the consumer remembers which objects it published, with the
-size and last-modified time each had, in the connection's checkpoint (one
+size, last-modified time and version each had, in the connection's checkpoint (one
 per tenant, connection and node). It survives restarts, deploys and the
 nightly park, so with `after_action: "none"` an object left in the bucket is
 published once, not again at every start (#538).
@@ -198,8 +213,11 @@ published once, not again at every start (#538).
 - **First start.** Every object already under the prefix is published. A
   start after the provider, endpoint, account, bucket or prefix was edited
   counts as a first start too.
-- **Replaced object.** An object overwritten under the same key (its size or
-  last-modified time changed) is published again, once.
+- **Replaced object.** An object overwritten under the same key (its size,
+  last-modified time or version changed; on GCS its size or generation) is
+  published again, once. Objects published before #718 were saved without
+  a version; they still count as published while their size and
+  last-modified time stay the same, so the upgrade publishes nothing again.
 - **Deleted, then added again.** An object that a poll finds gone from the
   listing is forgotten; if it comes back it is published again.
 - **Failed after-action.** If `delete` or `move` fails, the object is still
@@ -217,11 +235,13 @@ published once, not again at every start (#538).
   - The object must still match `file_pattern`; one the pattern no longer
     selects is left alone.
   - Only an object that looks as it did when it was published is retried
-    (same size and last-modified time). A replaced one is published again
-    first. An object replaced after the poll listed the bucket, but before
-    its retry a moment later, is deleted or moved unpublished; so is one
-    replaced with the same size and last-modified time, which the done list
-    can't tell from the old one.
+    (same size, last-modified time and version). A replaced one is
+    published again first, even one with the same size in the same second:
+    its version differs (#718). Each retry reads the object's metadata once
+    more and makes the delete or copy conditional, as on the first try. An
+    object replaced after the poll listed the bucket logs `object replaced
+    since published; left for the next poll` and is published again, by
+    that poll or the next.
   - A `move` whose copy worked and whose delete failed copies over the same
     destination again before it deletes.
   - Event mode has no listing, so it keeps the failed keys in a small
@@ -266,8 +286,12 @@ published once, not again at every start (#538).
   the last save again.
 
 An object replaced with the same size within the same second (S3 keeps
-last-modified times in whole seconds) looks unchanged and is not published
-again. Event mode doesn't use this list: there the queue's acknowledgement
+last-modified times in whole seconds) is told apart by its version and
+published again (#718). The exception is an object saved before #718, which
+has no version in the list: it is compared by size and last-modified time
+alone until it is published again. On S3 the version of most uploads is the
+MD5 of the content, so the same bytes uploaded again in the same second
+count as unchanged. Event mode doesn't use this list: there the queue's acknowledgement
 decides what was handled.
 
 During a deploy the old cloud-storage consumer stops before the new one

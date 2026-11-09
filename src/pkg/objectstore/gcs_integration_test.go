@@ -45,4 +45,5 @@ func TestGCS_RoundTrip_Integration(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	assertRoundTrip(t, ctx, store)
+	assertConditional(t, ctx, store, condSupport{})
 }

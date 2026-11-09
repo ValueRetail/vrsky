@@ -411,7 +411,22 @@ func (s *cloudConsumer) doneSet(connID, tenantID string, cfg *cloudConfig) *done
 		nodeID = fallbackNodeID
 	}
 	scope := strings.Join([]string{cfg.providerOrDefault(), cfg.Endpoint, cfg.AccountName, cfg.Bucket, cfg.Prefix}, "|")
-	return doneset.New(s.checkpoints, doneset.Key{TenantID: tenantID, ConnectionID: connID, NodeID: nodeID}, scope)
+	set := doneset.New(s.checkpoints, doneset.Key{TenantID: tenantID, ConnectionID: connID, NodeID: nodeID}, scope)
+	set.UseMatch(cfg.match())
+	return set
+}
+
+// match is how two stamps of one object compare on cfg's provider. GCS
+// changes last-modified (updated) on a metadata-only edit, such as labels or
+// content type, while the generation stays; there the generation and size
+// decide (#718). An S3 ETag is the content's MD5 for most uploads, so there,
+// as on Azure, last-modified still counts: an identical upload a second later
+// is a new object.
+func (c *cloudConfig) match() doneset.Match {
+	if c.providerOrDefault() == objectstore.ProviderGCS {
+		return doneset.MatchVersion
+	}
+	return doneset.MatchTime
 }
 
 // pollOnce lists the bucket under the prefix and fetches+publishes+after-actions
@@ -444,7 +459,9 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 
 	listing := make(map[string]doneset.Stamp, len(objs))
 	for _, o := range objs {
-		listing[o.Key] = doneset.StampOf(o.Size, o.LastModified)
+		// With the version: a replacement with the same size in the same
+		// second is not done, and not deleted blind by the retry pass (#718).
+		listing[o.Key] = stampOf(o)
 	}
 	// Objects gone from the listing leave the done set: added again, they are
 	// published again.
@@ -527,9 +544,9 @@ func (s *cloudConsumer) clock() time.Time {
 // stamp the listing shows and still there (#640): published, but its delete
 // or move failed. It runs right after the listing and before anything is
 // published, and does at most doneset.MaxRetriesPerPoll tries. An object
-// replaced since it was published has another stamp, is not done, and is left
-// for the publish loop. An object replaced after the listing, before its turn
-// here, is not noticed (see the plan, Risks).
+// replaced since it was published has another stamp (the version tells a
+// same-size, same-second one apart), is not done, and is left for the publish
+// loop. One replaced after the listing is caught by retryAfterAction (#718).
 func (s *cloudConsumer) retryPass(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, done *doneset.Set, objs []objectstore.Object, listing map[string]doneset.Stamp, now time.Time, logger *slog.Logger) {
 	if cfg.AfterAction != "delete" && cfg.AfterAction != "move" {
 		return
@@ -543,7 +560,7 @@ func (s *cloudConsumer) retryPass(ctx context.Context, store objectstore.ObjectS
 			continue
 		}
 		tries++
-		s.retryAfterAction(ctx, store, cfg, done, o.Key, now, logger)
+		s.retryAfterAction(ctx, store, cfg, done, o.Key, listing[o.Key], now, logger)
 	}
 }
 
@@ -552,14 +569,62 @@ func (s *cloudConsumer) retryPass(ctx context.Context, store objectstore.ObjectS
 // backs off, doubling from a minute up to an hour, and logs once per try, not
 // per poll. A move whose copy already landed (the delete is what failed) just
 // copies over the same key again, then deletes.
-func (s *cloudConsumer) retryAfterAction(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, done *doneset.Set, key string, now time.Time, logger *slog.Logger) {
-	if err := s.afterAction(ctx, store, cfg, key); err != nil {
+//
+// The object is stat'ed first and must still be the one listed (#718): one
+// replaced since the listing is forgotten, so it is published again. The
+// listing's last-modified is compared at whole seconds, since S3 listings can
+// carry milliseconds where a HEAD has none (#707). The delete or copy is then
+// made on the listed version only, where the store honours that.
+func (s *cloudConsumer) retryAfterAction(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, done *doneset.Set, key string, listed doneset.Stamp, now time.Time, logger *slog.Logger) {
+	obj, err := store.Stat(ctx, key)
+	switch {
+	case errors.Is(err, objectstore.ErrNotFound):
+		done.RetryDone(key)
+		logger.Info("after-action: object already gone; nothing to do", "key", key, "action", cfg.AfterAction)
+		return
+	case err != nil:
 		failures, wait := done.RetryFailed(key, now)
-		logger.Warn("after-action failed again; will retry", "key", key, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", err)
+		logger.Warn("after-action failed again; will retry", "key", key, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", fmt.Errorf("stat before %s: %w", cfg.AfterAction, err))
 		return
 	}
-	done.RetryDone(key)
-	logger.Info("after-action done on retry", "key", key, "action", cfg.AfterAction)
+	found := stampOf(obj)
+	if !cfg.match().Same(wholeSecond(found), wholeSecond(listed)) {
+		s.retryReplaced(done, cfg, key, logger)
+		return
+	}
+	version := listed.Version
+	if version == "" {
+		version = found.Version
+	}
+	err = s.afterAction(ctx, store, cfg, key, version)
+	switch {
+	case err == nil:
+		done.RetryDone(key)
+		logger.Info("after-action done on retry", "key", key, "action", cfg.AfterAction)
+	case errors.Is(err, errReplaced):
+		s.retryReplaced(done, cfg, key, logger)
+	case errors.Is(err, objectstore.ErrNotFound):
+		done.RetryDone(key)
+		logger.Info("after-action: object already gone; nothing to do", "key", key, "action", cfg.AfterAction)
+	default:
+		failures, wait := done.RetryFailed(key, now)
+		logger.Warn("after-action failed again; will retry", "key", key, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", err)
+	}
+}
+
+// retryReplaced handles a retry that found another object under key: it is
+// not what was published, so it is no longer done, and this poll's publish
+// loop or the next poll publishes it, whatever its stamp.
+func (s *cloudConsumer) retryReplaced(done *doneset.Set, cfg *cloudConfig, key string, logger *slog.Logger) {
+	done.Forget(key)
+	logger.Warn("after-action: object replaced since published; left for the next poll",
+		"bucket", cfg.Bucket, "key", key, "action", cfg.AfterAction)
+}
+
+// wholeSecond drops the sub-second part of st's last-modified.
+func wholeSecond(st doneset.Stamp) doneset.Stamp {
+	st.MTimeNsec = 0
+	return st
 }
 
 // saveDone saves the done set; a failure is retried at the next save.
@@ -592,8 +657,10 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 	// with the loop, and the loop waits for it.
 	var retryQ *afterRetryQueue
 	if cfg.AfterAction == "delete" || cfg.AfterAction == "move" {
-		retryQ = newAfterRetryQueue(logger, cfg.AfterAction, cfg.Bucket, s.afterRetry, store.Stat,
-			func(ctx context.Context, key string) error { return s.afterAction(ctx, store, cfg, key) })
+		retryQ = newAfterRetryQueue(logger, cfg.AfterAction, cfg.Bucket, s.afterRetry, cfg.match(), store.Stat,
+			func(ctx context.Context, key, version string) error {
+				return s.afterAction(ctx, store, cfg, key, version)
+			})
 		qctx, stopQ := context.WithCancel(ctx)
 		qDone := make(chan struct{})
 		go func() { defer close(qDone); retryQ.run(qctx) }()
@@ -718,12 +785,12 @@ var errReplaced = errors.New("object replaced since published")
 // the old stamp and then left too: a duplicate at worst. An object gone by
 // the second Stat gives an afterErr wrapping objectstore.ErrNotFound, and any
 // other Stat error is a failed after-action.
-func (s *cloudConsumer) ingest(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) (stamp objectStamp, afterErr, err error) {
+func (s *cloudConsumer) ingest(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) (stamp doneset.Stamp, afterErr, err error) {
 	guarded := cfg.AfterAction == "delete" || cfg.AfterAction == "move"
 	if guarded {
 		obj, err := store.Stat(ctx, key)
 		if err != nil {
-			return objectStamp{}, nil, fmt.Errorf("stat: %w", err)
+			return doneset.Stamp{}, nil, fmt.Errorf("stat: %w", err)
 		}
 		stamp = stampOf(obj)
 	}
@@ -733,16 +800,16 @@ func (s *cloudConsumer) ingest(ctx context.Context, connID, tenantID string, sto
 	}
 	logger.Info("cloud-storage object ingested", "key", key, "size", size, "streamed", streamed)
 	if !guarded {
-		return stamp, s.afterAction(ctx, store, cfg, key), nil
+		return stamp, s.afterAction(ctx, store, cfg, key, ""), nil
 	}
 	obj, err := store.Stat(ctx, key)
 	if err != nil {
 		return stamp, fmt.Errorf("stat before %s: %w", cfg.AfterAction, err), nil
 	}
-	if stampOf(obj) != stamp {
+	if !cfg.match().Same(stampOf(obj), stamp) {
 		return stamp, errReplaced, nil
 	}
-	return stamp, s.afterAction(ctx, store, cfg, key), nil
+	return stamp, s.afterAction(ctx, store, cfg, key, stamp.Version), nil
 }
 
 // wantsAfterRetry reports whether a done object that is still listed gets its
@@ -828,10 +895,32 @@ func (s *cloudConsumer) finishConn(own *activeConn, connID, tenantID, status str
 }
 
 // afterAction applies the configured post-ingest action to a fetched object.
-func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, key string) error {
+// With a version and a store that can make it a condition, the delete and the
+// move's copy act only on that version (#718): a new upload under the key
+// since the caller's Stat makes them fail with errReplaced and is left where
+// it is. Without either, they act on whatever is under the key.
+func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, key, version string) error {
+	cond, ok := store.(objectstore.Conditional)
+	if !ok || version == "" {
+		cond = nil
+	}
+	err := s.runAfterAction(ctx, store, cond, cfg, key, version)
+	if errors.Is(err, objectstore.ErrVersionChanged) {
+		return fmt.Errorf("%w: %w", errReplaced, err)
+	}
+	return err
+}
+
+func (s *cloudConsumer) runAfterAction(ctx context.Context, store objectstore.ObjectStore, cond objectstore.Conditional, cfg *cloudConfig, key, version string) error {
+	remove := func() error {
+		if cond != nil {
+			return cond.DeleteIf(ctx, key, version)
+		}
+		return store.Delete(ctx, key)
+	}
 	switch cfg.AfterAction {
 	case "delete":
-		return store.Delete(ctx, key)
+		return remove()
 	case "move":
 		if cfg.MovePrefix == "" {
 			return fmt.Errorf("after_action=move but move_prefix is empty")
@@ -846,10 +935,14 @@ func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.Objec
 		if strings.TrimLeft(dst, "/") == strings.TrimLeft(key, "/") {
 			return fmt.Errorf("object %q is already in move_prefix %q; not moved (%w)", key, cfg.MovePrefix, errMoveOntoSelf)
 		}
-		if err := store.Copy(ctx, key, dst); err != nil {
+		copyTo := store.Copy
+		if cond != nil {
+			copyTo = func(ctx context.Context, src, dst string) error { return cond.CopyIf(ctx, src, dst, version) }
+		}
+		if err := copyTo(ctx, key, dst); err != nil {
 			return fmt.Errorf("copy to move_prefix: %w", err)
 		}
-		return store.Delete(ctx, key)
+		return remove()
 	default: // "none" / "" / "leave"
 		return nil
 	}

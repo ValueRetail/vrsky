@@ -82,8 +82,9 @@ kubectl get pods -n vrsky-monitoring
 Prod runs `PROFILE=azure ./install-monitoring.sh`, which layers
 `prometheus-values.azure.yaml` + `grafana-values.azure.yaml` (AKS storage
 class, small requests — the two nodes are nearly fully committed on CPU
-requests), applies `podmonitors.yaml` (management-api `:9090`, every
-`tier=connector` pod on `:8080/metrics`) and wraps
+requests), applies `podmonitors.yaml` (management-api `:3000`, the alert responder,
+every `tier=connector` pod on `:8080/metrics`, and the cert-manager
+controller on `:9402` for the Postgres certificate alerts, #729) and wraps
 `infrastructure/prometheus-rules.yml` in a `PrometheusRule`.
 
 Before the first install create two Secrets (values never in git):
