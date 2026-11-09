@@ -197,7 +197,10 @@ the release in the dev stack) accepts `If-Match` on a delete and deletes
 anyway, and a store that answers `501 NotImplemented` gets a plain delete or
 copy. There, as before #718, a new version uploaded in the instant between
 the second read and the delete can still be removed unpublished. MinIO does
-honour the condition on the copy of a `move`.
+honour the condition on the copy of a `move`. A store that answers `400` to
+`If-Match` on a delete gets no fallback: every `delete` or `move` there fails
+and backs off as a failed after-action. Nothing is lost, but the objects stay
+in the bucket ([#791](https://github.com/ValueRetail/vrsky/issues/791)).
 
 ### What gets published, and when again (poll mode)
 

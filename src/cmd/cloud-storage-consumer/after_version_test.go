@@ -205,8 +205,10 @@ func TestRetryPass_ReplacedAfterListingIsLeft(t *testing.T) {
 			if !p.logHas("level=WARN", "replaced since published; left for the next poll", "key=in/a.json") {
 				t.Errorf("no Warn for the replacement:\n%s", p.logs.String())
 			}
-			p.tick()
+			// Forgotten, so the poll that saw the replacement publishes it.
 			avReplaced(t, p, action)
+			p.tick()
+			requireCounts(t, p.log, "the poll after", map[string]int{"in/a.json": 2})
 		})
 	}
 }
@@ -251,9 +253,11 @@ func TestAfterAction_ConditionalPoll(t *testing.T) {
 				if tc.retry {
 					requireCounts(t, p.log, "first poll", map[string]int{"in/a.json": 1})
 					tc.arm(cs, p.fk.fakeStore)
-					// Past the first backoff. The refused retry forgets the
-					// key, so the same poll publishes the replacement.
-					avTicks(p, 3)
+					// The retry is due at the second poll from here. The refused
+					// retry forgets the key, so that poll publishes the
+					// replacement.
+					avTicks(p, 2)
+					avReplaced(t, p, action)
 				} else {
 					requireCounts(t, p.log, "first poll", map[string]int{"in/a.json": 1})
 					if body, ok := fsBody(p.fk.fakeStore, "in/a.json"); !ok || body != avNew {
@@ -312,6 +316,11 @@ func TestAfterAction_ConditionalEvent(t *testing.T) {
 				}
 				if l.logHas("level=ERROR") || l.logHas("failed again") {
 					t.Errorf("a refused conditional call was counted as a failure:\n%s", l.logs.String())
+				}
+				// The refusal itself reads as replaced: nothing is queued for
+				// the retry queue's Stat to sort out.
+				if !retry && l.logHas("will retry in memory") {
+					t.Errorf("the refused first after-action was queued as a failure:\n%s", l.logs.String())
 				}
 			})
 		}
@@ -443,5 +452,55 @@ func isReplaced(err error) bool {
 func avTicks(p *faPoll, n int) {
 	for i := 0; i < n; i++ {
 		p.tick()
+	}
+}
+
+// avMillisStore lists last-modified with milliseconds and stats it in whole
+// seconds, as MinIO does (its listing says 12.300, its HEAD 12.000).
+type avMillisStore struct {
+	*flakyStore
+}
+
+func (s *avMillisStore) List(ctx context.Context, prefix string) ([]objectstore.Object, error) {
+	objs, err := s.flakyStore.List(ctx, prefix)
+	for i := range objs {
+		objs[i].LastModified = objs[i].LastModified.Add(300 * time.Millisecond)
+	}
+	return objs, err
+}
+
+func (s *avMillisStore) Stat(ctx context.Context, key string) (objectstore.Object, error) {
+	obj, err := s.flakyStore.Stat(ctx, key)
+	obj.LastModified = obj.LastModified.Truncate(time.Second)
+	return obj, err
+}
+
+// 189: the retry's Stat is compared with the listing at whole seconds. A
+// listing with milliseconds and a HEAD without them are the same object: the
+// retry deletes or moves it, with no replacement warning and no second
+// publish.
+func TestRetryPass_ListingMillisecondsAreNotAReplacement(t *testing.T) {
+	for _, action := range []string{"delete", "move"} {
+		t.Run(action, func(t *testing.T) {
+			p := newAVPoll(t, action, func(fk *flakyStore) objectstore.ObjectStore {
+				return &avMillisStore{flakyStore: fk}
+			})
+			p.tick()
+			requireCounts(t, p.log, "first poll", map[string]int{"in/a.json": 1})
+			if !p.logHas("after-action failed; will retry") {
+				t.Fatalf("first after-action did not fail:\n%s", p.logs.String())
+			}
+			avTicks(p, 4) // past the first backoff
+			requireCounts(t, p.log, "after the retry", map[string]int{"in/a.json": 1})
+			if p.fk.has("in/a.json") {
+				t.Error("in/a.json still in the bucket after the retry")
+			}
+			if p.logHas("replaced since published") {
+				t.Errorf("the listing's milliseconds read as a replacement:\n%s", p.logs.String())
+			}
+			if !p.logHas("after-action done on retry", "key=in/a.json") {
+				t.Errorf("no retry success logged:\n%s", p.logs.String())
+			}
+		})
 	}
 }
