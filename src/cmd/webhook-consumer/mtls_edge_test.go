@@ -387,3 +387,59 @@ func TestWebhookConsumer_EdgeListenerNeedsItsFiles(t *testing.T) {
 		t.Errorf("unset port: err %v, server %v", err, c.edgeServer)
 	}
 }
+
+// TestWebhookConsumer_EdgeMTLSIntermediate: nginx forwards only the leaf, so
+// a client certificate issued by an intermediate verifies only when the
+// connection's client CA includes that intermediate. Root alone is refused
+// (closed, not open), which is what the docs tell tenants.
+func TestWebhookConsumer_EdgeMTLSIntermediate(t *testing.T) {
+	f := newEdgeFixture(t)
+	now := time.Now()
+	rootPEM, root, rootKey := mtlsCA(t)
+
+	intKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "test-intermediate"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	intDER, err := x509.CreateCertificate(rand.Reader, intTmpl, root, &intKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inter, _ := x509.ParseCertificate(intDER)
+	leaf, _, _ := edgeLeaf(t, inter, intKey, "partner-int", []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, now.Add(-time.Hour), now.Add(time.Hour))
+
+	tests := []struct {
+		name       string
+		clientCA   []byte
+		wantStatus int
+	}{
+		{"client CA holds root and intermediate", append(append([]byte{}, rootPEM...), pemOf(inter)...), http.StatusAccepted},
+		{"client CA holds only the root", rootPEM, http.StatusUnauthorized},
+		{"client CA holds only the intermediate", pemOf(inter), http.StatusAccepted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f.c.mu.Lock()
+			f.c.activeConnections["conn-int"] = &ActiveConnection{ConnectionID: "conn-int", TenantID: edgeTenantA, Cancel: func() {}, ClientCA: tt.clientCA}
+			f.c.mu.Unlock()
+			req := httptest.NewRequest(http.MethodPost, "/webhook/conn-int", strings.NewReader(`{"ok":true}`))
+			req.TLS = f.ingressState
+			req.Header.Set(headerClientVerify, "SUCCESS")
+			req.Header.Set(headerClientCert, nginxEscape(pemOf(leaf)))
+			rec := httptest.NewRecorder()
+			f.c.handleEdgeWebhook()(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body %q", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}

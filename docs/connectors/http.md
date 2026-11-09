@@ -89,7 +89,13 @@ Other request handling options not listed here are set via the in-app pipeline e
 
 With `tls.client_ca_secret_id` set, every request must come with a client
 certificate that chains to that CA, is within its validity dates and allows
-client authentication. Anything else gets `401`, and nothing is published.
+client authentication. Anything else is refused (`400` from the ingress or
+`401` from the webhook service, see below), and nothing is published.
+
+If your client certificates are issued by an intermediate CA, put that
+intermediate in `client_ca` (with the root, or on its own). The ingress
+passes only the client's own certificate to the webhook service, not the
+chain, so a `client_ca` holding only the root refuses them with `401`.
 Rejections count in `webhook_client_cert_failures_total{connection_id,reason}`
 (`missing_cert`, `untrusted_cert`, `malformed_cert`, `untrusted_edge`).
 

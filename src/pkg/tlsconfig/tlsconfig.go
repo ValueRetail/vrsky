@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -131,12 +132,16 @@ func ParseForwardedCert(escaped string) (*x509.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("forwarded certificate: not URL-escaped PEM")
 	}
+	// pem.Decode skips anything before the first BEGIN line; refuse that too.
+	if !strings.HasPrefix(strings.TrimSpace(raw), "-----BEGIN ") {
+		return nil, fmt.Errorf("forwarded certificate: data before the certificate")
+	}
 	block, rest := pem.Decode([]byte(raw))
 	if block == nil {
 		return nil, fmt.Errorf("forwarded certificate: no PEM block")
 	}
 	if block.Type != "CERTIFICATE" {
-		return nil, fmt.Errorf("forwarded certificate: PEM block is %q, want CERTIFICATE", block.Type)
+		return nil, fmt.Errorf("forwarded certificate: PEM block is not a CERTIFICATE")
 	}
 	if len(block.Headers) != 0 {
 		return nil, fmt.Errorf("forwarded certificate: PEM block has headers")

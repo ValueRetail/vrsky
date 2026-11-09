@@ -52,6 +52,8 @@ metadata:
     # the location (503), not skip the check.
     nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
     # One intermediate between a tenant's root and the client certificate.
+    # nginx forwards only the leaf, so the connection's own client_ca must
+    # also hold that intermediate for the worker's check to pass.
     nginx.ingress.kubernetes.io/auth-tls-verify-depth: "2"
     nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
 

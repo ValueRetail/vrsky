@@ -81,11 +81,29 @@ missing bundle fails closed:
 ```bash
 kubectl apply -f infrastructure/kubernetes/ingress/webhooks-mtls-ingress.yaml
 kubectl -n vrsky-platform wait --for=condition=Ready certificate/vrsky-webhooks-mtls-tls --timeout=300s
-curl -s -o /dev/null -w '%{http_code}\n' https://mtls.vrsky.valueretail.no/webhook/x -d '{}'
+U=https://mtls.vrsky.valueretail.no/webhook/x
+curl -s -o /dev/null -w '%{http_code}\n' "$U" -d '{}'
 # want 503 (ingress-nginx denies the location while auth-tls-secret is missing)
+curl -s -o /dev/null -w '%{http_code}\n' "$U" -d '{}' \
+  -H 'ssl-client-cert: forged' -H 'ssl-client-verify: SUCCESS'
+# want 503 too: a forged header must not get through a broken edge
 ```
 
-If that prints anything else, delete the Ingress (rollback below) and stop.
+Then the same with a bundle that doesn't parse:
+
+```bash
+printf 'not a certificate\n' > junk.pem
+kubectl -n vrsky-platform create secret generic webhook-client-ca --from-file=ca.crt=junk.pem
+sleep 10
+curl -s -o /dev/null -w '%{http_code}\n' "$U" -d '{}' \
+  -H 'ssl-client-cert: forged' -H 'ssl-client-verify: SUCCESS'
+# want 503 (or a TLS error); never 401 or 202
+kubectl -n vrsky-platform delete secret webhook-client-ca
+```
+
+If any of these prints anything else, delete the Ingress (rollback below) and
+stop: the worker would still verify a forged certificate against the
+connection's CA, but nothing would prove the caller holds its key.
 
 **5. The CA bundle.** One PEM file with every CA that a tenant has set as a
 webhook client CA. The tenant supplies their CA certificate (public material;
@@ -100,6 +118,12 @@ kubectl -n vrsky-platform create secret generic webhook-client-ca \
 
 ingress-nginx picks the Secret up by itself within a few seconds. Repeat this
 step whenever a tenant adds or rotates a client CA.
+
+Never add a public CA, one that issues certificates to anyone who asks. If a
+tenant's client certificates come from an intermediate, put the intermediate
+and its root in the bundle, and tell the tenant their connection's client CA
+must include the intermediate: the ingress forwards only the leaf, so the
+webhook service can't build the chain from the root alone.
 
 **6. Checks.** Make two throwaway CAs and a client certificate from each, on
 your machine:

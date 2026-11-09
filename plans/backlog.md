@@ -1433,6 +1433,14 @@ Last updated 2026-10-28.
     for such a connection (`ui/src/config/env.ts`, the source panel in
     `PropertyEditor.tsx`). Found in #454.
 
+196. **The webhook consumer reads its edge certificate once.** cert-manager
+    renews `webhook-edge-server` 90 days before it ends, but the consumer
+    loads the files at start (#454), so a pod that runs past the old
+    certificate's end breaks the hop from the ingress (mTLS webhooks get
+    502). Parking restarts pods daily, which hides it. Reload on change
+    (`tls.Config.GetCertificate` reading the mounted files when they change),
+    or alert on the served certificate's expiry. Found in review of #454.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource

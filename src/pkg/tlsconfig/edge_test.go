@@ -44,6 +44,7 @@ func TestParseForwardedCert(t *testing.T) {
 		{"bad escape", "%zz" + escapeAll(string(certPEM)), true},
 		{"two certificates", escapeAll(string(certPEM) + string(certPEM)), true},
 		{"data after the certificate", escapeAll(string(certPEM) + "junk"), true},
+		{"data before the certificate", escapeAll("junk\n" + string(certPEM)), true},
 		{"a key, not a certificate", escapeAll(string(keyPEM)), true},
 		{"certificate block with bad DER", escapeAll("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"), true},
 		{"PEM headers", escapeAll(strings.Replace(string(certPEM), "-----\n", "-----\nProc-Type: 4,ENCRYPTED\n\n", 1)), true},

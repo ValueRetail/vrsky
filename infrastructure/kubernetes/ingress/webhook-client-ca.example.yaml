@@ -7,6 +7,10 @@
 # 2). The worker checks each request again against its own connection's CA,
 # so a CA in this bundle opens only the connections that configured it.
 #
+# Never add a public CA (one that issues certificates to anyone who asks):
+# the worker would still refuse those callers per connection, but the edge
+# check would stop meaning anything.
+#
 # Do not fill this file in and commit it. Build the bundle from the tenants'
 # CA certificates (public material, but it belongs in the cluster, not git)
 # and create the Secret directly:

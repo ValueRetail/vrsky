@@ -89,8 +89,15 @@ type edgeRoute struct {
 	port                int
 }
 
+// A spec.defaultBackend counts too, as host "" and path "(default)": it takes
+// every request no rule matches.
 func edgeIngressRoutes(doc map[string]any) []edgeRoute {
 	var out []edgeRoute
+	if db := edgeDig(doc, "spec", "defaultBackend"); db != nil {
+		svc, _ := edgeDig(db, "service", "name").(string)
+		port, _ := edgeDig(db, "service", "port", "number").(int)
+		out = append(out, edgeRoute{"", "(default)", svc, port})
+	}
 	for _, rule := range edgeList(edgeDig(doc, "spec", "rules")) {
 		host, _ := edgeDig(rule, "host").(string)
 		for _, p := range edgeList(edgeDig(rule, "http", "paths")) {
