@@ -13,6 +13,9 @@ shutdown could wait up to 10 s.
 - Concurrent first uses: one caller connects (`tc.connecting`), others wait on its
   result (or their own ctx). One pool per target, no loser to leak.
 - A failed open or ping returns the error and is not cached; the next call retries.
+- The connect's cleanup (clear `tc.connecting`, close `done`) is deferred, so a
+  panic in open or ping still frees the target: waiters get the retryable
+  `errConnectAborted`, the panic reaches the subscriber, which NAKs.
 
 ## Acceptance criteria
 - Eviction and Stop during a slow connect return promptly.

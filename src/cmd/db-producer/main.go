@@ -83,6 +83,11 @@ var targetConnectTimeout = 10
 // the current config.
 var errTargetEvicted = errors.New("target config was reloaded during the delivery; will retry")
 
+// errConnectAborted is what callers waiting on a connect get when that
+// connect ended without a result (open or ping panicked). The delivery is
+// retried and connects again.
+var errConnectAborted = errors.New("connecting to the target database was aborted; will retry")
+
 // TargetConnection is one database destination node of a connection.
 type TargetConnection struct {
 	NodeID         string
@@ -140,25 +145,35 @@ func (tc *TargetConnection) pool(ctx context.Context, open func(string) (*sql.DB
 			return nil, ctx.Err()
 		}
 	}
-	call := &poolCall{done: make(chan struct{})}
+	// err stays errConnectAborted unless the connect returns.
+	call := &poolCall{done: make(chan struct{}), err: errConnectAborted}
 	tc.connecting = call
 	tc.mu.Unlock()
+	// Deferred so that a panic in open or ping (recovered and NAKed by the
+	// subscriber) still clears the connect and wakes its waiters. Without it
+	// every later pool call on this target would wait on done forever.
+	defer func() {
+		tc.mu.Lock()
+		tc.connecting = nil
+		tc.mu.Unlock()
+		close(call.done)
+	}()
 
-	call.db, call.err = tc.connect(ctx, open)
+	db, err := tc.connect(ctx, open)
 
 	tc.mu.Lock()
-	tc.connecting = nil
-	if call.err == nil {
-		if tc.closed {
-			// Evicted while connecting: nothing would ever close this pool.
-			_ = call.db.Close()
-			call.db, call.err = nil, errTargetEvicted
-		} else {
-			tc.DB = call.db
-		}
+	switch {
+	case err != nil:
+		call.db, call.err = nil, err
+	case tc.closed:
+		// Evicted while connecting: nothing would ever close this pool.
+		_ = db.Close()
+		call.db, call.err = nil, errTargetEvicted
+	default:
+		tc.DB = db
+		call.db, call.err = db, nil
 	}
 	tc.mu.Unlock()
-	close(call.done)
 	return call.db, call.err
 }
 

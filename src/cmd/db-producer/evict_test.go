@@ -98,7 +98,7 @@ type slowTarget struct {
 	entered chan struct{}
 	release chan struct{}
 	mu      sync.Mutex
-	dbs     []*sql.DB
+	mocks   []sqlmock.Sqlmock
 }
 
 func newSlowTarget() *slowTarget {
@@ -115,22 +115,23 @@ func (s *slowTarget) open(string) (*sql.DB, error) {
 	mock.ExpectPing()
 	mock.ExpectClose()
 	s.mu.Lock()
-	s.dbs = append(s.dbs, db)
+	s.mocks = append(s.mocks, mock)
 	s.mu.Unlock()
 	return db, nil
 }
 
 // openAndClosed returns how many pools were opened and how many of those are
-// closed (a closed *sql.DB refuses a ping with "database is closed").
+// closed. Every pool expects a ping (done by connect) and then a Close, so a
+// pool's expectations are all met exactly when it has been closed.
 func (s *slowTarget) openAndClosed() (opened, closed int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, db := range s.dbs {
-		if err := db.Ping(); err != nil && strings.Contains(err.Error(), "closed") {
+	for _, mock := range s.mocks {
+		if mock.ExpectationsWereMet() == nil {
 			closed++
 		}
 	}
-	return len(s.dbs), closed
+	return len(s.mocks), closed
 }
 
 func slowTargetProducer(connID string, tc *TargetConnection) *dbProducer {
@@ -249,6 +250,93 @@ func TestTargetPool_FailedConnectIsRetried(t *testing.T) {
 	db, err := tc.pool(context.Background(), open)
 	if err != nil || db == nil {
 		t.Fatalf("retry: db = %v, err = %v", db, err)
+	}
+	tc.close()
+}
+
+// A panic in open (the subscriber recovers it and NAKs) must not leave the
+// connect marked in flight: a caller already waiting on it gets
+// errConnectAborted, and the next call connects. Without the cleanup every
+// later call would wait forever, since the handler ctx is never cancelled.
+func TestTargetPool_PanicInConnectDoesNotWedgeTarget(t *testing.T) {
+	tc := &TargetConnection{NodeID: "n1", Config: TargetDBConfig{Host: "db", Table: "t"}}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	panicky := func(string) (*sql.DB, error) {
+		close(entered)
+		<-release
+		panic("driver bug")
+	}
+	var opens atomic.Int32
+	healthy := func(string) (*sql.DB, error) {
+		opens.Add(1)
+		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+		if err != nil {
+			return nil, err
+		}
+		mock.ExpectPing()
+		return db, nil
+	}
+
+	recovered := make(chan any, 1)
+	go func() {
+		defer func() { recovered <- recover() }()
+		_, _ = tc.pool(context.Background(), panicky)
+	}()
+	<-entered
+
+	// A caller that queues behind the panicking connect. If it arrives after
+	// the cleanup it connects itself, so either outcome is valid; hanging is not.
+	type result struct {
+		db  *sql.DB
+		err error
+	}
+	waiter := make(chan result, 1)
+	go func() {
+		db, err := tc.pool(context.Background(), healthy)
+		waiter <- result{db, err}
+	}()
+	time.Sleep(20 * time.Millisecond) // let the waiter queue behind the connect
+	close(release)
+
+	select {
+	case r := <-recovered:
+		if r == nil {
+			t.Fatal("the panic in open did not propagate to the caller")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("panicking caller did not return")
+	}
+	select {
+	case r := <-waiter:
+		if r.err != nil && !errors.Is(r.err, errConnectAborted) || r.err == nil && r.db == nil {
+			t.Fatalf("waiter: db = %v, err = %v; want a pool or errConnectAborted", r.db, r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiter hangs after a panic in the connect it waited on")
+	}
+
+	next := make(chan result, 1)
+	go func() {
+		db, err := tc.pool(context.Background(), healthy)
+		next <- result{db, err}
+	}()
+	select {
+	case r := <-next:
+		if r.err != nil || r.db == nil {
+			t.Fatalf("next pool: db = %v, err = %v; want a connected pool", r.db, r.err)
+		}
+		tc.mu.Lock()
+		cached := tc.DB
+		tc.mu.Unlock()
+		if cached != r.db {
+			t.Error("the pool connected after the panic was not cached")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("next pool call hangs after a panic in an earlier connect")
+	}
+	if n := opens.Load(); n != 1 {
+		t.Errorf("healthy opens = %d; want 1", n)
 	}
 	tc.close()
 }
