@@ -28,7 +28,18 @@ import (
 const (
 	tokenRaceWorkers = 8
 	tokenRaceRounds  = 25
+	// tokenRaceDeadline bounds each test's database calls, so a change that
+	// makes a transaction wait on its own row lock fails here instead of
+	// hanging until the package times out.
+	tokenRaceDeadline = 30 * time.Second
 )
+
+func tokenRaceContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), tokenRaceDeadline)
+	t.Cleanup(cancel)
+	return ctx
+}
 
 func newTokenRaceRepo(t *testing.T) (*sql.DB, *PostgresRepository, *User) {
 	t.Helper()
@@ -88,7 +99,7 @@ func oneWinner(t *testing.T, round int, errs []error) int {
 
 func TestTokenRaceDB_PasswordResetSpentOnce(t *testing.T) {
 	db, repo, user := newTokenRaceRepo(t)
-	ctx := context.Background()
+	ctx := tokenRaceContext(t)
 	for round := range tokenRaceRounds {
 		_, hashed, err := auth.GeneratePasswordResetToken()
 		if err != nil {
@@ -119,7 +130,7 @@ func TestTokenRaceDB_PasswordResetSpentOnce(t *testing.T) {
 
 func TestTokenRaceDB_EmailVerificationSpentOnce(t *testing.T) {
 	_, repo, user := newTokenRaceRepo(t)
-	ctx := context.Background()
+	ctx := tokenRaceContext(t)
 	for round := range tokenRaceRounds {
 		_, hashed, err := auth.GenerateVerificationToken()
 		if err != nil {
@@ -142,51 +153,69 @@ func TestTokenRaceDB_EmailVerificationSpentOnce(t *testing.T) {
 	}
 }
 
-// refuseUserUpdates makes every UPDATE on users fail until the test drops it.
-func refuseUserUpdates(t *testing.T, db *sql.DB) (drop func()) {
+// refuseUpdates makes every UPDATE statement on table fail until the test
+// drops it. Statement level, so it fires even when no row matches.
+func refuseUpdates(t *testing.T, db *sql.DB, table string) (drop func()) {
 	t.Helper()
 	ctx := context.Background()
+	trigger := "test_refuse_" + table + "_update"
 	if _, err := db.ExecContext(ctx, `
-		CREATE OR REPLACE FUNCTION test_refuse_user_update() RETURNS trigger LANGUAGE plpgsql AS $$
-		BEGIN RAISE EXCEPTION 'user update refused by test'; END $$;
-		CREATE TRIGGER test_refuse_user_update BEFORE UPDATE ON users
-			FOR EACH ROW EXECUTE FUNCTION test_refuse_user_update();`); err != nil {
+		CREATE OR REPLACE FUNCTION test_refuse_update() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'update on % refused by test', TG_TABLE_NAME; END $$;
+		CREATE TRIGGER `+trigger+` BEFORE UPDATE ON `+table+`
+			FOR EACH STATEMENT EXECUTE FUNCTION test_refuse_update();`); err != nil {
 		t.Fatal(err)
 	}
 	return func() {
-		if _, err := db.ExecContext(ctx, `DROP TRIGGER test_refuse_user_update ON users`); err != nil {
+		if _, err := db.ExecContext(ctx, `DROP TRIGGER `+trigger+` ON `+table); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
+// A write that fails partway rolls back everything before it: the token stays
+// unused and the user row keeps its old values.
 func TestTokenRaceDB_FailedUserWriteKeepsTheToken(t *testing.T) {
-	ctx := context.Background()
+	ctx := tokenRaceContext(t)
+	createReset := func(repo *PostgresRepository, userID, hashed string) error {
+		return repo.CreatePasswordResetToken(ctx, userID, hashed, time.Now().Add(time.Hour))
+	}
+	useReset := func(repo *PostgresRepository, hashed string) error {
+		return repo.UsePasswordResetToken(ctx, hashed, "new-hash")
+	}
+	const resetUsedAt = `SELECT used_at FROM password_reset_tokens WHERE token_hash = $1`
 	cases := []struct {
 		name   string
+		refuse string // table whose UPDATE fails
 		create func(repo *PostgresRepository, userID, hashed string) error
 		use    func(repo *PostgresRepository, hashed string) error
 		usedAt string // query for the token's used_at by hash
+		// unchanged is the user column the failed use must not have changed,
+		// and its value before the use.
+		unchanged, before string
 	}{
 		{
-			name: "password reset",
-			create: func(repo *PostgresRepository, userID, hashed string) error {
-				return repo.CreatePasswordResetToken(ctx, userID, hashed, time.Now().Add(time.Hour))
-			},
-			use: func(repo *PostgresRepository, hashed string) error {
-				return repo.UsePasswordResetToken(ctx, hashed, "new-hash")
-			},
-			usedAt: `SELECT used_at FROM password_reset_tokens WHERE token_hash = $1`,
+			name: "password reset, password write refused", refuse: "users",
+			create: createReset, use: useReset, usedAt: resetUsedAt,
+			unchanged: "password_hash", before: "old-hash",
 		},
 		{
-			name: "email verification",
+			// The step after the password write: the new password must not
+			// stick while the old sessions stay alive.
+			name: "password reset, session invalidation refused", refuse: "sessions",
+			create: createReset, use: useReset, usedAt: resetUsedAt,
+			unchanged: "password_hash", before: "old-hash",
+		},
+		{
+			name: "email verification", refuse: "users",
 			create: func(repo *PostgresRepository, userID, hashed string) error {
 				return repo.CreateEmailVerificationToken(ctx, userID, hashed, time.Now().Add(time.Hour))
 			},
 			use: func(repo *PostgresRepository, hashed string) error {
 				return repo.UseEmailVerificationToken(ctx, hashed)
 			},
-			usedAt: `SELECT used_at FROM email_verification_tokens WHERE token_hash = $1`,
+			usedAt:    `SELECT used_at FROM email_verification_tokens WHERE token_hash = $1`,
+			unchanged: "email_verified::text", before: "false",
 		},
 	}
 	for _, c := range cases {
@@ -196,12 +225,23 @@ func TestTokenRaceDB_FailedUserWriteKeepsTheToken(t *testing.T) {
 			if err := c.create(repo, user.ID, hashed); err != nil {
 				t.Fatal(err)
 			}
+			column := func() string {
+				t.Helper()
+				var v string
+				if err := db.QueryRowContext(ctx, `SELECT `+c.unchanged+` FROM users WHERE id = $1`, user.ID).Scan(&v); err != nil {
+					t.Fatal(err)
+				}
+				return v
+			}
+			if got := column(); got != c.before {
+				t.Fatalf("%s is %q before the use, want %q", c.unchanged, got, c.before)
+			}
 
-			drop := refuseUserUpdates(t, db)
+			drop := refuseUpdates(t, db, c.refuse)
 			err := c.use(repo, hashed)
 			if err == nil || errors.Is(err, auth.ErrTokenUsed) || errors.Is(err, auth.ErrTokenExpired) ||
 				errors.Is(err, auth.ErrInvalidToken) {
-				t.Fatalf("use with the user write refused: %v, want a database error", err)
+				t.Fatalf("use with the %s write refused: %v, want a database error", c.refuse, err)
 			}
 			var usedAt sql.NullTime
 			if err := db.QueryRowContext(ctx, c.usedAt, hashed).Scan(&usedAt); err != nil {
@@ -209,6 +249,9 @@ func TestTokenRaceDB_FailedUserWriteKeepsTheToken(t *testing.T) {
 			}
 			if usedAt.Valid {
 				t.Fatalf("the failed use spent the token (used_at %v)", usedAt.Time)
+			}
+			if got := column(); got != c.before {
+				t.Fatalf("the failed use changed %s to %q, want %q kept", c.unchanged, got, c.before)
 			}
 			drop()
 
