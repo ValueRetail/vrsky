@@ -19,7 +19,8 @@ import (
 
 // #616: base_url is tenant config and the request carries the Sitoo Basic-auth
 // credential, so the producer refuses a URL that is not https or that reaches
-// a private address, and its client refuses to dial one.
+// a private address, and its client refuses to dial one. A refused base_url
+// is retried and then dead-lettered (#721), not dropped.
 
 func TestDeliver_RefusesBadBaseURL(t *testing.T) {
 	var hits atomic.Int32
@@ -58,8 +59,10 @@ func TestDeliver_RefusesBadBaseURL(t *testing.T) {
 			if err == nil {
 				t.Fatal("Deliver accepted the base_url, want an error")
 			}
-			if !sdk.IsPermanent(err) {
-				t.Errorf("error %v is not Permanent: retrying cannot fix the config", err)
+			// Retried and dead-lettered (#721), like the other destinations,
+			// so the message can be replayed once the node is fixed.
+			if sdk.IsPermanent(err) {
+				t.Errorf("error is Permanent (acked and dropped); want it retried and dead-lettered: %v", err)
 			}
 			if hits.Load() != 0 {
 				t.Errorf("the API received %d requests, want none", hits.Load())
