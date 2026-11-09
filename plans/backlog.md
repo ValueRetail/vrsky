@@ -1395,7 +1395,7 @@ Last updated 2026-10-28.
     On GCS compare generation and size and ignore `Updated`. Found in review
     of #710. Filed as #718.
 
-191. **Salesforce Bulk API jobs are never checked.** `bulkWrite` creates,
+191. ~~**Salesforce Bulk API jobs are never checked.**~~ (#760) `bulkWrite` creates,
     fills and closes the job and acks; it does not poll the job state or
     read `failedResults`, so a record the job refuses while Salesforce
     processes it reaches no queue and no log. A close whose answer is lost
