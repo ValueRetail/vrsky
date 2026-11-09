@@ -312,23 +312,32 @@ node sees) is skipped and the converted record is written.
       not passed either. The Warn says so: it reads "was not advanced".
     - The node relies on the order only once it has checked it, once per
       process for each tenant, company, entity and `cursor_field`. The first
-      poll that gets a second page asks for one record ascending and one
-      descending (`$top=1`, the configured filter, no cursor clause). The
-      order holds when the first value ascending is below the first value
-      descending and the last value the poll read lies between them. A server
-      that ignores `$orderby` answers both with the same record. If the check
-      fails, the node logs a Warn ("do not bracket what the poll read") and
-      polls without `$orderby` until it restarts; a poll that stops early
-      then does not advance. A check that cannot answer (a failed request, no
-      value) decides nothing: that poll does not advance if it stops, and the
-      next one checks again. An entity whose records all share one value
-      fails the check; there is nothing to resume past there anyway. Polls
-      that read a single page never check and cost nothing extra.
-    - If BC answers 400 to `$orderby`, or to the check, and the same request
-      without it works (a field it cannot sort on), the node logs a Warn and
-      polls without `$orderby` until it restarts. The same goes for a feed
-      that comes back out of order anyway, which the node checks on every
-      page and logs.
+      poll that reads a cursor value and gets a second page asks for one
+      record ascending and one descending (`$top=1`, the configured filter,
+      no cursor clause). The answers decide it:
+        - The same record both ways: BC ignores `$orderby` (an edit between
+          the two requests can change the value, not the record). No.
+        - Two records on one value, and the poll so far read only that value:
+          nothing is decided. That poll does not advance if it stops, and the
+          next poll checks again. An entity whose records all share one
+          value has nothing to resume past anyway.
+        - Otherwise the order holds when the value ascending is below the
+          value descending and the last value the poll read lies between
+          them. If not: no.
+        - A 400 to either request: no, with no retry.
+        - Any other failure, or an answer without a readable value: nothing is
+          decided, as above.
+    - On a no the node logs a Warn and polls without `$orderby` until it
+      restarts; a poll that stops early then does not advance. A no is not
+      undone by a later yes. Polls that read a single page never check, and
+      neither does a `cursor_field` whose values are not dates or timestamps,
+      since it never gets a resume point.
+    - If BC answers 400 to the ordered first page and the same request
+      without `$orderby` works (a field it cannot sort on), the node logs a
+      Warn and polls without `$orderby` until it restarts. Records that come
+      back out of `cursor_field` order on any page do the same: the poll
+      that saw them stores no resume point if it stopped, and later polls
+      ask without `$orderby`.
     - A **Resend everything** that stops early stores the same point and is
       done; the next polls send the rest. A recovery read past a frozen
       watermark (see "Records dated in the future") that stops early stores

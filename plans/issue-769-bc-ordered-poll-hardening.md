@@ -35,18 +35,26 @@ Follow-up to #733 / PR #755 (`plans/issue-733-bc-ordered-resume.md`).
   after a fully handled page followed by another request, so single-page polls
   never need the order and never pay for the probe. Two `$top=1` requests per
   key per process otherwise.
-- **The bracket.** Equal first values ascending and descending fail the check:
-  a server that ignores `$orderby` returns the same first record both ways, and
-  an entity whose records all share one value has nothing to resume past
-  anyway. The poll-side check uses the last (largest) value read so far, not
-  the first: a record edited between page 1 and the probe moves up, which can
-  lift the probed minimum above page 1's first value but not above its last.
+- **The bracket** (`orderBrackets`): the value ascending strictly below the
+  value descending, and the last (largest) value read so far between them,
+  ends included. The last value, not the first: a record edited between page
+  1 and the probe moves up, which can lift the probed minimum above page 1's
+  first value but not above its last.
+- **Same record both ways** is a "no" and is cached: a server that ignores
+  `$orderby` answers both with it, and an edit between the two requests can
+  change its value but not its key (review round 1).
+- **Different records on one value**, with the last value read on it too,
+  decides nothing (round 1): the entity may hold one value for now.
 - **Inconclusive probe** (a failed request other than 400, an empty answer, an
   unreadable value): nothing is cached, this poll is treated as unordered for
   a stop (stores nothing, as before #733), and the next multi-page poll probes
   again. A 400 to either probe is a "no" and is cached, like the 400 to the
   ordered first page.
-- **Disorder already seen on page 1** is a "no" without probing.
+- **Disorder on any page** turns the order off and caches a "no" (round 1);
+  on page 1 it does so without probing.
+- **A cached "no" is final** for the process; a later "yes" does not undo it.
+- **No probe before a cursor value is read**: a field whose values never
+  parse never gets a resume point, so it is not probed on every poll.
 - **Cache key** includes the tenant, so no verdict crosses tenants even for the
   same company URL.
 - **The wait.** The stop moves the cancelled poller to a `stopping` map. The

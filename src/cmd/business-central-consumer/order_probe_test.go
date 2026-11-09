@@ -3,9 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
 )
@@ -50,7 +56,7 @@ func TestOrderProbe_IgnoredOrderIsCaught(t *testing.T) {
 	if n := len(bc.probeQueries()); n != 2 {
 		t.Errorf("%d probe requests, want 2 (one ascending, one descending, once)", n)
 	}
-	if out := logs.String(); !strings.Contains(out, "do not bracket what the poll read") || !strings.Contains(out, "level=WARN") {
+	if out := logs.String(); !strings.Contains(out, "does not keep $orderby on cursor_field") || !strings.Contains(out, "level=WARN") {
 		t.Errorf("no Warn saying the order did not hold: %s", out)
 	}
 
@@ -188,5 +194,233 @@ func TestProbeURL(t *testing.T) {
 	cfg.Filter = ""
 	if got := cfg.probeURL("asc"); got != "https://bc.example/api/v2.0/companies(GUID)/items?$orderby=postingDate+asc&$top=1" {
 		t.Errorf("probeURL without a filter = %q", got)
+	}
+}
+
+// orderedOff reports, after polls on bc, that no watermark was stored, that
+// the first poll asked for the order and the later ones did not, and that the
+// verdict "no" is cached.
+func orderedOff(t *testing.T, c *bcConsumer, bc *orderedBC, cfg *BCConfig) {
+	t.Helper()
+	if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil && cp.LastProcessedMessageID != "" {
+		t.Errorf("watermark %q stored although BC ignores $orderby", cp.LastProcessedMessageID)
+	}
+	qs := bc.firstPageQueries()
+	if qs[0].Get("$orderby") != cfg.effectiveCursorField()+" asc" {
+		t.Errorf("poll 1 asked $orderby=%q", qs[0].Get("$orderby"))
+	}
+	for i, q := range qs[1:] {
+		if ob, ok := q["$orderby"]; ok {
+			t.Errorf("poll %d still asked $orderby=%v", i+2, ob)
+		}
+	}
+	if honoured, known := c.orderVerdict("tenant-1", cfg); !known || honoured {
+		t.Errorf("cached verdict = (%v, known %v), want a cached no", honoured, known)
+	}
+}
+
+// A date cursor, with BC ignoring $orderby and page 1 all on one date: the
+// probe's two answers and the last value read are all that date (review of
+// #789). A check that let lo == hi pass would store 2026-01-06 on the first
+// capped poll, and e and f would never be sent.
+func TestOrderProbe_OneDateOnPageOneIsCaught(t *testing.T) {
+	lowerPageCap(t, 2)
+	recs := map[string]string{
+		"a": "2026-01-05", "b": "2026-01-05", "c": "2026-01-05", "d": "2026-01-06",
+		"e": "2026-01-01", "f": "2026-01-02",
+	}
+	bc, c, got, mu, _ := orderedFixture(t, dateField, 2, recs)
+	bc.ignoreOrder = true
+	cfg := bc.cfg()
+	var published []string
+	for i := 0; i < 2; i++ {
+		ids, err := pollOnce(t, c, got, mu, cfg)
+		if !errors.Is(err, errPageCap) {
+			t.Fatalf("poll %d: err = %v, want errPageCap", i+1, err)
+		}
+		published = append(published, ids...)
+	}
+	orderedOff(t, c, bc, cfg)
+	pageCap = maxPagesPerPoll
+	ids, err := pollOnce(t, c, got, mu, cfg)
+	if err != nil {
+		t.Fatalf("uncapped poll: %v", err)
+	}
+	published = append(published, ids...)
+	for _, id := range []string{"e", "f"} {
+		if !strings.Contains(","+sorted(published)+",", ","+id+",") {
+			t.Errorf("record %s never published; published %v", id, published)
+		}
+	}
+}
+
+func TestOrderBrackets(t *testing.T) {
+	at := func(m int) time.Time { return aheadNow.Add(time.Duration(m) * time.Minute) }
+	lo, hi := at(-60), at(-10)
+	for _, tc := range []struct {
+		name     string
+		lo, hi   time.Time
+		last     time.Time
+		haveLast bool
+		want     bool
+	}{
+		{"lo == hi", lo, lo, lo, true, false},
+		{"lo == hi, nothing read", lo, lo, time.Time{}, false, false},
+		{"lo > hi", hi, lo, at(-30), true, false},
+		{"last on lo", lo, hi, lo, true, true},
+		{"last on hi", lo, hi, hi, true, true},
+		{"last between", lo, hi, at(-30), true, true},
+		{"last above hi", lo, hi, at(-5), true, false},
+		{"last below lo", lo, hi, at(-70), true, false},
+		{"nothing read, lo < hi", lo, hi, time.Time{}, false, true},
+	} {
+		if got := orderBrackets(tc.lo, tc.hi, tc.last, tc.haveLast); got != tc.want {
+			t.Errorf("%s: orderBrackets = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// BC ignores $orderby and the record it answers both probes with is edited
+// between them, so the two answers bracket what the poll read. It is still
+// the same record: the order is not kept.
+func TestOrderProbe_EditBetweenProbesIsCaught(t *testing.T) {
+	lowerPageCap(t, 2)
+	recs := map[string]string{
+		"a": mins(-60), "b": mins(-50), "c": mins(-40), "d": mins(-30),
+		"e": mins(-90), "f": mins(-80),
+	}
+	bc, c, got, mu, logs := orderedFixture(t, lmField, 2, recs)
+	bc.ignoreOrder = true
+	bc.afterProbe = func(dir string) {
+		if dir == "asc" {
+			bc.recs["a"] = mins(-10)
+		}
+	}
+	cfg := bc.cfg()
+	for i := 0; i < 2; i++ {
+		if _, err := pollOnce(t, c, got, mu, cfg); !errors.Is(err, errPageCap) {
+			t.Fatalf("poll %d: err = %v, want errPageCap", i+1, err)
+		}
+	}
+	orderedOff(t, c, bc, cfg)
+	if !strings.Contains(logs.String(), "with the same record") {
+		t.Errorf("no Warn naming the same record: %s", logs)
+	}
+}
+
+// Records out of order on page 2, after the probe said yes: the node stops
+// asking for the order and caches the "no".
+func TestOrderProbe_DisorderOnALaterPageTurnsOrderOff(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	var mu sync.Mutex
+	var firsts []url.Values
+	var apiURL string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if answerOrderProbe(w, r, "2026-10-01T00:00:00Z", "2026-10-03T00:00:00Z") {
+			return
+		}
+		if r.URL.Query().Get("page") == "2" {
+			fmt.Fprint(w, `{"value":[{"number":"C","lastModifiedDateTime":"2026-10-01T05:00:00Z"}]}`)
+			return
+		}
+		mu.Lock()
+		firsts = append(firsts, r.URL.Query())
+		mu.Unlock()
+		fmt.Fprintf(w, `{"value":[{"number":"A","lastModifiedDateTime":"2026-10-01T10:00:00Z"},`+
+			`{"number":"B","lastModifiedDateTime":"2026-10-02T10:00:00Z"}],"@odata.nextLink":"%s?page=2"}`, apiURL)
+	}))
+	defer api.Close()
+	apiURL = api.URL + "/companies(GUID)/items"
+
+	c, _, _ := newTestConsumer()
+	logs := &stLogBuf{}
+	c.logger = slog.New(slog.NewTextHandler(logs, nil))
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: api.URL, TokenURL: tokenSrv.URL, Incremental: true, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(http.DefaultClient)
+	for i := 0; i < 2; i++ {
+		if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+			t.Fatalf("poll %d: %v", i+1, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(firsts) != 2 || firsts[0].Get("$orderby") == "" {
+		t.Fatalf("first-page requests %v, want two, the first ordered", firsts)
+	}
+	if ob, ok := firsts[1]["$orderby"]; ok {
+		t.Errorf("poll 2 still asked $orderby=%v after records came back out of order", ob)
+	}
+	if honoured, known := c.orderVerdict("tenant-1", cfg); !known || honoured {
+		t.Errorf("cached verdict = (%v, known %v), want a cached no", honoured, known)
+	}
+	if !strings.Contains(logs.String(), "out of cursor_field order") {
+		t.Errorf("no Warn about the order: %s", logs)
+	}
+}
+
+// A cached "no" stays: a later "yes" for the same key does not undo it.
+func TestSetOrderVerdict_NoIsFinal(t *testing.T) {
+	c, _, _ := newTestConsumer()
+	cfg := &BCConfig{CompanyID: "GUID", APIBaseURL: "https://bc.example/api/v2.0"}
+	c.setOrderVerdict("tenant-1", cfg, true)
+	if honoured, known := c.orderVerdict("tenant-1", cfg); !known || !honoured {
+		t.Fatalf("verdict = (%v, %v), want a cached yes", honoured, known)
+	}
+	c.setOrderVerdict("tenant-1", cfg, false)
+	c.setOrderVerdict("tenant-1", cfg, true)
+	if honoured, known := c.orderVerdict("tenant-1", cfg); !known || honoured {
+		t.Errorf("verdict = (%v, %v) after no then yes, want the no kept", honoured, known)
+	}
+}
+
+// Every record on one value, BC honouring the order and answering the two
+// probes with different records: nothing is decided. The node keeps asking
+// for the order, stores no resume point, and probes again on the next poll.
+func TestOrderProbe_OneValueDecidesNothing(t *testing.T) {
+	lowerPageCap(t, 2)
+	v := mins(-60)
+	bc, c, got, mu, _ := orderedFixture(t, lmField, 2, map[string]string{"a": v, "b": v, "c": v, "d": v, "e": v})
+	cfg := bc.cfg()
+	for i := 0; i < 2; i++ {
+		if _, err := pollOnce(t, c, got, mu, cfg); !errors.Is(err, errPageCap) {
+			t.Fatalf("poll %d: err = %v, want errPageCap", i+1, err)
+		}
+	}
+	if _, known := c.orderVerdict("tenant-1", cfg); known {
+		t.Error("a verdict was cached from probes that found one value")
+	}
+	if n := len(bc.probeQueries()); n != 4 {
+		t.Errorf("%d probe requests over two polls, want 4 (asked again)", n)
+	}
+	for i, q := range bc.firstPageQueries() {
+		if q.Get("$orderby") != lmField+" asc" {
+			t.Errorf("poll %d asked $orderby=%q, want it kept", i+1, q.Get("$orderby"))
+		}
+	}
+	if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil && cp.LastProcessedMessageID != "" {
+		t.Errorf("watermark %q stored", cp.LastProcessedMessageID)
+	}
+}
+
+// A cursor_field whose values are not dates (a code) never gets a resume
+// point, so it is never probed.
+func TestOrderProbe_UnparseableCursorDoesNotProbe(t *testing.T) {
+	lowerPageCap(t, 2)
+	bc, c, got, mu, logs := orderedFixture(t, "code", 2, map[string]string{"a": "A1", "b": "B1", "c": "C1", "d": "D1", "e": "E1"})
+	cfg := bc.cfg()
+	for i := 0; i < 2; i++ {
+		if _, err := pollOnce(t, c, got, mu, cfg); !errors.Is(err, errPageCap) {
+			t.Fatalf("poll %d: err = %v, want errPageCap", i+1, err)
+		}
+	}
+	if n := len(bc.probeQueries()); n != 0 {
+		t.Errorf("%d probe requests for a field that never parses, want 0", n)
+	}
+	if strings.Contains(logs.String(), "order check") {
+		t.Errorf("an order-check line was logged: %s", logs)
 	}
 }

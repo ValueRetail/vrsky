@@ -692,8 +692,11 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			break
 		}
 		// Only a poll with another page to read can stop with a resume point,
-		// so this is where the order is first needed: confirm it once.
-		if ordered && !confirmed && !probed {
+		// so this is where the order is first needed: confirm it once. Not
+		// before the poll has read a cursor value: until then a stop stores
+		// no resume point, and a field whose values never parse (a number, a
+		// code) never gets one, so it is not probed on every poll.
+		if ordered && !confirmed && !probed && watermark.atLast != nil {
 			probed = true
 			switch c.probeOrder(ctx, tenantID, cfg, tok, &watermark, logger) {
 			case orderHonoured:
@@ -708,6 +711,16 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			stopped = err
 			break
 		}
+	}
+	// Records out of cursor order on any page, after the probe or without
+	// one: the order cannot be relied on, now or on later polls.
+	if ordered && watermark.unordered {
+		c.setOrderVerdict(tenantID, cfg, false)
+		cfg.unordered, ordered = true, false
+		logger.Warn("Business Central returned records out of cursor_field order although the poll asked for "+
+			"$orderby; polling without $orderby until the connector restarts. A poll that stops early "+
+			"(page cap, failed page) then does not advance the watermark",
+			"cursor_field", cfg.effectiveCursorField(), "entity", cfg.effectiveEntity())
 	}
 	if stopped != nil {
 		return c.stoppedPoll(ctx, connID, tenantID, cfg, stopState{
@@ -942,13 +955,20 @@ func (c *bcConsumer) orderVerdict(tenantID string, cfg *BCConfig) (honoured, kno
 	return honoured, known
 }
 
+// setOrderVerdict caches what was found about the order. A "no" is final for
+// the process: a later "yes" (another connection's probe that ran before the
+// "no" landed, say) does not undo it.
 func (c *bcConsumer) setOrderVerdict(tenantID string, cfg *BCConfig, honoured bool) {
 	c.orderMu.Lock()
 	defer c.orderMu.Unlock()
 	if c.orderChecks == nil {
 		c.orderChecks = make(map[string]bool)
 	}
-	c.orderChecks[orderKey(tenantID, cfg)] = honoured
+	key := orderKey(tenantID, cfg)
+	if prev, ok := c.orderChecks[key]; ok && !prev {
+		return
+	}
+	c.orderChecks[key] = honoured
 }
 
 // probeOrder checks, once per process for each orderKey, that BC keeps
@@ -959,13 +979,12 @@ func (c *bcConsumer) setOrderVerdict(tenantID string, cfg *BCConfig, honoured bo
 //
 // It asks for one record ascending and one descending, under the configured
 // filter and without the cursor clause, so the two are the smallest and the
-// largest value of the entity. The order holds when the smallest is strictly
-// below the largest and the last value the poll has read lies between them. A
-// server that ignores $orderby answers both with the same record. An entity
-// whose records all share one value fails too; a stopped poll has nothing to
-// resume past there anyway. The last value read is the one compared, not the
-// first: a record edited between page 1 and the probe moves up, which can
-// lift the smallest value above page 1's first but not above its last.
+// largest value of the entity. A server that ignores $orderby answers both
+// with the same record, whatever its value (an edit between the two requests
+// can change the value, not the record): that is a "no". Otherwise the order
+// holds when orderBrackets says so. Two records on one value, with the last
+// value read on it too, decide nothing: every record may share that value for
+// now, and there is nothing to resume past until they do not.
 //
 // A 400 to either request is a "no", as for the ordered first page. Any other
 // failure, or an answer without a readable value, leaves nothing cached: this
@@ -985,7 +1004,7 @@ func (c *bcConsumer) probeOrder(ctx context.Context, tenantID string, cfg *BCCon
 		return ignored("returned records out of cursor_field order although the poll asked for $orderby")
 	}
 	var ends [2]time.Time
-	var raws [2]string
+	var raws, keys [2]string
 	for i, dir := range []string{"asc", "desc"} {
 		body, err := c.get(ctx, tok, cfg.probeURL(dir), 0)
 		if err != nil && isBadRequest(err) {
@@ -998,20 +1017,29 @@ func (c *bcConsumer) probeOrder(ctx context.Context, tenantID string, cfg *BCCon
 			}
 			return orderUnknown
 		}
-		v, raw, ok := firstCursor(body, field)
+		v, raw, key, ok := firstCursor(body, field)
 		if !ok {
 			logger.Warn("Business Central order check got no cursor_field value; this poll does not rely on the order, "+
 				"the next one checks again", "cursor_field", field, "order", dir)
 			return orderUnknown
 		}
-		ends[i], raws[i] = v, raw
+		ends[i], raws[i], keys[i] = v, raw, key
 	}
 	lo, hi := ends[0], ends[1]
-	inside, lastRead := true, ""
-	if t.atLast != nil {
-		inside, lastRead = !t.last.Before(lo) && !t.last.After(hi), t.last.UTC().Format(time.RFC3339)
+	haveLast, lastRead := t.atLast != nil, ""
+	if haveLast {
+		lastRead = t.last.UTC().Format(time.RFC3339)
 	}
-	if !lo.Before(hi) || !inside {
+	if keys[0] == keys[1] {
+		return ignored("does not keep $orderby on cursor_field: it answered ascending and descending with "+
+			"the same record", "record", keys[0], "first_ascending", raws[0], "first_descending", raws[1])
+	}
+	if lo.Equal(hi) && (!haveLast || t.last.Equal(lo)) {
+		logger.Info("Business Central order check found one cursor_field value at both ends; this poll does not "+
+			"rely on the order, the next one checks again", "cursor_field", field, "value", raws[0])
+		return orderUnknown
+	}
+	if !orderBrackets(lo, hi, t.last, haveLast) {
 		return ignored("does not keep $orderby on cursor_field: the first record ascending and the first "+
 			"descending do not bracket what the poll read",
 			"first_ascending", raws[0], "first_descending", raws[1], "last_read", lastRead)
@@ -1022,22 +1050,33 @@ func (c *bcConsumer) probeOrder(ctx context.Context, tenantID string, cfg *BCCon
 	return orderHonoured
 }
 
-// firstCursor is the cursor_field value of the first record of an OData page.
-func firstCursor(body []byte, field string) (time.Time, string, bool) {
+// orderBrackets reports whether a probe's smallest value lo and largest value
+// hi are consistent with an ordered feed: lo strictly below hi, and the last
+// value the poll read (when it read one) between them, ends included.
+func orderBrackets(lo, hi, last time.Time, haveLast bool) bool {
+	if !lo.Before(hi) {
+		return false
+	}
+	return !haveLast || (!last.Before(lo) && !last.After(hi))
+}
+
+// firstCursor is the cursor_field value (parsed and raw) and the record key
+// (recordKey) of the first record of an OData page.
+func firstCursor(body []byte, field string) (time.Time, string, string, bool) {
 	var p odataPage
 	if err := json.Unmarshal(body, &p); err != nil || len(p.Value) == 0 {
-		return time.Time{}, "", false
+		return time.Time{}, "", "", false
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(p.Value[0], &fields); err != nil {
-		return time.Time{}, "", false
+		return time.Time{}, "", "", false
 	}
 	var s string
 	if raw, ok := fields[field]; !ok || json.Unmarshal(raw, &s) != nil {
-		return time.Time{}, "", false
+		return time.Time{}, "", "", false
 	}
 	v, _, ok := parseCursor(s)
-	return v, s, ok
+	return v, s, recordKey(p.Value[0], fields), ok
 }
 
 // laterCursor reports whether cursor value a is later than b. Any value is

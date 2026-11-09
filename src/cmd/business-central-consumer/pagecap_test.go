@@ -29,11 +29,11 @@ func answerOrderProbe(w http.ResponseWriter, r *http.Request, lo, hi string) boo
 	if !q.Has("$top") {
 		return false
 	}
-	v := lo
+	v, key := lo, "probe-lo"
 	if strings.HasSuffix(q.Get("$orderby"), " desc") {
-		v = hi
+		v, key = hi, "probe-hi"
 	}
-	fmt.Fprintf(w, `{"value":[{"number":"probe","lastModifiedDateTime":%q}]}`, v)
+	fmt.Fprintf(w, `{"value":[{"number":%q,"lastModifiedDateTime":%q}]}`, key, v)
 	return true
 }
 

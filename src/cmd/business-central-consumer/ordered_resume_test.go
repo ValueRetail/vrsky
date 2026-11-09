@@ -64,6 +64,9 @@ type orderedBC struct {
 	// failProbe, when set, is the status the next probe gets; it is
 	// cleared once used.
 	failProbe int
+	// afterProbe, when set, runs (under the lock) after a probe is
+	// answered, with its direction; a test edits recs in it.
+	afterProbe func(dir string)
 	// hold, when set, runs before a page request takes the lock, with its
 	// $skiptoken; a test blocks a page in it.
 	hold func(token string, r *http.Request)
@@ -184,6 +187,8 @@ func (b *orderedBC) serve(w http.ResponseWriter, r *http.Request) {
 
 // probe answers an order probe: `$orderby=<field> asc|desc&$top=n`, sorted
 // unless the fake ignores $orderby, in which case it is key order either way.
+// Descending reverses the key order of ties too, as `ORDER BY field DESC,
+// key DESC` would.
 func (b *orderedBC) probe(w http.ResponseWriter, q url.Values) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -214,11 +219,15 @@ func (b *orderedBC) probe(w http.ResponseWriter, q url.Values) {
 	}
 	sort.Slice(ids, func(i, j int) bool {
 		vi, vj := b.recs[ids[i]], b.recs[ids[j]]
-		if b.ignoreOrder || vi == vj {
+		switch {
+		case b.ignoreOrder:
 			return ids[i] < ids[j]
-		}
-		if dir == "desc" {
+		case dir == "desc" && vi == vj:
+			return ids[i] > ids[j]
+		case dir == "desc":
 			return b.less(vj, vi)
+		case vi == vj:
+			return ids[i] < ids[j]
 		}
 		return b.less(vi, vj)
 	})
@@ -227,6 +236,9 @@ func (b *orderedBC) probe(w http.ResponseWriter, q url.Values) {
 		out = append(out, fmt.Sprintf(`{"id":%q,%q:%q}`, id, b.field, b.recs[id]))
 	}
 	fmt.Fprintf(w, `{"value":[%s]}`, strings.Join(out, ","))
+	if b.afterProbe != nil {
+		b.afterProbe(dir)
+	}
 }
 
 func (b *orderedBC) probeQueries() []url.Values {
