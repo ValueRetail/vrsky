@@ -121,8 +121,10 @@ Front Systems with the two auth headers.
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `5xx`/network errors retry on the usual backoff and go to the DLQ once
-the retries are used up; `4xx` and `401`/`403` are poison: the message is
+and `5xx`/network errors retry and go to the DLQ once the retries are used
+up. A `429` comes back after Front Systems' `Retry-After` (5 s without one),
+kept between 1 s and 2 min; later attempts wait longer, see
+[Which failed messages reach the DLQ](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq). `4xx` and `401`/`403` are poison: the message is
 acked and dropped, not dead-lettered. An incomplete node config and a payload
 that is not JSON are dropped the same way. A `base_url` the connector refuses
 (see below) sends nothing; the message is retried and

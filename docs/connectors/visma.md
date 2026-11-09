@@ -101,7 +101,9 @@ A producer node writes each message to a Visma resource (`POST`/`PUT`/`PATCH`).
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `503`/`5xx`/network errors retry, and go to the DLQ once the retries are
-used up. Other `4xx` answers, `401`/`403` included, an incomplete node config
+used up. A `429` or `503` comes back after 5 s (the connector does not read
+`Retry-After`); later attempts wait longer, see
+[Which failed messages reach the DLQ](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq). Other `4xx` answers, `401`/`403` included, an incomplete node config
 and a payload that is not JSON are permanent: the message is logged and
 dropped, not retried and not dead-lettered. A failure to get a token is
 retried.

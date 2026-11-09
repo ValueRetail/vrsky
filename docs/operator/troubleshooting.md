@@ -193,10 +193,25 @@ Deleting a connection does not — the builder asks before creating a new one.
 Only some failures do. A destination (a producer in the code) sorts every
 error it hits into one of two kinds:
 
-- **Retried.** The message is delivered again after 1 s, 5 s, 30 s and 2 min.
-  After the fifth attempt it is copied to the connection's DLQ with the last
+- **Retried.** The message is delivered again, five attempts in all. After
+  the fifth attempt it is copied to the connection's DLQ with the last
   error, the attempt count and the worker's name, and kept there for 7 days.
-  Retry it from the DLQ once the cause is fixed.
+  Retry it from the DLQ once the cause is fixed. How soon it comes back
+  depends on the error:
+  - A rate limit (`429` from Sitoo or Front Systems; `429` or `503` from
+    Visma, Brightpearl, Business Central or SAP) comes back after the wait
+    the destination asked for. Sitoo and Front Systems read it from the
+    answer (`X-Rate-Limit-Reset` or `Retry-After`) and wait 5 s when it has
+    none; the other four always wait 5 s. The SDK keeps that wait between
+    1 s and 2 min. JetStream adds the growth of the backoff schedule on
+    later attempts, so a 5 s wait becomes 5 s, 9 s, 34 s and 124 s: about
+    three minutes from the first attempt to the DLQ. The worker logs
+    `Handler error, will retry after the delay it asked for` with
+    `retry_after`.
+  - Any other retried error comes back at once, on the worker's next
+    fetch, so the five attempts usually take under a second. The backoff
+    schedule (1 s, 5 s, 30 s, 2 min) only applies when a worker stops
+    answering for a message, for example when it crashes mid-delivery.
 - **Dropped.** The error is marked permanent, because trying the same message
   again cannot work (a `4xx` from the target, an incomplete node, a payload
   that is not JSON). The message is acked and nothing is kept. There is no
@@ -225,7 +240,7 @@ Which kind an error gets differs per destination:
 | Kafka | No `brokers` or `topic` | Failure to open the writer or to write |
 | RabbitMQ | No `url`, or neither `exchange` nor a queue | Failure to connect or to publish |
 | Salesforce | Payload not JSON; no `object`; `upsert` with no `external_id_field` | A record Salesforce refuses with a `4xx` (the error names it as `record[N]` with Salesforce's code; the other records still go in), a record with no external-id value; `401`/`403` after the token refresh, `408`, `429`, `5xx`, a redirect, network or token failure; the same answers while creating, filling or closing a Bulk API job. Records that went in are not sent again on the retry (see the [Salesforce page](../connectors/salesforce.md#records-are-not-sent-twice)) |
-| Sitoo | Incomplete node; a `base_url` the connector refuses; payload not JSON; a webhook event notification; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error |
+| Sitoo | Incomplete node; payload not JSON; a webhook event notification; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error; a refused `base_url` or address |
 | Front Systems | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error; a refused `base_url` or address |
 | Visma | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error, token failure; a refused URL |
 | Brightpearl | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error; a refused base URL |

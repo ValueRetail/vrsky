@@ -239,7 +239,9 @@ For a till posting sales:
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `503`/`5xx`/network errors and a refused address retry, then go to the
-DLQ; `4xx` bad-data and `401`/`403` auth are poison: the message is acked and
+DLQ. A `429` or `503` (on the write or the `dedupe_fields` lookup) comes
+back after 5 s (the connector does not read `Retry-After`); later attempts
+wait longer, see [Which failed messages reach the DLQ](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq). `4xx` bad-data and `401`/`403` auth are poison: the message is acked and
 dropped with a log line, not dead-lettered. An incomplete node config and a
 payload that is not JSON are dropped the same way. A failure to get a token is
 retried.

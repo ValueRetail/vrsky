@@ -116,7 +116,7 @@ We will implement a **hybrid dual-NATS architecture**:
 **Use Cases**:
 
 - ✅ The data stream: every pipeline message, one durable consumer per worker
-- ✅ Retries: JetStream redelivery of a NAK'd message, with backoff
+- ✅ Retries: JetStream redelivery of a NAK'd message
 - ✅ Dead letter queue: the `VRSKY_DLQ` stream (failed messages)
 - ✅ Platform-wide events (tenant provisioning, etc.)
 - ✅ Cross-tenant integrations (future feature)
@@ -316,7 +316,9 @@ There is no state store: the attempt count is JetStream's own delivery count
 
 ```
 handler returns nil                      → Ack
-handler returns an error, delivery < 5   → Nak (redelivered after the backoff)
+handler returns an error, delivery < 5   → Nak (redelivered at once, on the next fetch)
+  the error asks for a delay (NakDelay)  → NakWithDelay(delay), the delay kept
+                                           between 1 s and the largest backoff step
 handler returns an error, delivery = 5   → copy to vrsky.dlq.<tenant>.pipeline.<conn>
                                            with X-Vrsky-Last-Error, X-Vrsky-Delivered
                                            and X-Vrsky-Worker, then Ack
@@ -327,7 +329,18 @@ handler panics                           → Nak
 SDK connectors don't call this directly. The SDK runner maps `Deliver`'s
 result onto it: nil acks, `sdk.Permanent` acks and drops (logged, never
 dead-lettered), anything else is returned and so NAK'd
-(`pkg/sdk/lifecycle.go`).
+(`pkg/sdk/lifecycle.go`). `sdk.RateLimited(err, d)` is the error that asks
+for a delay (#721).
+
+The backoff schedule is not what spaces NAK'd attempts. JetStream applies
+`BackOff` when an ack wait runs out (a worker that died or hung), and puts a
+plain NAK straight back on the redelivery queue, so five failed attempts
+usually take under a second. A NAK with a delay is measured from where the
+attempt's ack wait began counting down from `Backoff[0]` and fires once the
+attempt's own step has passed, so delivery `n` waits the delay plus
+`Backoff[n-1] - Backoff[0]` (measured on nats-server 2.15). With the default
+schedule a 5 s delay waits 5 s, 9 s, 34 s and 124 s. Every redelivery,
+delayed or not, counts toward `MaxDeliver`.
 
 ### AckWait, in-progress heartbeats & redelivery (#139)
 
@@ -349,13 +362,15 @@ duplicate delivery (`pkg/messaging/subscriber.go`).
   window** (`Duplicates: 5*time.Minute`) collapses re-published duplicates. The
   full redelivery-to-DLQ backoff schedule (≈156s) fits well inside that window,
   so a message that is NAK'd and retried across the whole schedule is still
-  deduplicated. Downstream sinks should additionally treat writes as idempotent
+  deduplicated. A rate-limited destination can take longer (up to about ten
+  minutes with the 2 min cap), but a destination publishes nothing back to
+  the stream, so the window does not apply to it. Downstream sinks should additionally treat writes as idempotent
   where the target allows it (e.g. upsert by key).
 
 ### Dead Letter Queue
 
-A message that fails five deliveries (`MaxDeliveryAttempts`; redelivered after
-1 s, 5 s, 30 s and 2 min) is dead-lettered:
+A message that fails five deliveries (`MaxDeliveryAttempts`; see above for
+how far apart they are) is dead-lettered:
 
 1. The message is copied to the `VRSKY_DLQ` stream with the last error and
    the attempt count, and acked on the data stream.

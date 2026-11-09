@@ -534,7 +534,7 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 				"connection_id", env.IntegrationID, "tenant_id", env.TenantID,
 				"envelope_id", env.ID, "error", derr)
 		}
-		return derr // Retriable / bare → NAK → backoff → DLQ
+		return derr // Retriable / bare → NAK; RateLimited → NAK with its delay; then DLQ
 	})
 	if err != nil {
 		return nil, err
