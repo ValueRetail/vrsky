@@ -275,6 +275,9 @@ func TestWatermarkHoldsWhenAPageFails(t *testing.T) {
 	call := 0
 	var apiURL string
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if answerOrderProbe(w, r, "2026-01-01T10:00:00Z", "2026-01-02T10:00:00Z") {
+			return
+		}
 		mu.Lock()
 		if r.URL.Query().Get("page") == "" {
 			filters = append(filters, r.URL.Query().Get("$filter"))

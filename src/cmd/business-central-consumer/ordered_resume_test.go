@@ -58,6 +58,21 @@ type orderedBC struct {
 	// failFirst, when set, is the status the next first-page request gets
 	// instead of a page; it is cleared once used.
 	failFirst int
+	// probes is the query of every order probe ($top, #769). They are not
+	// pages: they do not count in firstPages, fail or beforePage.
+	probes []url.Values
+	// failProbe, when set, is the status the next probe gets; it is
+	// cleared once used.
+	failProbe int
+	// afterProbe, when set, runs (under the lock) after a probe is
+	// answered, with its direction; a test edits recs in it.
+	afterProbe func(dir string)
+	// tiesByKeyAsc makes a descending probe break ties by key ascending,
+	// like an ascending one, instead of reversing them.
+	tiesByKeyAsc bool
+	// hold, when set, runs before a page request takes the lock, with its
+	// $skiptoken; a test blocks a page in it.
+	hold func(token string, r *http.Request)
 }
 
 var orderedFilter = regexp.MustCompile(`^(\w+) (gt|ge) (\S+)$`)
@@ -82,10 +97,17 @@ func (b *orderedBC) less(x, y string) bool {
 }
 
 func (b *orderedBC) serve(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Has("$top") {
+		b.probe(w, q)
+		return
+	}
+	token := q.Get("$skiptoken")
+	if b.hold != nil {
+		b.hold(token, r)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	q := r.URL.Query()
-	token := q.Get("$skiptoken")
 	if token == "" {
 		b.firstPages = append(b.firstPages, q)
 		if b.failFirst != 0 {
@@ -164,6 +186,68 @@ func (b *orderedBC) serve(w http.ResponseWriter, r *http.Request) {
 		next = fmt.Sprintf(`,"@odata.nextLink":%q`, b.srv.URL+r.URL.Path+"?"+q.Encode())
 	}
 	fmt.Fprintf(w, `{"value":[%s]%s}`, strings.Join(out, ","), next)
+}
+
+// probe answers an order probe: `$orderby=<field> asc|desc&$top=n`, sorted
+// unless the fake ignores $orderby, in which case it is key order either way.
+// Descending reverses the key order of ties too, as `ORDER BY field DESC,
+// key DESC` would, unless tiesByKeyAsc is set.
+func (b *orderedBC) probe(w http.ResponseWriter, q url.Values) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.probes = append(b.probes, q)
+	if b.failProbe != 0 {
+		code := b.failProbe
+		b.failProbe = 0
+		http.Error(w, "busy", code)
+		return
+	}
+	field, dir, _ := strings.Cut(q.Get("$orderby"), " ")
+	if b.rejectOrder || field != b.field || (dir != "asc" && dir != "desc") {
+		http.Error(w, `{"error":{"code":"BadRequest","message":"cannot sort on this field"}}`, http.StatusBadRequest)
+		return
+	}
+	if q.Get("$filter") != "" {
+		http.Error(w, `{"error":{"message":"a probe carries no cursor clause"}}`, http.StatusBadRequest)
+		return
+	}
+	top, err := strconv.Atoi(q.Get("$top"))
+	if err != nil || top < 1 {
+		http.Error(w, `{"error":{"message":"bad $top"}}`, http.StatusBadRequest)
+		return
+	}
+	ids := make([]string, 0, len(b.recs))
+	for id := range b.recs {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		vi, vj := b.recs[ids[i]], b.recs[ids[j]]
+		switch {
+		case b.ignoreOrder:
+			return ids[i] < ids[j]
+		case dir == "desc" && vi == vj && !b.tiesByKeyAsc:
+			return ids[i] > ids[j]
+		case dir == "desc":
+			return b.less(vj, vi)
+		case vi == vj:
+			return ids[i] < ids[j]
+		}
+		return b.less(vi, vj)
+	})
+	out := []string{}
+	for _, id := range ids[:min(top, len(ids))] {
+		out = append(out, fmt.Sprintf(`{"id":%q,%q:%q}`, id, b.field, b.recs[id]))
+	}
+	fmt.Fprintf(w, `{"value":[%s]}`, strings.Join(out, ","))
+	if b.afterProbe != nil {
+		b.afterProbe(dir)
+	}
+}
+
+func (b *orderedBC) probeQueries() []url.Values {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]url.Values(nil), b.probes...)
 }
 
 func (b *orderedBC) add(recs map[string]string) {
@@ -486,7 +570,9 @@ func TestOrderedResume_UntrustedOrderDoesNotAdvance(t *testing.T) {
 		wantOrderbys []bool // per first-page request: carried $orderby
 	}{
 		{"BC refuses $orderby", true, "refused $orderby on cursor_field", []bool{true, false, false}},
-		{"BC ignores $orderby", false, "out of cursor_field order", []bool{true, true}},
+		// The first page is already out of order, so the order is not
+		// trusted and the next poll asks without it (#769).
+		{"BC ignores $orderby", false, "out of cursor_field order", []bool{true, false}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
