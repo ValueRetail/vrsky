@@ -17,6 +17,10 @@ import (
 // silently ignore the next real file someone adds there. The other direction
 // keeps the names honest: every /src/<name> line must be a command, and none
 // may name a directory at src/ root, so the list can never hide source.
+//
+// A command built with `go build .` inside src/cmd/<name>/ leaves its binary
+// at src/cmd/<name>/<name>. Each command also needs the line
+// /src/cmd/<name>/<name>, and every such line must name a real command.
 func TestGitignoreCoversCmdBinaries(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	body, err := os.ReadFile(filepath.Join(root, ".gitignore"))
@@ -26,6 +30,12 @@ func TestGitignoreCoversCmdBinaries(t *testing.T) {
 	listed := map[string]bool{}
 	for _, m := range regexp.MustCompile(`(?m)^/src/([^/\s]+)$`).FindAllStringSubmatch(string(body), -1) {
 		listed[m[1]] = true
+	}
+	inCmd := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^/src/cmd/([^/\s]+)/([^/\s]+)$`).FindAllStringSubmatch(string(body), -1) {
+		if m[1] == m[2] {
+			inCmd[m[1]] = true
+		}
 	}
 
 	cmdDirs, err := os.ReadDir(filepath.Join(root, "src", "cmd"))
@@ -45,6 +55,14 @@ func TestGitignoreCoversCmdBinaries(t *testing.T) {
 	for name := range commands {
 		if !listed[name] {
 			t.Errorf(".gitignore has no /src/%s line; `go build ./cmd/%s` in src/ would leave an untracked binary", name, name)
+		}
+		if !inCmd[name] {
+			t.Errorf(".gitignore has no /src/cmd/%s/%s line; \"go build .\" in src/cmd/%s would leave an untracked binary", name, name, name)
+		}
+	}
+	for name := range inCmd {
+		if !commands[name] {
+			t.Errorf(".gitignore line /src/cmd/%s/%s names no directory in src/cmd; drop it or add the command", name, name)
 		}
 	}
 
