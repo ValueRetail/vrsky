@@ -90,7 +90,11 @@ func TestDeliver_TimedOutNodeIsNotMarkedTaken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	start := time.Now()
 	err := p.Deliver(ctx, env)
+	if elapsed := time.Since(start); elapsed >= 3*time.Second {
+		t.Errorf("first Deliver took %v, want about the 200ms timeout", elapsed)
+	}
 	if err == nil {
 		t.Fatal("want an error: one node timed out")
 	}
