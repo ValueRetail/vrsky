@@ -1306,7 +1306,7 @@ Last updated 2026-10-28.
     `sdk.Retriable` for the first, and decide what a refused row should do
     (dead-letter the message with the row's error?). Found in #698.
 
-180. **The Sitoo destination drops a message for a refused `base_url`.**
+180. ~~**The Sitoo destination drops a message for a refused `base_url`.**~~ (#721)
     `sitoo-producer` returns `sdk.Permanent` from `safeurl.CheckBaseURL`,
     while the HTTP, Visma, Brightpearl, Front Systems, SAP and Business
     Central destinations retry and dead-letter, so the message can be replayed
