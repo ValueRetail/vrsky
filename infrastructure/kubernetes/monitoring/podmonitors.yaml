@@ -66,3 +66,33 @@ spec:
           targetLabel: __address__
         - sourceLabels: [__meta_kubernetes_pod_label_app]
           targetLabel: connector
+---
+# cert-manager's controller (#729), for the Postgres server certificate's
+# expiry: certmanager_certificate_expiration_timestamp_seconds, alerted on by
+# PostgresCertExpiring and PostgresCertMetricsAbsent in prometheus-rules.yml.
+# The labels and the port (http-metrics, 9402) are what the cert-manager
+# v1.13.3 chart renders for the controller pod; install-cert-manager.sh pins
+# that version, and TestCertManagerPodMonitor fails when it changes so the
+# two are checked again. The cainjector and webhook pods are left out: they
+# carry other component labels and no certificate metrics.
+#
+# honorLabels: the metric's own `namespace` label is the Certificate's
+# (vrsky-database). Without it Prometheus would rename it exported_namespace
+# and set namespace="cert-manager", and the rules' matcher would find nothing.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cert-manager
+  namespace: vrsky-monitoring
+spec:
+  namespaceSelector:
+    matchNames: [cert-manager]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/component: controller
+  podMetricsEndpoints:
+    - port: http-metrics     # named containerPort 9402 in the chart
+      path: /metrics
+      interval: 60s          # an expiry date; nothing here changes by the second
+      honorLabels: true
