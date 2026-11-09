@@ -716,7 +716,7 @@ func TestBulk_PollBound(t *testing.T) {
 	f := newFakeBulk(t)
 	f.inProgress = -1
 	p := newBulkProducer(t, f, "insert")
-	p.bulkPollInitial = 5 * time.Millisecond
+	p.bulkPollInitial = 50 * time.Millisecond
 	p.bulkPollMax = 200 * time.Millisecond
 	p.bulkPollTimeout = 250 * time.Millisecond
 	env := testEnvelope(threeRecords)
@@ -728,14 +728,19 @@ func TestBulk_PollBound(t *testing.T) {
 		took := time.Since(start)
 		checkRetryable(t, err)
 		checkContains(t, err, []string{"still InProgress after 250ms"}, nil)
-		// Waits of 5, 10, 20, 40, 80 ms, then the last one is cut to the
-		// 95 ms left: about 250 ms. Unclipped it would be 160 ms, 315 ms.
-		if took < 250*time.Millisecond || took > 290*time.Millisecond {
-			t.Errorf("attempt %d took %s, want the 250ms bound (under 290ms)", attempt, took)
+		// Waits of 50 and 100 ms, then the last one is cut to the 100 ms
+		// left: about 250 ms. Unclipped it would be 200 ms, 350 ms.
+		if took < 250*time.Millisecond || took > 320*time.Millisecond {
+			t.Errorf("attempt %d took %s, want the 250ms bound (under 320ms)", attempt, took)
 		}
-		// Six reads with backoff; a fixed 5 ms interval would make about 60.
-		if got := f.count("state") - reads; got < 4 || got > 8 {
-			t.Errorf("attempt %d read the job state %d times, want 4 to 8", attempt, got)
+		// Three reads with backoff, plus the retry's read on resuming; a
+		// fixed 50 ms interval would make five.
+		want := 3
+		if attempt > 1 {
+			want = 4
+		}
+		if got := f.count("state") - reads; got != want {
+			t.Errorf("attempt %d read the job state %d times, want %d", attempt, got, want)
 		}
 	}
 	if got := f.count("create"); got != 1 {

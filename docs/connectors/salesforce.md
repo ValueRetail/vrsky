@@ -162,7 +162,9 @@ Salesforce to process it (#760):
   record without a value for it would be an empty CSV row, which Salesforce
   skips. The node does not send it and names it (`record[2]: nothing to
   send`); the message is retried and then dead-lettered like any refused
-  record.
+  record. An empty record (`{}`, or one whose only field is null) is refused
+  this way on the Bulk path even for an object with no required fields,
+  though below the bulk threshold the REST path would send it.
 
 While a job is being waited for, the node handles no other message: the
 SDK delivers one message at a time per worker.
