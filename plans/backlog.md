@@ -1186,7 +1186,7 @@ Last updated 2026-10-28.
     retries. Stamp before the fetch and compare before the first after-action
     too. Found in review of #676.
 
-167. **Conditional deletes for the cloud-storage after-action.** The stamp
+167. ~~**Conditional deletes for the cloud-storage after-action.**~~ (#718) The stamp
     check leaves a window between the Stat and the delete (for a `move`,
     through the copy). Close it where the store supports it: Azure `If-Match`
     on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
@@ -1379,7 +1379,7 @@ Last updated 2026-10-28.
     URLs: httpbin since #660, mock-sap since #708. Decide whether compose
     sets it on `management-api` too. Found in #708. Filed as #720.
 
-189. **The poll-mode after-action retry runs blind.** The #640 retry pass
+189. ~~**The poll-mode after-action retry runs blind.**~~ (#718) The #640 retry pass
     calls `afterAction` for a key that is done at the listing's stamp,
     without a Stat check, so an object replaced with the same size within
     the same second (S3 listings have whole seconds), or replaced between the
@@ -1388,7 +1388,7 @@ Last updated 2026-10-28.
     one), or make the same Stat check as the first after-action (#707) in
     `retryAfterAction`. Found in review of #710. Filed as #718.
 
-190. **GCS metadata edits read as replacements.** The stamp check before a
+190. ~~**GCS metadata edits read as replacements.**~~ (#718) The stamp check before a
     cloud-storage after-action compares `Updated`, which GCS changes on a
     metadata-only edit (labels, content type) while the generation stays.
     Such an object is left (event mode) or published once more (poll mode).

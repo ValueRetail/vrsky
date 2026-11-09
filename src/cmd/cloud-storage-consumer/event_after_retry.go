@@ -26,7 +26,8 @@ import (
 // safe: a replacement between the Stat and the fetch is published under the
 // old stamp, and the retry then sees a mismatch and leaves the object, a
 // duplicate publish at worst. The first after-action makes the same check
-// (#707). What is left is the moment between a Stat and its Delete (or Copy).
+// (#707). The moment between a Stat and its Delete (or Copy) is closed by a
+// conditional delete or copy where the store honours one (#718).
 
 const (
 	// eventAfterQueueMax bounds the keys waiting for a retry per connection.
@@ -49,19 +50,18 @@ type afterRetryTuning struct {
 	capacity   int
 }
 
-// objectStamp is the version of an object as event mode published it.
-type objectStamp struct {
-	doneset.Stamp
-	version string
-}
-
-func stampOf(o objectstore.Object) objectStamp {
-	return objectStamp{Stamp: doneset.StampOf(o.Size, o.LastModified), version: o.Version}
+// stampOf is the version of an object as a listing or Stat shows it: size,
+// last-modified and the store's version (ETag or generation). Compare two
+// with cloudConfig.match.
+func stampOf(o objectstore.Object) doneset.Stamp {
+	st := doneset.StampOf(o.Size, o.LastModified)
+	st.Version = o.Version
+	return st
 }
 
 type afterRetryItem struct {
-	stamp   objectStamp // what was published
-	retries int         // retries made so far
+	stamp   doneset.Stamp // what was published
+	retries int           // retries made so far
 	next    time.Time
 }
 
@@ -69,9 +69,12 @@ type afterRetryQueue struct {
 	logger *slog.Logger
 	action string // for logs
 	bucket string // for logs
-	// stat looks the object up before a retry; do runs the after-action.
+	// match compares the stamp a retry finds with the published one.
+	match doneset.Match
+	// stat looks the object up before a retry; do runs the after-action, on
+	// the object only while it is at version where the store can say (#718).
 	stat func(ctx context.Context, key string) (objectstore.Object, error)
-	do   func(ctx context.Context, key string) error
+	do   func(ctx context.Context, key, version string) error
 	t    afterRetryTuning
 
 	mu    sync.Mutex
@@ -79,9 +82,9 @@ type afterRetryQueue struct {
 	wake  chan struct{} // 1-buffered: the queue changed
 }
 
-func newAfterRetryQueue(logger *slog.Logger, action, bucket string, t afterRetryTuning,
+func newAfterRetryQueue(logger *slog.Logger, action, bucket string, t afterRetryTuning, match doneset.Match,
 	stat func(ctx context.Context, key string) (objectstore.Object, error),
-	do func(ctx context.Context, key string) error) *afterRetryQueue {
+	do func(ctx context.Context, key, version string) error) *afterRetryQueue {
 	if t.base <= 0 {
 		t.base = doneset.RetryBase
 	}
@@ -95,7 +98,7 @@ func newAfterRetryQueue(logger *slog.Logger, action, bucket string, t afterRetry
 		t.capacity = eventAfterQueueMax
 	}
 	return &afterRetryQueue{
-		logger: logger, action: action, bucket: bucket, stat: stat, do: do, t: t,
+		logger: logger, action: action, bucket: bucket, match: match, stat: stat, do: do, t: t,
 		items: make(map[string]*afterRetryItem),
 		wake:  make(chan struct{}, 1),
 	}
@@ -122,7 +125,7 @@ func (q *afterRetryQueue) len() int {
 // cannot change is only logged; anything else is queued. A key already queued
 // starts over with the new stamp: it was published again and its new
 // after-action failed too.
-func (q *afterRetryQueue) failed(key string, stamp objectStamp, err error) {
+func (q *afterRetryQueue) failed(key string, stamp doneset.Stamp, err error) {
 	switch {
 	case errors.Is(err, objectstore.ErrNotFound):
 		q.logger.Info("after-action: object already gone; nothing to do", "key", key, "action", q.action)
@@ -243,19 +246,19 @@ func (q *afterRetryQueue) attempt(ctx context.Context, key string) {
 	case err != nil:
 		q.retryFailed(key, it, err)
 		return
-	case stampOf(obj) != it.stamp:
-		if q.drop(key, it) {
-			q.logger.Warn("after-action retry: object replaced since published; left for its own notification",
-				"bucket", q.bucket, "key", key, "action", q.action)
-		}
+	case !q.match.Same(stampOf(obj), it.stamp):
+		q.replaced(key, it)
 		return
 	}
 
-	err = q.do(ctx, key)
+	err = q.do(ctx, key, it.stamp.Version)
 	if ctx.Err() != nil {
 		return
 	}
 	switch {
+	case errors.Is(err, errReplaced):
+		// Written again between the Stat and the delete or copy (#718).
+		q.replaced(key, it)
 	case err == nil:
 		if q.drop(key, it) {
 			q.logger.Info("after-action done on retry", "key", key, "action", q.action, "retries", it.retries+1)
@@ -266,6 +269,14 @@ func (q *afterRetryQueue) attempt(ctx context.Context, key string) {
 		}
 	default:
 		q.retryFailed(key, it, err)
+	}
+}
+
+// replaced drops key, whose object is no longer the one published.
+func (q *afterRetryQueue) replaced(key string, it *afterRetryItem) {
+	if q.drop(key, it) {
+		q.logger.Warn("after-action retry: object replaced since published; left for its own notification",
+			"bucket", q.bucket, "key", key, "action", q.action)
 	}
 }
 

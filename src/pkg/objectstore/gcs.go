@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -172,6 +174,49 @@ func (g *gcsStore) Copy(ctx context.Context, srcKey, dstKey string) error {
 		return fmt.Errorf("gcs copy %q->%q: %w", srcKey, dstKey, err)
 	}
 	return nil
+}
+
+var _ Conditional = (*gcsStore)(nil)
+
+// DeleteIf deletes key with ifGenerationMatch (#718); GCS answers a changed
+// object with 412.
+func (g *gcsStore) DeleteIf(ctx context.Context, key, version string) error {
+	gen, err := strconv.ParseInt(version, 10, 64)
+	if err != nil {
+		return fmt.Errorf("gcs delete %q: version %q is not a generation: %w", key, version, err)
+	}
+	obj := g.client.Bucket(g.bucket).Object(key).If(storage.Conditions{GenerationMatch: gen})
+	if err := obj.Delete(ctx); err != nil {
+		return fmt.Errorf("gcs delete %q: %w", key, gcsCondErr(err))
+	}
+	return nil
+}
+
+// CopyIf copies with ifSourceGenerationMatch.
+func (g *gcsStore) CopyIf(ctx context.Context, srcKey, dstKey, version string) error {
+	gen, err := strconv.ParseInt(version, 10, 64)
+	if err != nil {
+		return fmt.Errorf("gcs copy %q->%q: version %q is not a generation: %w", srcKey, dstKey, version, err)
+	}
+	src := g.client.Bucket(g.bucket).Object(srcKey).If(storage.Conditions{GenerationMatch: gen})
+	dst := g.client.Bucket(g.bucket).Object(dstKey)
+	if _, err := dst.CopierFrom(src).Run(ctx); err != nil {
+		return fmt.Errorf("gcs copy %q->%q: %w", srcKey, dstKey, gcsCondErr(err))
+	}
+	return nil
+}
+
+// gcsCondErr marks the answers to a conditional request: 412 is a changed
+// object, a 404 a missing one.
+func gcsCondErr(err error) error {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) && gerr.Code == http.StatusPreconditionFailed {
+		return versionChanged(err)
+	}
+	if errors.As(err, &gerr) && gerr.Code == http.StatusNotFound {
+		return notFound(err)
+	}
+	return gcsGetErr(err)
 }
 
 // Close releases the underlying GCS storage.Client (connection pool + goroutines).
