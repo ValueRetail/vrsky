@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,4 +90,165 @@ func TestTargetDSN_HasConnectTimeout(t *testing.T) {
 
 func containsWord(s, w string) bool {
 	return slices.Contains(strings.Fields(s), w)
+}
+
+// slowTarget is a dialer that blocks in open until released. It remembers
+// every pool it returned so a test can tell which ones were closed.
+type slowTarget struct {
+	entered chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	dbs     []*sql.DB
+}
+
+func newSlowTarget() *slowTarget {
+	return &slowTarget{entered: make(chan struct{}, 8), release: make(chan struct{})}
+}
+
+func (s *slowTarget) open(string) (*sql.DB, error) {
+	s.entered <- struct{}{}
+	<-s.release
+	db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+	if err != nil {
+		return nil, err
+	}
+	mock.ExpectPing()
+	mock.ExpectClose()
+	s.mu.Lock()
+	s.dbs = append(s.dbs, db)
+	s.mu.Unlock()
+	return db, nil
+}
+
+// openAndClosed returns how many pools were opened and how many of those are
+// closed (a closed *sql.DB refuses a ping with "database is closed").
+func (s *slowTarget) openAndClosed() (opened, closed int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, db := range s.dbs {
+		if err := db.Ping(); err != nil && strings.Contains(err.Error(), "closed") {
+			closed++
+		}
+	}
+	return len(s.dbs), closed
+}
+
+func slowTargetProducer(connID string, tc *TargetConnection) *dbProducer {
+	return &dbProducer{
+		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		targetCache:     map[string][]*TargetConnection{connID: {tc}},
+		targetCacheTime: map[string]time.Time{connID: time.Now()},
+		targetCacheTTL:  time.Minute,
+	}
+}
+
+// Eviction and Stop do not wait for a connect in flight, and the pool that
+// connect then produces is closed, not leaked (#768).
+func TestTargetPool_EvictDuringConnectIsPromptAndLeaksNothing(t *testing.T) {
+	tests := []struct {
+		name  string
+		evict func(p *dbProducer, connID string)
+	}{
+		{"evict", func(p *dbProducer, connID string) { p.evictTargetCache(connID) }},
+		{"stop", func(p *dbProducer, connID string) { _ = p.Stop(context.Background()) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newSlowTarget()
+			tc := &TargetConnection{NodeID: "n1", Config: TargetDBConfig{Host: "db", Table: "t"}}
+			p := slowTargetProducer("c", tc)
+
+			type result struct {
+				db  *sql.DB
+				err error
+			}
+			res := make(chan result, 1)
+			go func() {
+				db, err := tc.pool(context.Background(), s.open)
+				res <- result{db, err}
+			}()
+			<-s.entered // connect is in flight
+
+			evicted := make(chan struct{})
+			go func() { tt.evict(p, "c"); close(evicted) }()
+			select {
+			case <-evicted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("eviction blocked behind the connect")
+			}
+
+			close(s.release)
+			r := <-res
+			if !errors.Is(r.err, errTargetEvicted) || r.db != nil {
+				t.Fatalf("pool = %v, %v; want nil, errTargetEvicted", r.db, r.err)
+			}
+			if opened, closed := s.openAndClosed(); opened != 1 || closed != opened {
+				t.Errorf("opened %d pools, closed %d; want every one closed", opened, closed)
+			}
+			if tc.DB != nil {
+				t.Error("evicted target holds a pool")
+			}
+		})
+	}
+}
+
+// Concurrent first uses of one target open one pool and all get it.
+func TestTargetPool_ConcurrentFirstUseOpensOnce(t *testing.T) {
+	s := newSlowTarget()
+	tc := &TargetConnection{NodeID: "n1", Config: TargetDBConfig{Host: "db", Table: "t"}}
+	const n = 8
+	dbs := make([]*sql.DB, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dbs[i], errs[i] = tc.pool(context.Background(), s.open)
+		}()
+	}
+	<-s.entered
+	time.Sleep(20 * time.Millisecond) // let the others queue behind the connect
+	close(s.release)
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil || dbs[i] != dbs[0] {
+			t.Fatalf("caller %d: db = %p (want %p), err = %v", i, dbs[i], dbs[0], errs[i])
+		}
+	}
+	if opened, closed := s.openAndClosed(); opened != 1 || closed != 0 {
+		t.Errorf("opened %d, closed %d; want 1, 0", opened, closed)
+	}
+	tc.close()
+	if opened, closed := s.openAndClosed(); closed != opened {
+		t.Errorf("after close: opened %d, closed %d", opened, closed)
+	}
+}
+
+// A failed open or ping is returned, not cached, and the next call retries.
+func TestTargetPool_FailedConnectIsRetried(t *testing.T) {
+	tc := &TargetConnection{NodeID: "n1", Config: TargetDBConfig{Host: "db", Table: "t"}}
+	var calls atomic.Int32
+	open := func(string) (*sql.DB, error) {
+		if calls.Add(1) == 1 {
+			return nil, errors.New("refused")
+		}
+		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+		if err != nil {
+			return nil, err
+		}
+		mock.ExpectPing()
+		return db, nil
+	}
+	if _, err := tc.pool(context.Background(), open); err == nil {
+		t.Fatal("first pool: want the open error")
+	}
+	if tc.DB != nil {
+		t.Fatal("failed open was cached")
+	}
+	db, err := tc.pool(context.Background(), open)
+	if err != nil || db == nil {
+		t.Fatalf("retry: db = %v, err = %v", db, err)
+	}
+	tc.close()
 }
