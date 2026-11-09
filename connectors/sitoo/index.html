@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -2776,15 +2776,15 @@ and the converted one is written.</p>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
-<p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
-and <code>5xx</code>/network errors are retried on the usual backoff and go
-to the DLQ once the retries are used up. <code>4xx</code> (bad request/data) and
+<p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks;
+<code>429</code>, <code>5xx</code>/network errors and a <code>base_url</code> the connector refuses (below)
+are retried and go to the DLQ once the retries are used up, so a message
+refused for its <code>base_url</code> can be replayed from the DLQ once the node is
+fixed. <code>4xx</code> (bad request/data) and
 <code>401</code>/<code>403</code> (auth) are permanent: the message is logged and dropped, not
 retried and not dead-lettered. So is a payload that is not JSON, a Sitoo
-webhook event notification (it is not a resource), an incomplete node config
-(account, site, API id or password missing) and a <code>base_url</code> the connector
-refuses (below): a destination drops each message while the node has such a
-<code>base_url</code>, and nothing is kept for a replay.</p>
+webhook event notification (it is not a resource) and an incomplete node
+config (account, site, API id or password missing).</p>
 <h3 id="the-base-url">The base URL<a class="headerlink" href="#the-base-url" title="Permanent link">&para;</a></h3>
 <p>Every request carries the node's API ID and password, and <code>base_url</code> is set in
 the node, so the connector only calls addresses it can trust:</p>
@@ -2926,7 +2926,7 @@ sale.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

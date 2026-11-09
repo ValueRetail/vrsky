@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -2838,23 +2838,54 @@ stores that point and the next poll continues there:</p>
   never become the watermark, so every poll starts before all of them. With <code>lookback_days</code> the window is read
   again from its start on every poll, so a window larger than the cap is
   not passed either. The Warn says so: it reads "was not advanced".</li>
-<li>If BC answers 400 to <code>$orderby</code> and the same request without it works
-  (a field it cannot sort on), the node logs a Warn and polls without
-  <code>$orderby</code> until it restarts; a poll that stops early then does not
-  advance. The same goes for a feed that comes back out of order anyway,
-  which the node checks and logs. The check only sees the pages a poll
-  read: a server that ignored the order and happened to return those
-  pages ascending would not be caught, and older records on the pages it
-  never read could be skipped. Business Central honoured the order in the
-  live check below.</li>
+<li>The node relies on the order only once it has checked it, once per
+  process for each tenant, company, entity and <code>cursor_field</code>. The first
+  poll that reads a cursor value and gets a second page asks for one
+  record ascending and one descending (<code>$top=1</code>, the configured filter,
+  no cursor clause). The answers decide it, in this order:<ul>
+<li>One value at both ends, and the poll so far read only that value:
+  nothing is decided, whichever records came back. That poll does not
+  advance if it stops, and the next poll checks again. An entity whose
+  records all share one value has nothing to resume past anyway, and
+  a BC that breaks ties by key in both directions answers both with
+  the same record there.</li>
+<li>Otherwise, the same record both ways: BC ignores <code>$orderby</code> (an
+  edit between the two requests can change the value, not the
+  record). No.</li>
+<li>Otherwise the order holds when the value ascending is below the
+  value descending and the last value the poll read lies between
+  them. If not: no.</li>
+<li>A 400 to either request: no, with no retry.</li>
+<li>Any other failure, or an answer without a readable value: nothing is
+  decided, as above.</li>
+</ul>
+</li>
+<li>On a no the node logs a Warn and polls without <code>$orderby</code> until it
+  restarts; a poll that stops early then does not advance. A no is not
+  undone by a later yes. Polls that read a single page never check, and
+  neither does a <code>cursor_field</code> whose values are not dates or timestamps,
+  since it never gets a resume point.</li>
+<li>If BC answers 400 to the ordered first page and the same request
+  without <code>$orderby</code> works (a field it cannot sort on), the node logs a
+  Warn and polls without <code>$orderby</code> until it restarts. Records that come
+  back out of <code>cursor_field</code> order on any page do the same: the poll
+  that saw them stores no resume point if it stopped, and later polls
+  ask without <code>$orderby</code>.</li>
 <li>A <strong>Resend everything</strong> that stops early stores the same point and is
   done; the next polls send the rest. A recovery read past a frozen
   watermark (see "Records dated in the future") that stops early stores
   nothing, as before, and starts over on the next poll.</li>
 </ul>
+<p>A stop followed at once by a start does not let the stopped poll's last
+checkpoint save land after the new poller's: the new poller waits for
+the stopped one to exit before it reads the checkpoint, at most two save
+attempts plus 5 seconds, and logs a Warn if it gives up waiting (some
+records may then be sent twice). The start command itself does not wait.</p>
 <p>The live trial (BC 28.5, 2026-11-03) kept its order across 40 pages with
 no duplicate ids, at about the cost of key order. Watch the poll times on
-a large tenant.</p>
+a large tenant. That check covered <code>lastModifiedDateTime</code> only;
+<code>postingDate</code> on <code>generalLedgerEntries</code> has not been checked live yet
+(#769).</p>
 <p>For a DateTime the comparison is <code>gt</code>, so a record written in the same millisecond as the
 watermark but after the fetch read it is not picked up. <code>ge</code> would redeliver
 the watermark record on every poll instead.</p>
@@ -3065,7 +3096,7 @@ Visma.net connector.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

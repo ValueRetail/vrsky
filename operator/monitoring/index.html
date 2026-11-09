@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1089,6 +1089,17 @@
     <span class="md-ellipsis">
       
         Metrics (Prometheus)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#postgres-server-certificate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Postgres server certificate
       
     </span>
   </a>
@@ -2455,6 +2466,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#postgres-server-certificate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Postgres server certificate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#traces-tempo" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2568,6 +2590,59 @@ main: Production check", closed again by the next green run. A parked
 cluster raises nothing. The webhook and the Teams target are not
 exercised; <code>/readyz</code> in the smoke check and <code>MgmtAPIErrorRate</code> cover the
 API.</p>
+<h2 id="postgres-server-certificate">Postgres server certificate<a class="headerlink" href="#postgres-server-certificate" title="Permanent link">&para;</a></h2>
+<p>Every service connects to Postgres with <code>sslmode=verify-full</code>, so an expired
+server certificate stops all of them at once (#453). cert-manager renews it 90
+days before the end (<code>infrastructure/kubernetes/postgresql/tls.yaml</code>). Two
+alerts watch that it does (#729):</p>
+<table>
+<thead>
+<tr>
+<th>Alert</th>
+<th>Fires when</th>
+<th>Severity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PostgresCertExpiring</code></td>
+<td>under 14 days left, for an hour</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>PostgresCertExpiring</code></td>
+<td>under 3 days left (or expired), for 10 minutes; replaces the warning</td>
+<td>critical</td>
+</tr>
+<tr>
+<td><code>PostgresCertMetricsAbsent</code></td>
+<td>no expiry metric for the certificate for an hour, so the alert above cannot fire</td>
+<td>warning</td>
+</tr>
+</tbody>
+</table>
+<p>They read <code>certmanager_certificate_expiration_timestamp_seconds{namespace="vrsky-database", name="postgresql-tls"}</code>,
+which the PodMonitor <code>cert-manager</code> (<code>infrastructure/kubernetes/monitoring/podmonitors.yaml</code>)
+scrapes from the cert-manager controller (port <code>http-metrics</code>, 9402). It uses
+<code>honorLabels</code>, so <code>namespace</code> is the Certificate's; without it the label would
+arrive as <code>exported_namespace</code>. The labels and port are the ones the v1.13.3
+chart that <code>install-cert-manager.sh</code> pins renders; <code>TestCertManagerPodMonitor</code>
+fails when that version changes, as a reminder to check them.</p>
+<p>The metric is cert-manager's view of the Secret. Postgres serves the copy it
+made when it last started, so a renewed Secret with a Postgres that has not
+restarted since is not this alert's to catch: <code>postgres-tls.sh check</code> says
+"Postgres has an OLDER certificate" and a restart fixes it. Production
+restarts it at every cluster start.</p>
+<p>When <code>PostgresCertExpiring</code> fires: <code>kubectl describe certificate postgresql-tls -n vrsky-database</code>
+and the cert-manager logs say why the renewal fails. After it renews, restart
+Postgres (<code>kubectl rollout restart statefulset/postgresql -n vrsky-database</code>,
+a minute or more without a database).</p>
+<p>When <code>PostgresCertMetricsAbsent</code> fires: in Prometheus (Status → Targets) the
+<code>podMonitor/vrsky-monitoring/cert-manager</code> target should be up. If there is
+none, compare the controller pod's labels and ports with the PodMonitor:
+<code>kubectl get pods -n cert-manager -l app.kubernetes.io/component=controller --show-labels</code>.</p>
+<p>Both are in the <code>vrsky-platform</code> group, so while one fires the deploy's smoke
+check fails too, like <code>CertExpirySoon</code>.</p>
 <h2 id="traces-tempo">Traces (Tempo)<a class="headerlink" href="#traces-tempo" title="Permanent link">&para;</a></h2>
 <p>Each message is a trace spanning consumer → producer (and the external call).
 Explore → Tempo → Search, or click a trace ID in a log line. See
@@ -2663,7 +2738,7 @@ rolling update the new pod could land on the other node and hang on
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -2941,7 +2941,7 @@ error it hits into one of two kinds:</p>
 <tr>
 <td>HTTP</td>
 <td>Every <code>4xx</code> except <code>429</code> (any other answer below <code>500</code> too); a URL a request cannot be built from</td>
-<td><code>5xx</code>, <code>429</code>, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host). With several nodes, only the failing ones are tried again and the last error names them (<code>node &lt;id&gt;: …</code>); a node that took the message is skipped, unless the worker restarted in between (<a href="../../connectors/http/#failed-deliveries">HTTP page</a>)</td>
+<td><code>5xx</code>, <code>429</code>, network error (a request still unanswered after 30 s included), OAuth token failure; a refused address (private or loopback address, redirect to another host). With several nodes, only the failing ones are tried again and the last error names them (<code>node &lt;id&gt;: …</code>); a node that took the message is skipped, unless the worker restarted in between (<a href="../../connectors/http/#failed-deliveries">HTTP page</a>)</td>
 </tr>
 <tr>
 <td>Database</td>
@@ -2976,12 +2976,12 @@ error it hits into one of two kinds:</p>
 <tr>
 <td>Salesforce</td>
 <td>Payload not JSON; no <code>object</code>; <code>upsert</code> with no <code>external_id_field</code></td>
-<td>A record Salesforce refuses with a <code>4xx</code> (the error names it as <code>record[N]</code> with Salesforce's code; the other records still go in), a record with no external-id value; <code>401</code>/<code>403</code> after the token refresh, <code>408</code>, <code>429</code>, <code>5xx</code>, a redirect, network or token failure; the same answers while creating, filling or closing a Bulk API job. Records that went in are not sent again on the retry (see the <a href="../../connectors/salesforce/#records-are-not-sent-twice">Salesforce page</a>)</td>
+<td>A record Salesforce refuses with a <code>4xx</code> (the error names it as <code>record[N]</code> with Salesforce's code; the other records still go in), a record with no external-id value; <code>401</code>/<code>403</code> after the token refresh, <code>408</code>, <code>429</code>, <code>5xx</code>, a redirect, network or token failure; the same answers while creating, filling or closing a Bulk API job; a record a Bulk job refuses or never processes (named by index with Salesforce's code), a Bulk job not done within 2 minutes per attempt, Bulk results that cannot be matched to the records, a Bulk record with nothing to send. Records that went in are not sent again on the retry (see the <a href="../../connectors/salesforce/#records-are-not-sent-twice">Salesforce page</a>); a DLQ retry of a Bulk <code>insert</code> after a restart duplicates them (<a href="../../connectors/salesforce/#retrying-a-bulk-message-from-the-dlq">Retrying a Bulk message from the DLQ</a>)</td>
 </tr>
 <tr>
 <td>Sitoo</td>
-<td>Incomplete node; a <code>base_url</code> the connector refuses; payload not JSON; a webhook event notification; every <code>4xx</code> except <code>429</code>, <code>401</code>/<code>403</code> included; a request that cannot be built</td>
-<td><code>5xx</code>, <code>429</code>, network error</td>
+<td>Incomplete node; payload not JSON; a webhook event notification; every <code>4xx</code> except <code>429</code>, <code>401</code>/<code>403</code> included; a request that cannot be built</td>
+<td><code>5xx</code>, <code>429</code>, network error; a refused <code>base_url</code> or address</td>
 </tr>
 <tr>
 <td>Front Systems</td>
@@ -3199,7 +3199,7 @@ and restart: <code>nats consumer rm VRSKY_DATA &lt;name&gt; --force</code>.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

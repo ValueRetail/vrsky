@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -3554,7 +3554,8 @@ first.</p>
    Postgres has TLS from step 1; <code>infrastructure/azure/rotate-secrets.sh</code>
    (which you run before real data goes in) copies the CA to the client
    namespaces and builds <code>verify-full</code> strings. Until then the dev Secrets
-   keep plain connections, which the server still accepts.</li>
+   use <code>sslmode=require</code> (TLS without checking the server): the server
+   refuses plain connections from other pods (#729).</li>
 <li><code>PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh</code>:
    monitoring and the alert rules. It stops unless the <code>vrsky-monitoring</code>
    namespace and its <code>alerts-webhook-token</code> and <code>grafana-admin</code> Secrets
@@ -3660,6 +3661,11 @@ manifests pull with <code>imagePullPolicy: IfNotPresent</code>.
 imports nine connectors as <code>localhost:5000/vrsky/...</code>, which nothing on k3d
 deploys (the connector manifest names ACR and only
 <code>deploy-connectors-azure.sh</code> applies it).</p>
+<p>Postgres refuses plain connections (#729), so the dev connection strings say
+<code>sslmode=require</code>. A git-ignored <code>secret.yaml</code> copied from an older example
+(in <code>infrastructure/kubernetes/postgresql/</code> or <code>management-api/</code>) still says
+<code>sslmode=disable</code> and is used ahead of the example: change it to
+<code>sslmode=require</code>, or delete it, before deploying.</p>
 <p><code>deploy-vrsky-platform.sh</code> doesn't deploy the UI; apply
 <code>infrastructure/kubernetes/ui/</code> yourself. The pod then runs the image's own
 nginx config, which serves the SPA but doesn't proxy <code>/api</code> to the management
@@ -3934,7 +3940,7 @@ rely on a backup. <strong><a href="../DR/"><code>docs/DR.md</code></a></strong> 
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1703,6 +1703,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#bulk-api-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk API jobs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retrying-a-bulk-message-from-the-dlq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retrying a Bulk message from the DLQ
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2483,6 +2505,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#bulk-api-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk API jobs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retrying-a-bulk-message-from-the-dlq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retrying a Bulk message from the DLQ
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2592,8 +2636,9 @@ Both paths treat Salesforce's answers the same way (#735):</p>
   counting from 0) with Salesforce's error code and message, for example
   <code>node p1: salesforce rejected 1 of 10 records (Contact insert): record[3]:
   400 REQUIRED_FIELD_MISSING: Required fields are missing: [LastName]</code>. On
-  the Bulk path the error is about the job instead (<code>salesforce rejected
-  the bulk job (create job): 400 …</code>).</li>
+  the Bulk path, see <a href="#bulk-api-jobs">Bulk API jobs</a> below; a job
+  Salesforce refuses outright reads <code>salesforce rejected the bulk job
+  (create job): 400 …</code>.</li>
 <li><strong>A transient failure</strong>: a network error, a token that cannot be fetched,
   a <code>401</code> that survives the one token refresh, a <code>403</code>, <code>408</code>, <code>429</code>, any
   <code>5xx</code>, or a redirect (they are never followed). The node stops sending
@@ -2605,16 +2650,75 @@ Both paths treat Salesforce's answers the same way (#735):</p>
 <p>A record that went in is not sent again when the message comes back,
 whether it comes back for a refused record, a transient failure or another
 node: on the retry only the remaining records go out, so an <code>insert</code> does
-not create duplicates. A Bulk job that was submitted for a node is not
-submitted again either. A retry from the DLQ skips them as well.</p>
+not create duplicates. On the Bulk path the same holds per record, and a
+retry finds the job of the earlier attempt instead of submitting a second
+one. A retry from the DLQ skips them as well.</p>
 <p>This is remembered by the worker process, for seven days and up to 10 000
-records. A redelivery handled by another process (after a restart or a
-deploy) sends every record again, and so does a record whose answer from
-Salesforce was lost. Delivery is at least once: use <code>upsert</code> with an
-external id where a duplicate matters.</p>
-<p>The Bulk path does not wait for the job to finish. A record the job refuses
-while Salesforce processes it is only listed in the job's failed results in
-Salesforce (Setup, Bulk Data Load Jobs); it does not reach the DLQ.</p>
+records (1 000 Bulk jobs). A redelivery handled by another process (after a
+restart, or a deploy while a Bulk job is still running) sends every record
+again in a new job, and so does a REST record whose answer from Salesforce
+was lost. Delivery is at least once: use <code>upsert</code> with an external id where
+a duplicate matters.</p>
+<h3 id="bulk-api-jobs">Bulk API jobs<a class="headerlink" href="#bulk-api-jobs" title="Permanent link">&para;</a></h3>
+<p>For a batch at or above the bulk threshold the node creates a Bulk API 2.0
+job, uploads the records as CSV, closes the job and then waits for
+Salesforce to process it (#760):</p>
+<ul>
+<li><strong>Waiting.</strong> The node reads the job's state every second at first, then
+  less often, up to every 30 seconds, for at most 2 minutes per delivery
+  attempt. The message stays in flight meanwhile. A job that is not done by
+  then fails the attempt (<code>bulk job 750… still InProgress after 2m0s</code>); the
+  retry goes on waiting for the same job. After five attempts the message
+  is dead-lettered. A retry from the DLQ picks the job up again only when
+  the same worker process handles it within seven days; see
+  <a href="#retrying-a-bulk-message-from-the-dlq">Retrying a Bulk message from the DLQ</a>.</li>
+<li><strong>Refused records.</strong> When the job is done the node reads its failed
+  results. Each record Salesforce refused is named by its index with
+  Salesforce's code and message (<code>record[3]: REQUIRED_FIELD_MISSING:
+  Required fields are missing: [LastName]</code>), the message is retried, and the
+  retry submits a new job with only the refused records. The others are not
+  sent again.</li>
+<li><strong>A job that ends <code>Failed</code> or <code>Aborted</code>.</strong> The records it processed stay
+  in. The refused ones and the ones it never processed are named (<code>not
+  processed</code>), with the job's error (<code>salesforce bulk job 750… ended
+  Failed: …</code>), and go in a new job on the retry.</li>
+<li><strong>A lost close.</strong> When the close gets no answer, the retry reads the
+  job's state: a closed job is waited for, an open one (the close never
+  arrived) is aborted before a new job is created. A failed upload aborts
+  its job right away.</li>
+<li><strong>Results the node cannot read.</strong> Salesforce returns result rows in no
+  fixed order, so the node matches each row to its record by the uploaded
+  values (field names in any case). A row that matches no record, results
+  larger than 32 MiB, fewer rows than the job reports, or a complete job
+  that processed fewer records than it was given fail the delivery, and
+  nothing is sent again: the message ends in the DLQ instead of risking
+  duplicates. Look the job up in Salesforce (Setup, Bulk Data Load Jobs) by
+  the id in the error.</li>
+<li><strong>A record with nothing to send.</strong> When the batch has a single field, a
+  record without a value for it would be an empty CSV row, which Salesforce
+  skips. The node does not send it and names it (<code>record[2]: nothing to
+  send</code>); the message is retried and then dead-lettered like any refused
+  record. An empty record (<code>{}</code>, or one whose only field is null) is refused
+  this way on the Bulk path even for an object with no required fields,
+  though below the bulk threshold the REST path would send it.</li>
+</ul>
+<p>While a job is being waited for, the node handles no other message: the
+SDK delivers one message at a time per worker.</p>
+<h3 id="retrying-a-bulk-message-from-the-dlq">Retrying a Bulk message from the DLQ<a class="headerlink" href="#retrying-a-bulk-message-from-the-dlq" title="Permanent link">&para;</a></h3>
+<p>What the node knows about a message's records and job lives in the worker
+process for seven days. A retry from the DLQ is only as safe as that
+memory:</p>
+<ul>
+<li><strong>Same process, within seven days.</strong> Records that went in are skipped
+  and a remembered job is picked up again. A message that was dead-lettered
+  because its results could not be matched fails the same way again: fix
+  it by hand in Salesforce instead of retrying.</li>
+<li><strong>After a restart or a deploy.</strong> The memory is gone, so the retry sends
+  every record again in a new job, and an <code>insert</code> duplicates the records
+  that went in the first time. Don't retry a Bulk <code>insert</code> from the DLQ
+  after a restart without first checking in Salesforce which of its records
+  are already there. An <code>upsert</code> with an external id is safe to retry.</li>
+</ul>
 <p>See the
 <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>
 for how other destinations treat failures.</p>
@@ -2676,7 +2780,7 @@ for how other destinations treat failures.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

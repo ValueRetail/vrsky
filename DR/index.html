@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -2952,8 +2952,9 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
    certificate from <code>infrastructure/kubernetes/postgresql/tls.yaml</code> (the
    StatefulSet manifest mounts it) and the strings keep
    <code>sslmode=verify-full</code>; if it is somewhere else, set the <code>sslmode</code> that
-   server supports (<code>infrastructure/azure/postgres-tls.sh urls</code> only knows
-   <code>verify-full</code> and <code>disable</code>). Then check: log in, list connections, open a connection's credentials (they
+   server supports (<code>infrastructure/azure/postgres-tls.sh urls</code> knows
+   <code>verify-full</code>, <code>require</code> and <code>disable</code>, and refuses <code>disable</code> while the
+   in-cluster Postgres turns plain connections away, #729). Then check: log in, list connections, open a connection's credentials (they
    decrypt only with the matching <code>ENCRYPTION_KEY</code>).</p>
 <p>Clean up a rehearsal with
 <code>kubectl -n vrsky-database delete pod,svc pg-restore-test</code>.</p>
@@ -3045,7 +3046,7 @@ docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w">
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
