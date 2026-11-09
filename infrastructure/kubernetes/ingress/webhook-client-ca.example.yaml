@@ -1,0 +1,27 @@
+# EXAMPLE ONLY. The CA bundle the mTLS webhook Ingress checks callers
+# against (#454, auth-tls-secret on webhooks-mtls-ingress.yaml).
+#
+# ca.crt is every CA that a tenant has set as a webhook connection's client
+# CA (tls.client_ca_secret_id), concatenated as PEM. Include the root, and
+# any intermediate that issues client certificates directly (verify depth is
+# 2). The worker checks each request again against its own connection's CA,
+# so a CA in this bundle opens only the connections that configured it.
+#
+# Do not fill this file in and commit it. Build the bundle from the tenants'
+# CA certificates (public material, but it belongs in the cluster, not git)
+# and create the Secret directly:
+#
+#   cat tenant-a-ca.pem tenant-b-ca.pem > bundle.pem
+#   kubectl -n vrsky-platform create secret generic webhook-client-ca \
+#     --from-file=ca.crt=bundle.pem --dry-run=client -o yaml | kubectl apply -f -
+#
+# ingress-nginx picks up a changed Secret without a restart.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: webhook-client-ca
+  namespace: vrsky-platform
+type: Opaque
+stringData:
+  ca.crt: |
+    REPLACE-WITH-THE-CONCATENATED-TENANT-CA-CERTIFICATES
