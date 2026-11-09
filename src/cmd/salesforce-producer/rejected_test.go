@@ -30,9 +30,11 @@ type reply struct {
 }
 
 // fakeSF is a fake Salesforce org. REST writes are keyed by the record's
-// Name, Bulk API calls by "create:<object>", "upload:<object>" and
-// "close:<object>". respond gets the key and how many times it was called
-// before (0 on the first call); returning false answers with success.
+// Name, Bulk API calls by "create:<object>", "upload:<object>",
+// "close:<object>", "abort:<object>" and "state:<object>" (a job's state
+// reads, answered JobComplete with nothing failed). respond gets the key and
+// how many times it was called before (0 on the first call); returning false
+// answers with success. bulk_test.go has a stateful fake for the Bulk API.
 type fakeSF struct {
 	t       *testing.T
 	srv     *httptest.Server
@@ -76,7 +78,14 @@ func (f *fakeSF) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPatch && strings.Contains(path, "/jobs/ingest/job-"):
 		obj := strings.TrimPrefix(path[strings.Index(path, "/jobs/ingest/job-"):], "/jobs/ingest/job-")
 		key = "close:" + obj
+		if strings.Contains(string(body), "Aborted") {
+			key = "abort:" + obj
+		}
 		ok = reply{status: http.StatusOK, body: `{"state":"UploadComplete"}`}
+	case r.Method == http.MethodGet && strings.Contains(path, "/jobs/ingest/job-"):
+		obj := strings.TrimPrefix(path[strings.Index(path, "/jobs/ingest/job-"):], "/jobs/ingest/job-")
+		key = "state:" + obj
+		ok = reply{status: http.StatusOK, body: fmt.Sprintf(`{"id":"job-%s","state":"JobComplete","numberRecordsProcessed":1,"numberRecordsFailed":0}`, obj)}
 	case strings.Contains(path, "/sobjects/"):
 		var rec map[string]any
 		if err := json.Unmarshal(body, &rec); err != nil {
@@ -129,7 +138,8 @@ func newTestProducer(t *testing.T, bulkThreshold int, forced *atomic.Int32, targ
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	p := &salesforceProducer{
-		bulkThreshold: bulkThreshold,
+		bulkThreshold:   bulkThreshold,
+		bulkPollInitial: time.Millisecond,
 		resolveToken: func(_ context.Context, _, _ string, force bool) (string, error) {
 			if force && forced != nil {
 				forced.Add(1)
@@ -524,14 +534,21 @@ func TestClassification_RESTAndBulkAgree(t *testing.T) {
 // A Bulk job that went in for one target is not submitted again when the
 // message comes back because another target failed.
 func TestBulk_SubmittedJobNotResubmittedOnRedelivery(t *testing.T) {
+	// The Contact counts: a failed create or upload makes the retry create a
+	// new job (the failed upload's job is aborted first); a close whose answer
+	// was lost makes the retry read the job's state instead (#760), which
+	// this fake answers JobComplete.
 	cases := []struct {
-		name    string
-		failKey string
-		rep     reply
+		name       string
+		failKey    string
+		rep        reply
+		wantCreate int
+		wantClose  int
+		wantAbort  int
 	}{
-		{name: "create 500", failKey: "create:Contact", rep: reply{status: 500}},
-		{name: "upload 400", failKey: "upload:Contact", rep: reply{status: 400, body: `[{"message":"bad csv","errorCode":"INVALIDJOB"}]`}},
-		{name: "close network error", failKey: "close:Contact", rep: reply{drop: true}},
+		{name: "create 500", failKey: "create:Contact", rep: reply{status: 500}, wantCreate: 2, wantClose: 1},
+		{name: "upload 400", failKey: "upload:Contact", rep: reply{status: 400, body: `[{"message":"bad csv","errorCode":"INVALIDJOB"}]`}, wantCreate: 2, wantClose: 1, wantAbort: 1},
+		{name: "close network error", failKey: "close:Contact", rep: reply{drop: true}, wantCreate: 1, wantClose: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -554,12 +571,13 @@ func TestBulk_SubmittedJobNotResubmittedOnRedelivery(t *testing.T) {
 			if got := sf.count("create:Account"); got != 1 {
 				t.Errorf("Account bulk job created %d times, want 1", got)
 			}
-			wantClose := 1
-			if tc.failKey == "close:Contact" {
-				wantClose = 2 // the first close got no answer
-			}
-			if got := sf.count("close:Contact"); got != wantClose {
-				t.Errorf("Contact bulk job closed %d times, want %d", got, wantClose)
+			for _, c := range []struct {
+				key  string
+				want int
+			}{{"create:Contact", tc.wantCreate}, {"close:Contact", tc.wantClose}, {"abort:Contact", tc.wantAbort}, {"close:Account", 1}} {
+				if got := sf.count(c.key); got != c.want {
+					t.Errorf("%s called %d times, want %d", c.key, got, c.want)
+				}
 			}
 		})
 	}

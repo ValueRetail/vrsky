@@ -96,8 +96,9 @@ Both paths treat Salesforce's answers the same way (#735):
   counting from 0) with Salesforce's error code and message, for example
   `node p1: salesforce rejected 1 of 10 records (Contact insert): record[3]:
   400 REQUIRED_FIELD_MISSING: Required fields are missing: [LastName]`. On
-  the Bulk path the error is about the job instead (`salesforce rejected
-  the bulk job (create job): 400 …`).
+  the Bulk path, see [Bulk API jobs](#bulk-api-jobs) below; a job
+  Salesforce refuses outright reads `salesforce rejected the bulk job
+  (create job): 400 …`.
 - **A transient failure**: a network error, a token that cannot be fetched,
   a `401` that survives the one token refresh, a `403`, `408`, `429`, any
   `5xx`, or a redirect (they are never followed). The node stops sending
@@ -110,18 +111,52 @@ Both paths treat Salesforce's answers the same way (#735):
 A record that went in is not sent again when the message comes back,
 whether it comes back for a refused record, a transient failure or another
 node: on the retry only the remaining records go out, so an `insert` does
-not create duplicates. A Bulk job that was submitted for a node is not
-submitted again either. A retry from the DLQ skips them as well.
+not create duplicates. On the Bulk path the same holds per record, and a
+retry finds the job of the earlier attempt instead of submitting a second
+one. A retry from the DLQ skips them as well.
 
 This is remembered by the worker process, for seven days and up to 10 000
-records. A redelivery handled by another process (after a restart or a
-deploy) sends every record again, and so does a record whose answer from
-Salesforce was lost. Delivery is at least once: use `upsert` with an
-external id where a duplicate matters.
+records (1 000 Bulk jobs). A redelivery handled by another process (after a
+restart, or a deploy while a Bulk job is still running) sends every record
+again in a new job, and so does a REST record whose answer from Salesforce
+was lost. Delivery is at least once: use `upsert` with an external id where
+a duplicate matters.
 
-The Bulk path does not wait for the job to finish. A record the job refuses
-while Salesforce processes it is only listed in the job's failed results in
-Salesforce (Setup, Bulk Data Load Jobs); it does not reach the DLQ.
+### Bulk API jobs
+
+For a batch at or above the bulk threshold the node creates a Bulk API 2.0
+job, uploads the records as CSV, closes the job and then waits for
+Salesforce to process it (#760):
+
+- **Waiting.** The node reads the job's state every second at first, then
+  less often, up to every 30 seconds, for at most 2 minutes per delivery
+  attempt. The message stays in flight meanwhile. A job that is not done by
+  then fails the attempt (`bulk job 750… still InProgress after 2m0s`); the
+  retry goes on waiting for the same job. After five attempts the message
+  is dead-lettered, and a retry from the DLQ picks the job up again.
+- **Refused records.** When the job is done the node reads its failed
+  results. Each record Salesforce refused is named by its index with
+  Salesforce's code and message (`record[3]: REQUIRED_FIELD_MISSING:
+  Required fields are missing: [LastName]`), the message is retried, and the
+  retry submits a new job with only the refused records. The others are not
+  sent again.
+- **A job that ends `Failed` or `Aborted`.** The records it processed stay
+  in. The refused ones and the ones it never processed are named (`not
+  processed`), with the job's error (`salesforce bulk job 750… ended
+  Failed: …`), and go in a new job on the retry.
+- **A lost close.** When the close gets no answer, the retry reads the
+  job's state: a closed job is waited for, an open one (the close never
+  arrived) is aborted before a new job is created. A failed upload aborts
+  its job right away.
+- **Results the node cannot read.** Salesforce returns result rows in no
+  fixed order, so the node matches each row to its record by the uploaded
+  values. A row that matches no record, results larger than 32 MiB, or
+  fewer rows than the job reports fail the delivery, and nothing is sent
+  again: the message ends in the DLQ instead of risking duplicates. Look the
+  job up in Salesforce (Setup, Bulk Data Load Jobs) by the id in the error.
+
+While a job is being waited for, the node handles no other message: the
+SDK delivers one message at a time per worker.
 
 See the
 [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq)
