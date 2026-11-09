@@ -310,23 +310,41 @@ node sees) is skipped and the converted record is written.
       never become the watermark, so every poll starts before all of them. With `lookback_days` the window is read
       again from its start on every poll, so a window larger than the cap is
       not passed either. The Warn says so: it reads "was not advanced".
-    - If BC answers 400 to `$orderby` and the same request without it works
-      (a field it cannot sort on), the node logs a Warn and polls without
-      `$orderby` until it restarts; a poll that stops early then does not
-      advance. The same goes for a feed that comes back out of order anyway,
-      which the node checks and logs. The check only sees the pages a poll
-      read: a server that ignored the order and happened to return those
-      pages ascending would not be caught, and older records on the pages it
-      never read could be skipped. Business Central honoured the order in the
-      live check below.
+    - The node relies on the order only once it has checked it, once per
+      process for each tenant, company, entity and `cursor_field`. The first
+      poll that gets a second page asks for one record ascending and one
+      descending (`$top=1`, the configured filter, no cursor clause). The
+      order holds when the first value ascending is below the first value
+      descending and the last value the poll read lies between them. A server
+      that ignores `$orderby` answers both with the same record. If the check
+      fails, the node logs a Warn ("do not bracket what the poll read") and
+      polls without `$orderby` until it restarts; a poll that stops early
+      then does not advance. A check that cannot answer (a failed request, no
+      value) decides nothing: that poll does not advance if it stops, and the
+      next one checks again. An entity whose records all share one value
+      fails the check; there is nothing to resume past there anyway. Polls
+      that read a single page never check and cost nothing extra.
+    - If BC answers 400 to `$orderby`, or to the check, and the same request
+      without it works (a field it cannot sort on), the node logs a Warn and
+      polls without `$orderby` until it restarts. The same goes for a feed
+      that comes back out of order anyway, which the node checks on every
+      page and logs.
     - A **Resend everything** that stops early stores the same point and is
       done; the next polls send the rest. A recovery read past a frozen
       watermark (see "Records dated in the future") that stops early stores
       nothing, as before, and starts over on the next poll.
 
+    A stop followed at once by a start does not let the stopped poll's last
+    checkpoint save land after the new poller's: the new poller waits for
+    the stopped one to exit before it reads the checkpoint, at most two save
+    attempts plus 5 seconds, and logs a Warn if it gives up waiting (some
+    records may then be sent twice). The start command itself does not wait.
+
     The live trial (BC 28.5, 2026-11-03) kept its order across 40 pages with
     no duplicate ids, at about the cost of key order. Watch the poll times on
-    a large tenant.
+    a large tenant. That check covered `lastModifiedDateTime` only;
+    `postingDate` on `generalLedgerEntries` has not been checked live yet
+    (#769).
 
     For a DateTime the comparison is `gt`, so a record written in the same millisecond as the
     watermark but after the fetch read it is not picked up. `ge` would redeliver
