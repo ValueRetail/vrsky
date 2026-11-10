@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
+
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
@@ -129,7 +131,11 @@ func TestStart_RefusesMovePrefixTheListingReturns(t *testing.T) {
 			}
 			f.nodes = mpNodes(tt.prefix, tt.movePrefix, action, tt.mode)
 			f.expectLookup(nil)
-			if !tt.refused {
+			if tt.refused {
+				// #724: a refused start marks the connection error.
+				f.mock.ExpectExec("UPDATE connections SET status").WithArgs("error", srConn, srTenant).
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			} else {
 				f.expectRunning()
 			}
 
@@ -141,6 +147,9 @@ func TestStart_RefusesMovePrefixTheListingReturns(t *testing.T) {
 				}
 				if n := f.polls.Load(); n != 0 {
 					t.Fatalf("refused start opened the object store %d time(s)", n)
+				}
+				if err := f.mock.ExpectationsWereMet(); err != nil {
+					t.Errorf("refused start did not write status error: %v", err)
 				}
 				out := logs.String()
 				for _, want := range []string{"level=ERROR", "move_prefix", strconv.Quote(tt.movePrefix), "prefix " + strconv.Quote(tt.prefix)} {
@@ -294,5 +303,36 @@ func TestEventMode_ObjectAlreadyInMovePrefixIsAckedNotMoved(t *testing.T) {
 	}
 	if _, ok := fs.objects[key]; !ok {
 		t.Fatalf("object %q is gone", key)
+	}
+}
+
+// #724: the other refusals write error too, and a refusal while the
+// connection is already active leaves its status alone.
+func TestStart_OtherRefusalsWriteError(t *testing.T) {
+	tests := []struct {
+		name  string
+		nodes string
+	}{
+		{"move without move_prefix", mpNodes("in/", "", "move", "")},
+		{"no bucket", `[{"id":"c1","type":"consumer","config":{"type":"cloud_storage","cloud_storage":{"provider":"s3","bucket":""}}}]`},
+		{"event mode without queue", `[{"id":"c1","type":"consumer","config":{"type":"cloud_storage","cloud_storage":{"provider":"s3","bucket":"b","mode":"event"}}}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newSRFixture(t)
+			f.nodes = tt.nodes
+			f.expectLookup(nil)
+			f.mock.ExpectExec("UPDATE connections SET status").WithArgs("error", srConn, srTenant).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			f.c.startConnection(context.Background(), srConn, srTenant)
+
+			if n := f.activeCount(); n != 0 {
+				t.Fatalf("start not refused (%d active)", n)
+			}
+			if err := f.mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("status error not written: %v", err)
+			}
+		})
 	}
 }

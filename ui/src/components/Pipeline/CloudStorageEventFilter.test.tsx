@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { useState } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import CloudStorageConfigEditor from './CloudStorageConfigEditor'
+import { moveInsideListing } from './moveInsideListing'
 
 type Cfg = Record<string, unknown>
 type Block = { file_pattern?: string; prefix?: string; mode?: string } | undefined
@@ -76,5 +77,49 @@ describe('cloud-storage source file pattern and prefix', () => {
   it('has no file pattern on a destination', () => {
     mount({ type: 'cloud_storage', cloud_storage: { bucket: 'b' } }, 'producer')
     expect(patternInput()).toBeNull()
+  })
+})
+
+describe('cloud-storage move_prefix rule (#724)', () => {
+  const base = { type: 'cloud_storage', cloud_storage: { after_action: 'move', prefix: 'in/', poll_interval_seconds: 60 } }
+  const alert = () => screen.queryByRole('alert')?.textContent ?? ''
+
+  it('flags a missing move_prefix', () => {
+    mount(base)
+    expect(alert()).toMatch(/required/)
+  })
+
+  it('flags a move_prefix inside the prefix in poll mode', () => {
+    mount({ ...base, cloud_storage: { ...base.cloud_storage, move_prefix: 'in/done' } })
+    expect(alert()).toMatch(/cannot start/)
+  })
+
+  it('treats the prefix as text', () => {
+    mount({ ...base, cloud_storage: { ...base.cloud_storage, prefix: 'in', move_prefix: 'in-done/' } })
+    expect(alert()).toMatch(/cannot start/)
+  })
+
+  it('only warns in event mode', () => {
+    mount({ ...base, cloud_storage: { after_action: 'move', mode: 'event', prefix: '', move_prefix: 'processed' } })
+    expect(alert()).toMatch(/ingested once more/)
+    expect(alert()).not.toMatch(/cannot start/)
+  })
+
+  it('is quiet for a move_prefix outside the prefix, and for other actions', () => {
+    mount({ ...base, cloud_storage: { ...base.cloud_storage, move_prefix: 'processed/' } })
+    expect(alert()).toBe('')
+    expect(screen.getByText(/Must be outside what the prefix lists/)).toBeTruthy()
+  })
+
+  it.each([
+    ['in/', '/', false],
+    ['in/', '.', false],
+    ['in/', 'in/../out', false],
+    ['incoming/a/', 'incoming', false],
+    ['data/report_', 'data', true],
+    ['', '/', true],
+    ['/in/', 'in', true],
+  ])('moveInsideListing(%j, %j) = %s', (prefix, move, want) => {
+    expect(moveInsideListing(prefix, move)).toBe(want)
   })
 })

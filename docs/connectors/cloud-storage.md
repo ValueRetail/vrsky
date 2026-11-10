@@ -51,6 +51,12 @@ Config bullets (all under `cloud_storage`):
   `incoming/a/x.csv` and `incoming/b/x.csv` both land on
   `<move_prefix>/x.csv` and the second overwrites the first.
 
+  Starting the connection returns a 400 that names the node when `move` has
+  no `move_prefix`, or (poll mode) when `move_prefix` is inside what `prefix`
+  lists (#724). The editor shows the rule under "Move to prefix". A config
+  saved before that check, or restored on boot, is refused by the consumer,
+  which sets the connection to `error` instead of leaving it `running`.
+
   In poll mode the start is also refused when `prefix` would select moved
   objects again (#567). The log says `invalid move_prefix` and names both
   values. Event mode starts anyway, with a warning (below). `prefix` is

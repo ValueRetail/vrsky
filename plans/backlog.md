@@ -876,8 +876,8 @@ Last updated 2026-10-28.
     `--allow-unbound` flag and the unbound warning, so every archive
     restore accepts is bound to its key. Update `docs/DR.md` and
     `docs/operator/backup.md`. Found in #549. Filed as #722.
-133. **A cloud-storage start the consumer refuses leaves the connection
-    `running`, ingesting nothing.** `StartConnection` in
+133. ~~**A cloud-storage start the consumer refuses leaves the connection
+    `running`, ingesting nothing.**~~ (#724) `StartConnection` in
     `src/pkg/managementapi/handler.go` writes `running` once the
     orchestrator has deployed, and `RestoreRunning` keeps it. The consumer's
     refusals in `startConnection` (`src/cmd/cloud-storage-consumer/service.go`,

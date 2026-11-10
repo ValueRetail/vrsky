@@ -3,6 +3,7 @@ import SecretInput from './SecretInput'
 import TestConnectionButton from './TestConnectionButton'
 import { StyledInput, StyledSelect } from './StyledFields'
 import { DEFAULT_POLL_INTERVAL_SECONDS } from './pollInterval'
+import { moveInsideListing } from './moveInsideListing'
 
 // CloudStorageConfigEditor configures the single cloud-storage connector
 // (Amazon S3 / Azure Blob / GCS) for both consumer and producer roles. The
@@ -25,6 +26,20 @@ export default function CloudStorageConfigEditor({
   const afterAction = (cs.after_action as string) || 'none'
   const mode = (cs.mode as string) || 'poll'
   const patternHelpId = useId()
+
+  // The start-time check and the consumer refuse these (#724); event mode
+  // only warns, as the consumer does.
+  const movePrefix = (cs.move_prefix as string) || ''
+  let movePrefixProblem = ''
+  if (role === 'consumer' && afterAction === 'move') {
+    if (!movePrefix) {
+      movePrefixProblem = 'Move to prefix is required when the action is Move.'
+    } else if (moveInsideListing((cs.prefix as string) || '', movePrefix)) {
+      movePrefixProblem = mode === 'event'
+        ? 'This is inside what the prefix selects: a moved object that comes back as a notification is ingested once more.'
+        : 'This is inside what the prefix lists, so moved objects would be ingested again and the connection cannot start. Pick a folder outside the prefix.'
+    }
+  }
 
   // Same as the SFTP panel (#589): a source in poll mode saves the 60 the
   // field shows, because a missing value means "poll once". Event mode has no
@@ -285,12 +300,24 @@ export default function CloudStorageConfigEditor({
             />
           </div>
           {afterAction === 'move' && (
-            <StyledInput
-              label="Move to prefix"
-              placeholder="processed/"
-              value={(cs.move_prefix as string) || ''}
-              onChange={(v) => update({ move_prefix: v })}
-            />
+            <>
+              <StyledInput
+                label="Move to prefix"
+                placeholder="processed/"
+                value={(cs.move_prefix as string) || ''}
+                onChange={(v) => update({ move_prefix: v })}
+              />
+              {movePrefixProblem && (
+                <div role="alert" style={{ fontSize: '11px', color: mode === 'event' ? '#b45309' : '#dc2626', marginTop: '-12px', marginBottom: '12px' }}>
+                  {movePrefixProblem}
+                </div>
+              )}
+              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: movePrefixProblem ? 0 : '-12px', marginBottom: '12px' }}>
+                {mode === 'event'
+                  ? 'Required. Keep it outside the prefix: a moved object the bucket notification covers is ingested once more.'
+                  : 'Required. Must be outside what the prefix lists (the prefix is matched as text, so "in" also lists "in-done/"), or the connection cannot start.'}
+              </div>
+            </>
           )}
         </>
       ) : (
