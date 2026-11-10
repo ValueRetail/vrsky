@@ -55,7 +55,11 @@ func (s *apiConsumer) handleSampleData() http.HandlerFunc {
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			writeJSON(w, map[string]interface{}{"ok": false, "error": err.Error()})
+			// A parse error quotes the URL, query and key included.
+			if s.logger != nil {
+				s.logger.Warn("sample-data request not built", "error", safeurl.Detail(err))
+			}
+			writeJSON(w, map[string]interface{}{"ok": false, "error": "request failed"})
 			return
 		}
 		httpReq.Header.Set("User-Agent", "VRSky-API-Consumer/1.0")

@@ -25,10 +25,19 @@ the server log.
   Business Central consumers show those texts and log `safeurl.Detail(err)`.
 - `RedactURL` shows `[invalid URL]` for an "@" in the query when no path
   precedes the "?" (item 176); `CheckRequestURL` and the HTTP producer inherit it.
+- A refused redirect's text (shown to the tenant as it is) names its target as
+  scheme, host and path only: no query, fragment or userinfo (review round 1).
+- `safeurl.Detail` cuts every `*url.Error` URL in the chain to scheme, host and
+  path, so the server log has no key either.
+- The API consumer's request-build error is "request failed" (detail logged).
+- Each of the six sample-data handlers is tested against the same failures
+  (`pkg/safeurl/safeurltest`), Visma and Business Central on the token request.
 
 ## Touches
 
-`src/pkg/safeurl`, `src/cmd/{api,sitoo,visma,brightpearl,sap-s4hana,business-central}-consumer/server.go`,
+`src/pkg/safeurl` (new test helper `safeurl/safeurltest`),
+`src/cmd/{api,sitoo,visma,brightpearl,sap-s4hana,business-central}-consumer/server.go`
+and a `sample_data_error_test.go` in each,
 `docs/SECURITY.md`, `plans/backlog.md`.
 
 ## Decisions taken without asking
@@ -42,7 +51,17 @@ the server log.
   A query with a path (`/x?email=a@b`, pinned by the HTTP producer test) is
   unchanged. A password containing "?" cannot parse with a path before the "?".
 - Non-transport errors (HTTP status text, parse errors) keep their text.
-- Redirect refusals keep their text via `redirectError` (hosts and redacted URLs only).
+- Redirect refusals keep their text via `redirectError`, but the URL in it is
+  `shownRequestURL`: RedactURL's verdict on the full URL first (so a password
+  with "?" in it stays `[invalid URL]`), then scheme, host and path. Round 1
+  shipped `RedactURL(req.URL.String())`, which keeps the query: a redirect to
+  `http://host/x?api_key=...` handed the key to the tenant.
+- `Detail` replaces each `*url.Error` URL in the text (quoted and bare, longest
+  first so one URL that extends another is replaced whole) rather than
+  rebuilding the chain: wrapping layers (`acquire token: token request: Post
+  "..."`) are plain `fmt.Errorf` text.
+- Shared test helper as a non-test package (`safeurltest`, imports `testing`
+  like `httptest` does), so all six handlers run the same table.
 
 ## Out of scope (other workers / follow-up)
 
@@ -57,3 +76,6 @@ address of an unreachable but allowed host. Follow-up: map with
 
 Go build, vet, lint, `go test -race` on `pkg/safeurl`, the touched consumers and
 all producers; mutation run on the DNS mapping and on the OpError unwrap.
+Round 2: mutations on the redirect texts (full URL back), `Detail` without
+redaction or without the length sort, and each of the six handlers returning
+`err.Error()` again.
