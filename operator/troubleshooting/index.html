@@ -1318,6 +1318,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#a-message-that-could-not-be-dead-lettered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A message that could not be dead-lettered
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-file-output-panel-says-load-failed-or-shows-no-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2703,6 +2714,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#a-message-that-could-not-be-dead-lettered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A message that could not be dead-lettered
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-file-output-panel-says-load-failed-or-shows-no-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2960,22 +2982,39 @@ error it hits into one of two kinds:</p>
     <code>vrsky_message_retry_undelayed_total</code> goes up. When a target is down,
     expect most of that connection's messages in the DLQ within seconds and
     the first few after about 2.5 minutes.</li>
+<li>A worker that panics is handled like one that returned an error: retried,
+    then dead-lettered with <code>X-Vrsky-Last-Error: handler panicked: …</code>.</li>
+<li>If the copy to the DLQ fails on the last attempt, see
+    <a href="#a-message-that-could-not-be-dead-lettered">A message that could not be dead-lettered</a>.</li>
 <li><strong>Dropped.</strong> The error is marked permanent, because trying the same message
-  again cannot work (a <code>4xx</code> from the target, an incomplete node, a payload
-  that is not JSON). The message is acked and nothing is kept. There is no
-  replay for it, and <code>vrsky_dlq_messages_total</code> does not count these. What the
-  worker logs depends on how the drop happens. An error marked <code>sdk.Permanent</code>
-  (the Sitoo, Front Systems, Visma, Brightpearl, Business Central and SAP
-  destinations, and a non-JSON payload in the database and Salesforce
-  destinations) is logged by the SDK as
-  <code>permanent error; dropping message</code>. Other drops are a plain <code>return nil</code>
-  and leave only the destination's own line, or none at all: the HTTP
-  destination's <code>4xx</code> (the feed shows it, the log has <code>HTTP request returned
-  error</code>), Kafka, RabbitMQ, SFTP, cloud-storage and Salesforce with a
-  missing setting.
+  again cannot work: the target refused the message itself (a <code>4xx</code> such as
+  <code>400</code> or <code>422</code>), or the payload is not JSON. The message is acked and
+  nothing is kept. There is no replay for it, and <code>vrsky_dlq_messages_total</code>
+  does not count these. What the worker logs depends on how the drop happens.
+  An error marked <code>sdk.Permanent</code> (the Sitoo, Front Systems, Visma,
+  Brightpearl, Business Central and SAP destinations, and a non-JSON payload
+  in the database and Salesforce destinations) is logged by the SDK as
+  <code>permanent error; dropping message</code>. The HTTP destination's <code>4xx</code> is a
+  plain ack: the feed shows it and the log has <code>HTTP request returned error</code>.
   Look in the worker's log in Loki, filtered by <code>connection_id</code>, and in the
   connection's activity feed.</li>
 </ul>
+<p>An error in the node's own config or credential is retried, not dropped,
+because the same message goes through once the node is fixed (#734): a
+<code>401</code>/<code>403</code>, a setting the destination needs that is missing, a template that
+cannot be rendered. Its five attempts fail the same way and it lands in the
+DLQ with an error that names what to fix. Fix the node, then retry the
+messages from the DLQ. Wait 5 minutes after the fix first: every destination
+keeps a connection's config that long, so an earlier retry can meet the old
+node and land in the DLQ again (cloud storage drops its copy when the
+connection is deployed again). With several nodes of
+the same Kafka, RabbitMQ, SFTP or cloud-storage destination on one
+connection, one misconfigured node fails the whole message for that
+destination, so its healthy sibling gets it again on each attempt and on the
+retry (the HTTP and Salesforce destinations skip the nodes that took it). The
+Sitoo, Front Systems, Visma, Brightpearl, Business Central and SAP
+destinations still drop a <code>401</code>/<code>403</code> and an incomplete node; they follow in a
+later change.</p>
 <p>Which kind an error gets differs per destination:</p>
 <table>
 <thead>
@@ -2988,8 +3027,8 @@ error it hits into one of two kinds:</p>
 <tbody>
 <tr>
 <td>HTTP</td>
-<td>Every <code>4xx</code> except <code>429</code> (any other answer below <code>500</code> too); a URL a request cannot be built from</td>
-<td><code>5xx</code>, <code>429</code>, network error (a request still unanswered after 30 s included), OAuth token failure; a refused address (private or loopback address, redirect to another host). With several nodes, only the failing ones are tried again and the last error names them (<code>node &lt;id&gt;: …</code>); a node that took the message is skipped, unless the worker restarted in between (<a href="../../connectors/http/#failed-deliveries">HTTP page</a>)</td>
+<td>Every <code>4xx</code> except <code>401</code>, <code>403</code> and <code>429</code> (any other answer below <code>500</code> too)</td>
+<td><code>5xx</code>, <code>429</code>, network error (a request still unanswered after 30 s included), OAuth token failure; <code>401</code>/<code>403</code> (with OAuth, after the one token refresh); a node with no <code>url</code>, a URL a request cannot be built from, or a <code>tls</code> cert or key that does not parse (nothing is sent to that node); a refused address (private or loopback address, redirect to another host). With several nodes, only the failing ones are tried again and the last error names them (<code>node &lt;id&gt;: …</code>); a node that took the message is skipped, unless the worker restarted in between (<a href="../../connectors/http/#failed-deliveries">HTTP page</a>)</td>
 </tr>
 <tr>
 <td>Database</td>
@@ -3003,28 +3042,28 @@ error it hits into one of two kinds:</p>
 </tr>
 <tr>
 <td>Cloud storage</td>
-<td>No <code>bucket</code></td>
-<td>Failure to open the provider or write the object</td>
+<td>A key that cannot be built even without the <code>key_template</code> (the payload's own <code>uuid</code> field cleans away to nothing); a <code>key_template</code> that cannot be rendered falls back to a generated key instead</td>
+<td>No <code>bucket</code>; failure to open the provider or write the object</td>
 </tr>
 <tr>
 <td>SFTP</td>
-<td>No <code>host</code>, <code>username</code> or <code>remote_dir</code>; no password or key; <code>filename_template</code> that cannot be parsed or rendered</td>
-<td>Failure to connect (after three tries), to create <code>remote_dir</code> or to write the file</td>
+<td>Nothing</td>
+<td>No <code>host</code>, <code>username</code> or <code>remote_dir</code>; no password or key; <code>filename_template</code> that cannot be parsed or rendered (a field the record lacks included); failure to connect (after three tries), to create <code>remote_dir</code> or to write the file</td>
 </tr>
 <tr>
 <td>Kafka</td>
-<td>No <code>brokers</code> or <code>topic</code></td>
-<td>Failure to open the writer or to write</td>
+<td>Nothing</td>
+<td>No <code>brokers</code> or <code>topic</code>; failure to open the writer or to write</td>
 </tr>
 <tr>
 <td>RabbitMQ</td>
-<td>No <code>url</code>, or neither <code>exchange</code> nor a queue</td>
-<td>Failure to connect or to publish</td>
+<td>Nothing</td>
+<td>No <code>url</code>, or neither <code>exchange</code> nor a queue; failure to connect or to publish</td>
 </tr>
 <tr>
 <td>Salesforce</td>
-<td>Payload not JSON; no <code>object</code>; <code>upsert</code> with no <code>external_id_field</code></td>
-<td>A record Salesforce refuses with a <code>4xx</code> (the error names it as <code>record[N]</code> with Salesforce's code; the other records still go in), a record with no external-id value; <code>401</code>/<code>403</code> after the token refresh, <code>408</code>, <code>429</code>, <code>5xx</code>, a redirect, network or token failure; the same answers while creating, filling or closing a Bulk API job; a record a Bulk job refuses or never processes (named by index with Salesforce's code), a Bulk job not done within 2 minutes per attempt, Bulk results that cannot be matched to the records, a Bulk record with nothing to send. Records that went in are not sent again on the retry (see the <a href="../../connectors/salesforce/#records-are-not-sent-twice">Salesforce page</a>); a DLQ retry of a Bulk <code>insert</code> after a restart duplicates them (<a href="../../connectors/salesforce/#retrying-a-bulk-message-from-the-dlq">Retrying a Bulk message from the DLQ</a>)</td>
+<td>Payload not JSON</td>
+<td>No <code>object</code>; <code>upsert</code> with no <code>external_id_field</code>; a record Salesforce refuses with a <code>4xx</code> (the error names it as <code>record[N]</code> with Salesforce's code; the other records still go in), a record with no external-id value; <code>401</code>/<code>403</code> after the token refresh, <code>408</code>, <code>429</code>, <code>5xx</code>, a redirect, network or token failure; the same answers while creating, filling or closing a Bulk API job; a record a Bulk job refuses or never processes (named by index with Salesforce's code), a Bulk job not done within 2 minutes per attempt, Bulk results that cannot be matched to the records, a Bulk record with nothing to send. Records that went in are not sent again on the retry (see the <a href="../../connectors/salesforce/#records-are-not-sent-twice">Salesforce page</a>); a DLQ retry of a Bulk <code>insert</code> after a restart duplicates them (<a href="../../connectors/salesforce/#retrying-a-bulk-message-from-the-dlq">Retrying a Bulk message from the DLQ</a>)</td>
 </tr>
 <tr>
 <td>Sitoo</td>
@@ -3095,6 +3134,37 @@ agent destination is described on its <a href="../../connectors/remote-agent/">o
 <li>With several destinations on one connection, one failure retries the whole
   message and the destinations that already delivered get it again.</li>
 </ul>
+<h2 id="a-message-that-could-not-be-dead-lettered">A message that could not be dead-lettered<a class="headerlink" href="#a-message-that-could-not-be-dead-lettered" title="Permanent link">&para;</a></h2>
+<p>On a message's fifth and last attempt the worker copies it to the DLQ. If
+that copy fails, it tries twice more (after 500 ms and 2 s). If all three
+fail (#811):</p>
+<ul>
+<li>The worker logs <code>Could not copy the message to the DLQ; it is left unacked
+  and stays only in VRSKY_DATA</code> at error level, with <code>tenant_id</code>,
+  <code>connection_id</code>, <code>durable</code>, <code>stream_seq</code>, <code>last_error</code> (why the delivery
+  failed) and <code>error</code> (why the DLQ copy failed).</li>
+<li><code>vrsky_dlq_publish_failed_total{pipeline_id, worker}</code> goes up. No alert
+  is wired to it yet.</li>
+<li>The message is not retried again: NATS never delivers a message to the
+  same worker more than five times. Usually it is not in the DLQ view
+  either (but see below).</li>
+</ul>
+<p>The payload is still in the <code>VRSKY_DATA</code> stream at that sequence, for up to
+72 hours (less if the stream hits its size cap). There is no button for it
+yet. First check whether a copy got into the DLQ after all: when the tries
+timed out rather than being refused, one of them may have been stored with
+its answer lost. The connection's DLQ view would then show an entry from
+that worker at the time of the log line; to be sure, the entry's headers in
+<code>GET /api/v1/connections/{id}/dlq</code> include
+<code>Nats-Msg-Id: VRSKY_DATA-&lt;stream_seq&gt;</code>. If it is there, there is nothing to
+recover. Otherwise, by hand: find the log line in Loki, read the message
+with the NATS CLI (<code>nats stream get VRSKY_DATA &lt;stream_seq&gt;</code>, from a
+nats-box pod), and once the cause is fixed publish its payload to
+<code>vrsky.dlq.&lt;tenant_id&gt;.pipeline.&lt;connection_id&gt;</code>. It then shows in the
+connection's DLQ view and can be retried or discarded there like any other
+entry.</p>
+<p>A failing DLQ copy usually means JetStream itself is unwell (a restart, a
+full disk): check the NATS pod and its logs first.</p>
 <h2 id="the-file-output-panel-says-load-failed-or-shows-no-files">The File Output panel says "Load failed", or shows no files<a class="headerlink" href="#the-file-output-panel-says-load-failed-or-shows-no-files" title="Permanent link">&para;</a></h2>
 <p>The panel and the upload box go through the management API
 (<code>/api/v1/connections/{id}/files</code>). Before that they addressed the worker's own

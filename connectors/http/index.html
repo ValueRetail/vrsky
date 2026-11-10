@@ -2785,25 +2785,34 @@ instead (#774):</p>
 </ul>
 <p>Hitting any of them is a timeout like the one above: retried, then
 dead-lettered. None of them is a node setting.</p>
+<p>A <code>401</code> or <code>403</code> is retried too, so a bad credential means 5 attempts per
+message, each sending it. With OAuth every attempt forces a token refresh,
+about 5 refreshes per message, so a burst of messages can hit the identity
+provider or lock out a basic-auth account. A <code>403</code> from a WAF or from
+per-record authorization is retried and dead-lettered the same way.</p>
 <p>A <code>5xx</code>, a <code>429</code>, a network error and a failure to get an OAuth token are
-retried on the usual backoff and then dead-lettered with the payload. Any
-other answer below <code>500</code> (so every <code>4xx</code> except <code>429</code>, a <code>401</code> that is still
-refused after the one token refresh included) is logged, shown in the
-activity feed and acked: the message is dropped, not dead-lettered. A URL the
-request cannot be built from is dropped the same way. Which errors reach the
-DLQ for every destination is in the
+retried on the usual backoff and then dead-lettered with the payload. So is a
+<code>401</code> or <code>403</code> (a wrong or expired credential; with OAuth, one still refused
+after the one token refresh), and a node the request cannot be built for: no
+<code>url</code>, a URL the request cannot be built from, or a <code>tls</code> certificate or key
+that does not parse (nothing is sent to that node then). Fix the node, wait
+5 minutes (the worker keeps a connection's config that long), and retry the
+message from the DLQ (#734). Any other answer below <code>500</code> (so every other
+<code>4xx</code>: <code>400</code>, <code>404</code>, <code>422</code>, ...) is logged, shown in the activity feed and
+acked: the target refused the message itself, and it is dropped, not
+dead-lettered. Which errors reach the DLQ for every destination is in the
 <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</p>
 <p><strong>Several HTTP nodes on one connection.</strong> The message is acked only when no
 node failed in a way that is retried. When one node fails and another takes
 the message, the message is retried for the failing node only: a node that
-took it (a <code>2xx</code>, or a <code>4xx</code>, which is final) is not sent it again on the
-next attempts (#730). A node whose request failed on the way (the connection
+took it (a <code>2xx</code>, or a <code>4xx</code> other than <code>401</code>/<code>403</code>, which is final) is not sent
+it again on the next attempts (#730). A node whose request failed on the way (the connection
 dropped, a timeout) has not taken it and is tried again. The DLQ copy's last
 error names every node that still failed, as <code>node &lt;node id&gt;: &lt;error&gt;</code>. That
 header is cut at 512 bytes, so with many failing nodes the later ones show
 only in the worker's log (<code>HTTP destination refused</code>, <code>HTTP request failed</code>
-or <code>HTTP request returned error</code>, with <code>connection_id</code> and <code>node_id</code>). A retry from the DLQ skips the nodes that
-took the message as well.</p>
+or <code>HTTP request returned error</code>, with <code>connection_id</code> and <code>node_id</code>). A retry
+from the DLQ skips the nodes that took the message as well.</p>
 <p>This memory is kept by the <code>http-producer</code> process: one entry per node per
 message, up to 10 000 entries, for 7 days (the DLQ's retention). If the
 worker restarts (or a rolling deploy hands the message to the new pod)

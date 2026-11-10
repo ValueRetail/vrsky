@@ -2976,8 +2976,11 @@ handler returns an error, delivery n &lt; 5 → NakWithDelay, redelivered Backof
 handler returns an error, delivery = 5   → copy to vrsky.dlq.&lt;tenant&gt;.pipeline.&lt;conn&gt;
                                            with X-Vrsky-Last-Error, X-Vrsky-Delivered
                                            and X-Vrsky-Worker, then Ack
-                                           (if the DLQ publish fails: Nak)
-handler panics                           → as for an error, delivery n &lt; 5
+  the DLQ publish fails                  → tried 3 times in all (500 ms, then 2 s apart),
+                                           then left unacked, logged and counted
+                                           (see "When the DLQ copy fails")
+handler panics                           → as for an error, on every delivery
+                                           (X-Vrsky-Last-Error: "handler panicked: …")
 </code></pre></div>
 <p>SDK connectors don't call this directly. The SDK runner maps <code>Deliver</code>'s
 result onto it: nil acks, <code>sdk.Permanent</code> acks and drops (logged, never
@@ -3028,6 +3031,42 @@ together they can fill all 32 slots and stall the durable until the old
 pods' delays run out. A durable-wide bound is #813; raising <code>MaxAckPending</code>
 or moving retries to a delay stream are the alternatives
 (<code>plans/issue-794-backoff-nak.md</code>).</p>
+<h4 id="when-the-dlq-copy-fails-811">When the DLQ copy fails (#811)<a class="headerlink" href="#when-the-dlq-copy-fails-811" title="Permanent link">&para;</a></h4>
+<p>nats-server makes no delivery past <code>MaxDeliver</code>. On the fifth delivery a
+NAK, delayed or not, and an ack wait that runs out all end the same way:
+the server drops the message from the durable's pending set and sends a
+<code>$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES</code> advisory (<code>getNextMsg</code> and
+<code>checkPending</code> → <code>hasMaxDeliveries</code> in the 2.15.1 source). So the DLQ copy is
+the last chance. Until #811 a failed copy was followed by a NAK, and a panic
+on the fifth delivery took the retry path; both lost the message without a
+trace beyond a log line.</p>
+<p>Now <code>Subscriber.deadLetter</code> (<code>pkg/messaging/subscriber.go</code>):</p>
+<ul>
+<li>Tries the copy up to <code>messaging.DLQPublishAttempts</code> (3) times, 500 ms and
+  then 2 s apart, each try bounded by <code>DLQPublishTimeout</code> (2 s). The
+  heartbeat keeps the message in flight meanwhile. The copy's <code>Msg-Id</code> is
+  <code>&lt;stream&gt;-&lt;sequence&gt;</code>, so a try that was stored but whose answer got lost
+  does not make a second copy (the DLQ's 2-minute duplicate window). The
+  subscriber's Publisher counts the streams as ensured by <code>Subscribe</code>, so a
+  try is one publish, with no stream probe first; a Publisher whose ensure
+  failed tries it again on the next publish. The worker's loop is held for
+  this: 2.5 s when the DLQ refuses at once, about 8.5 s at worst, inside
+  the SDK runner's 30 s shutdown grace.</li>
+<li>If every try fails, leaves the message unacked (no NAK, no term: neither
+  would keep it, and an ack or term would say it was handled). It logs
+  <code>Could not copy the message to the DLQ; it is left unacked and stays only
+  in VRSKY_DATA</code> at error level with <code>stream_seq</code>, tenant, connection,
+  worker, the last handler error and the DLQ error, and counts it in
+  <code>vrsky_dlq_publish_failed_total{pipeline_id, worker}</code>. When its ack wait
+  runs out the server drops it from the durable.</li>
+</ul>
+<p>The message is then only in <code>VRSKY_DATA</code>, at the logged sequence, until the
+stream's 72 h age limit or its size caps remove it. Recovering it is by hand
+(see the <a href="../operator/troubleshooting/#a-message-that-could-not-be-dead-lettered">operator guide</a>).
+A worker killed during its fifth attempt loses the message the same way and
+leaves only the advisory. Making either case recover on its own needs a
+consumer config change or an advisory listener
+(<code>plans/issue-811-last-delivery-dlq.md</code>).</p>
 <h3 id="ackwait-in-progress-heartbeats-redelivery-139">AckWait, in-progress heartbeats &amp; redelivery (#139)<a class="headerlink" href="#ackwait-in-progress-heartbeats-redelivery-139" title="Permanent link">&para;</a></h3>
 <p>The durable consumer's <strong>AckWait</strong> is the crash-recovery window — how long
 JetStream waits for an ack before assuming the worker died and redelivering. It
@@ -3057,7 +3096,10 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
 1 s, 5 s, 30 s and 2 min, or at once over the cap above) is dead-lettered:</p>
 <ol>
 <li>The message is copied to the <code>VRSKY_DLQ</code> stream with the last error and
-   the attempt count, and acked on the data stream.</li>
+   the attempt count, and acked on the data stream. A handler that panics
+   is dead-lettered the same way. If the copy fails three times the message
+   is not acked and stays only in <code>VRSKY_DATA</code>
+   (<a href="#when-the-dlq-copy-fails-811">When the DLQ copy fails</a>).</li>
 <li><code>vrsky_dlq_messages_total</code> goes up, and the <code>DLQGrowing</code> alert fires
    when a pipeline dead-letters messages for 10 minutes. The metric has no
    tenant label, so the alert goes to the platform's notification targets,

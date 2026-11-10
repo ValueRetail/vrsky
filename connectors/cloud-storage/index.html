@@ -2598,6 +2598,11 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   <code>incoming/a/x.csv</code> and <code>incoming/b/x.csv</code> both land on
   <code>&lt;move_prefix&gt;/x.csv</code> and the second overwrites the first.</li>
 </ul>
+<p>Starting the connection returns a 400 that names the node when <code>move</code> has
+  no <code>move_prefix</code>, or (poll mode) when <code>move_prefix</code> is inside what <code>prefix</code>
+  lists (#724). The editor shows the rule under "Move to prefix". A config
+  saved before that check, or restored on boot, is refused by the consumer,
+  which sets the connection to <code>error</code> instead of leaving it <code>running</code>.</p>
 <p>In poll mode the start is also refused when <code>prefix</code> would select moved
   objects again (#567). The log says <code>invalid move_prefix</code> and names both
   values. Event mode starts anyway, with a warning (below). <code>prefix</code> is
@@ -2881,12 +2886,17 @@ block: <code>none</code>, <code>sse-s3</code> (S3-managed keys), or <code>sse-km
 <li><strong>Test connection.</strong> The cloud-storage worker exposes a <code>/test-connection</code>
   endpoint; use the <strong>Test connection</strong> button in the editor to verify bucket
   access before deploying.</li>
-<li><strong>Failed uploads.</strong> A destination without a <code>bucket</code> logs an error and acks
-  each message: it is dropped, not dead-lettered. A failure to open the
+<li><strong>Failed uploads.</strong> A destination without a <code>bucket</code> logs an error and fails
+  each message, so it is retried and then dead-lettered with the error
+  <code>cloud-storage node has no bucket</code>. Set the bucket, deploy the connection
+  again (that clears the worker's cached config) and retry the messages from
+  the DLQ (#734). A failure to open the
   provider or to write the object (for example credentials refused or the
   network down) is retried and then dead-lettered. A <code>key_template</code> that
   cannot be rendered does not drop anything: the object is written under a
-  generated key and a warning is logged. See the
+  generated key and a warning is logged.
+  Duplicates: when one node of a fan-out has a config error, the other nodes of that producer get the message again on each attempt (5 in all) and again on a DLQ replay, because this producer keeps no record of which node took it. Fix the node quickly or expect duplicates (skip set for these four: #758).
+  See the
   <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 <li>Object-format handling and any provider-specific options not listed here are
   configured via the in-app pipeline editor (Property panel).</li>

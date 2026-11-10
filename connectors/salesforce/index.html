@@ -2664,10 +2664,11 @@ field used to match existing records.</p>
   endpoint — use the <strong>Test connection</strong> button to confirm the grant and
   instance are valid before deploying.</li>
 <li><strong>Failed deliveries.</strong> A payload that is not JSON is dropped (logged, not
-  dead-lettered), and so is a message for a node with no <code>object</code> (logged,
-  acked). An <code>upsert</code> node with no <code>external_id_field</code> fails every delivery
-  with an error that says so, so its messages end in the DLQ and can be
-  replayed once the node is fixed (#765). Everything else
+  dead-lettered). A node with no <code>object</code> (#734) and an <code>upsert</code> node with no
+  <code>external_id_field</code> (#765) fail every delivery with an error that says so,
+  so their messages end in the DLQ and can be replayed once the node is fixed.
+  Wait 5 minutes after the fix before the retry: the worker keeps a
+  connection's config that long. Everything else
   is retried and, after five attempts, dead-lettered with the error; see
   <a href="#what-happens-when-a-write-fails">What happens when a write fails</a>.</li>
 <li>Field mapping, batch sizing, and other options not listed here are
