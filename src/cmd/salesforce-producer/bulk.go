@@ -179,15 +179,28 @@ func listRejected(out map[int]string) []string {
 // written as an empty line, which CSV readers (Salesforce's too) skip: the
 // job would end JobComplete without it. With no column at all, no record has
 // anything to send.
-func sendable(records []map[string]any, pending []int, op string) ([]int, map[int]string) {
+func sendable(records []map[string]any, pending []int, op, extIDField string) ([]int, map[int]string) {
+	local := map[int]string{}
+	if op == "upsert" {
+		// The REST rule (restWrite): an external id that is absent, null or
+		// "" is refused here. In the CSV it would be empty or #N/A.
+		var keep []int
+		for _, i := range pending {
+			if v := records[i][extIDField]; v == nil || v == "" {
+				local[i] = fmt.Sprintf("no value for external id field %s", extIDField)
+				continue
+			}
+			keep = append(keep, i)
+		}
+		pending = keep
+	}
 	header, rows := csvTable(subset(records, pending), op)
 	if len(header) > 1 {
-		return pending, nil
+		return pending, local
 	}
 	var send []int
-	local := map[int]string{}
 	for j, i := range pending {
-		if len(header) == 0 || rows[j][0] == "" || records[i][header[0]] == nil {
+		if len(header) == 0 || rows[j][0] == "" {
 			local[i] = "nothing to send (no field has a value, and an empty CSV row is skipped)"
 			continue
 		}
@@ -325,7 +338,7 @@ func (p *salesforceProducer) bulkWrite(ctx context.Context, tenantID string, cfg
 	}
 	b := &bulkCall{p: p, tenantID: tenantID, cfg: cfg, op: op, total: len(records),
 		base: fmt.Sprintf("%s/services/data/%s/jobs/ingest", strings.TrimRight(cfg.InstanceURL, "/"), cfg.APIVersion)}
-	pending, b.local = sendable(records, pending, op)
+	pending, b.local = sendable(records, pending, op, cfg.ExternalIDField)
 	for i, why := range b.local {
 		p.logger.Error("Salesforce Bulk API: record cannot be sent", "record", i, "object", cfg.Object, "op", op, "error", why)
 	}

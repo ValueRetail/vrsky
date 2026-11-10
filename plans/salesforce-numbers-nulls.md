@@ -61,6 +61,13 @@ guide as I know it, not re-read live. It is not tested against an org.
 - A literal `#N/A` string value clears the field on a Bulk upsert. Salesforce
   has no escape; documented, not handled.
 
+- **Bulk upsert with no external id** (absent, null, "") is refused locally in
+  `sendable`, the REST rule, so `#N/A` never lands in the key column (review).
+- **Exponent-form numbers** are expanded to exact plain digits with
+  `math/big` (no float64) right after decoding, so REST body, URL and CSV agree;
+  plain forms are untouched. Exponents beyond 400 stay as sent (review).
+- The REST-null-overrides-default claim is unchecked against an org (#804).
+
 ## Risks
 
 - Result matching on Bulk compares uploaded values with the values in

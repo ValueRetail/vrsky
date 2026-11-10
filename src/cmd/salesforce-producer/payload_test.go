@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,9 +35,9 @@ func TestRecordsToCSV_NumbersAndNulls(t *testing.T) {
 		want string
 	}{
 		// Insert: null and absent both stay empty.
-		{"insert", header + "9007199254740993,0.10,12345678,1000000,Acme,-1.5e3,\n,,2,,B,,\n"},
+		{"insert", header + "9007199254740993,0.10,12345678,1000000,Acme,-1500,\n,,2,,B,,\n"},
 		// Upsert: an explicit null is #N/A, an absent field stays empty.
-		{"upsert", header + "9007199254740993,0.10,12345678,1000000,Acme,-1.5e3,#N/A\n,,2,,B,,\n"},
+		{"upsert", header + "9007199254740993,0.10,12345678,1000000,Acme,-1500,#N/A\n,,2,,B,,\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.op, func(t *testing.T) {
@@ -51,6 +52,33 @@ func TestRecordsToCSV_NumbersAndNulls(t *testing.T) {
 	}
 }
 
+func TestPlainNumber(t *testing.T) {
+	for in, want := range map[string]string{
+		"1e+16": "10000000000000000", "1E2": "100", "-1.5e3": "-1500", "1.25e-2": "0.0125",
+		"1e-3": "0.001", "5e-1": "0.5", "1.0e0": "1", "-0e5": "0", "12345678.5e1": "123456785",
+		"9007199254740993e2": "900719925474099300", "2.5e2": "250",
+		// Plain forms are untouched, trailing zeros included.
+		"0.10": "0.10", "1000000": "1000000", "-3": "-3", "9007199254740993": "9007199254740993",
+		// Too large to expand: left as sent.
+		"1e999999": "1e999999", "1e-999999": "1e-999999",
+	} {
+		if got := plainNumber(json.Number(in)); string(got) != want {
+			t.Errorf("plainNumber(%s) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestParseRecords_ExponentNumbersAreExpanded(t *testing.T) {
+	recs, err := parseRecords([]byte(`[{"A":1e+16,"N":{"B":[2.5E1,0.10]}}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(recs[0])
+	if want := `{"A":10000000000000000,"N":{"B":[25,0.10]}}`; string(b) != want {
+		t.Errorf("record = %s, want %s", b, want)
+	}
+}
+
 func TestParseRecords_TrailingDataIsBad(t *testing.T) {
 	for _, in := range []string{`{"a":1} {"b":2}`, `[{"a":1}] x`} {
 		if _, err := parseRecords([]byte(in)); err == nil {
@@ -59,12 +87,28 @@ func TestParseRecords_TrailingDataIsBad(t *testing.T) {
 	}
 }
 
-// A single upsert column that is null is nothing to send, not a "#N/A" row.
-func TestSendable_NullOnlyFieldIsNothingToSend(t *testing.T) {
-	recs := []map[string]any{{"ExtId__c": nil}, {"ExtId__c": "x"}}
-	send, local := sendable(recs, []int{0, 1}, "upsert")
-	if len(send) != 1 || send[0] != 1 || len(local) != 1 || local[0] == "" {
-		t.Errorf("send %v local %v, want only record 1 sent and record 0 refused", send, local)
+// A Bulk upsert refuses locally, as REST does, a record whose external id is
+// absent, null or "": never an empty or #N/A key column in the CSV.
+func TestSendable_UpsertWithoutExternalIDIsRefused(t *testing.T) {
+	recs, err := parseRecords([]byte(`[{"ExtId__c":null,"Name":"A"},{"Name":"B"},{"ExtId__c":"","Name":"C"},{"ExtId__c":0,"Name":"D"},{"ExtId__c":"x","Name":"E"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	send, local := sendable(recs, []int{0, 1, 2, 3, 4}, "upsert", "ExtId__c")
+	if len(send) != 2 || send[0] != 3 || send[1] != 4 {
+		t.Errorf("send = %v, want [3 4]", send)
+	}
+	for _, i := range []int{0, 1, 2} {
+		if !strings.Contains(local[i], "no value for external id field ExtId__c") {
+			t.Errorf("local[%d] = %q, want the external id refusal", i, local[i])
+		}
+	}
+	if len(local) != 3 {
+		t.Errorf("local = %v, want records 0-2 only", local)
+	}
+	// An insert has no key to require.
+	if send, local := sendable(recs, []int{0, 1, 2}, "insert", ""); len(send) != 3 || len(local) != 0 {
+		t.Errorf("insert: send %v local %v, want all sent", send, local)
 	}
 }
 
@@ -158,7 +202,7 @@ func TestREST_InsertBodyKeepsNumbersAndNull(t *testing.T) {
 	publish(t, h, numbersPayload)
 	got := c.find(t, http.MethodPost, "/sobjects/Account")
 	// Compact, key-sorted by encoding/json, numbers verbatim, null kept.
-	const want = `{"Big":9007199254740993,"Dec":0.10,"ExtId__c":12345678,"Million":1000000,"Name":"Acme","Neg":-1.5e3,"Nope":null}`
+	const want = `{"Big":9007199254740993,"Dec":0.10,"ExtId__c":12345678,"Million":1000000,"Name":"Acme","Neg":-1500,"Nope":null}`
 	if got.body != want {
 		t.Errorf("REST body = %s\nwant      %s", got.body, want)
 	}
@@ -179,6 +223,16 @@ func TestREST_UpsertURLLargeInteger(t *testing.T) {
 	h := payloadHarness(t, c, `"operation":"upsert","external_id_field":"ExtId__c"`, 100, 0, nil)
 	publish(t, h, `{"ExtId__c":9007199254740993}`)
 	c.find(t, http.MethodPatch, "/sobjects/Account/ExtId__c/9007199254740993")
+}
+
+func TestREST_UpsertURLExponentFormIsPlainDigits(t *testing.T) {
+	c := &capture{}
+	h := payloadHarness(t, c, `"operation":"upsert","external_id_field":"ExtId__c"`, 100, 0, nil)
+	publish(t, h, `{"ExtId__c":1e+16}`)
+	got := c.find(t, http.MethodPatch, "/sobjects/Account/ExtId__c/10000000000000000")
+	if got.body != `{"ExtId__c":10000000000000000}` {
+		t.Errorf("REST body = %s", got.body)
+	}
 }
 
 func TestBulk_UploadedCSV(t *testing.T) {

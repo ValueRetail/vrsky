@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -524,6 +526,69 @@ func decodeJSON(data []byte, v any) error {
 	return nil
 }
 
+// maxExponent bounds the exponent plainNumber expands. Anything larger is
+// left as sent; Salesforce refuses such a value anyway, and expanding 1e999999
+// would build a million-digit string.
+const maxExponent = 400
+
+// plainNumber writes a number in exponent form (1e+16, -1.5e3) as exact plain
+// decimal digits (10000000000000000, -1500), through math/big and never a
+// float64. A number without e or E is returned untouched, so 0.10 stays 0.10.
+func plainNumber(n json.Number) json.Number {
+	s := string(n)
+	at := strings.IndexAny(s, "eE")
+	if at < 0 {
+		return n
+	}
+	if exp, err := strconv.Atoi(strings.TrimPrefix(s[at+1:], "+")); err != nil || exp > maxExponent || exp < -maxExponent {
+		return n
+	}
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return n
+	}
+	if r.IsInt() {
+		return json.Number(r.Num().String())
+	}
+	// The denominator is 2^a*5^b for a decimal, so max(a, b) digits after
+	// the point are exact.
+	den := new(big.Int).Set(r.Denom())
+	digits := max(factorCount(den, 2), factorCount(den, 5))
+	out := r.FloatString(digits)
+	return json.Number(out)
+}
+
+// factorCount is how many times f divides n; n is consumed.
+func factorCount(n *big.Int, f int64) int {
+	fb, m, c := big.NewInt(f), new(big.Int), 0
+	for {
+		q, rem := new(big.Int).QuoRem(n, fb, m)
+		if rem.Sign() != 0 {
+			return c
+		}
+		n.Set(q)
+		c++
+	}
+}
+
+// plainNumbers rewrites, in place, every number of a decoded record with
+// plainNumber.
+func plainNumbers(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		return plainNumber(t)
+	case map[string]any:
+		for k, x := range t {
+			t[k] = plainNumbers(x)
+		}
+	case []any:
+		for i, x := range t {
+			t[i] = plainNumbers(x)
+		}
+	}
+	return v
+}
+
 func parseRecords(payload []byte) ([]map[string]any, error) {
 	trimmed := bytes.TrimSpace(payload)
 	if len(trimmed) == 0 {
@@ -535,12 +600,16 @@ func parseRecords(payload []byte) ([]map[string]any, error) {
 		if err := decodeJSON(trimmed, &rows); err != nil {
 			return nil, fmt.Errorf("%w: %v", errBadPayload, err)
 		}
+		for _, r := range rows {
+			plainNumbers(r)
+		}
 		return rows, nil
 	case '{':
 		var one map[string]any
 		if err := decodeJSON(trimmed, &one); err != nil {
 			return nil, fmt.Errorf("%w: %v", errBadPayload, err)
 		}
+		plainNumbers(one)
 		return []map[string]any{one}, nil
 	default:
 		return nil, errBadPayload
