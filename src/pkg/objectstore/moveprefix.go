@@ -19,6 +19,9 @@ import (
 // (a base name starting with that rest is selected). Leading slashes are
 // ignored on both sides, which refuses more rather than less.
 //
+// ui/src/components/Pipeline/moveInsideListing.ts mirrors this rule for the
+// editor; change both together.
+//
 // It returns nil when movePrefix is empty; a missing move_prefix is a
 // separate refusal.
 func MoveInsideListing(prefix, movePrefix string) error {

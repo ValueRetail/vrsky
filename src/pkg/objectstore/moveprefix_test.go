@@ -17,6 +17,9 @@ func TestMoveInsideListing(t *testing.T) {
 		{"unrelated", "in/", "processed", false},
 		{"bucket root", "in/", "/", false},
 		{"one level up", "incoming/a/", "incoming", false},
+		{"leading .. kept", "x/", "../x", false},
+		{"leading .. under prefix ..", "../", "../x", true},
+		{"dot-dot leaves the prefix", "in/", "a/../../in", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

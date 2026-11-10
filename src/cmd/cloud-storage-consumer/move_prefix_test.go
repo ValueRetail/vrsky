@@ -336,3 +336,49 @@ func TestStart_OtherRefusalsWriteError(t *testing.T) {
 		})
 	}
 }
+
+// #724: a stop that lands while the start is in flight wins. The refused start
+// writes nothing, so "error" does not overwrite the user's stop.
+func TestStart_RefusedAfterStopWritesNothing(t *testing.T) {
+	f := newSRFixture(t)
+	f.nodes = mpNodes("in/", "", "move", "")
+	f.expectLookup(nil)
+	// Sentinel: if the refusal wrote "error", it consumed this expectation and
+	// the manual write below fails.
+	f.mock.ExpectExec("UPDATE connections SET status").WithArgs("error", srConn, srTenant).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	f.c.starts.AfterReserve = func(string) { f.c.handleStopCommand(srStopMsg()) }
+
+	f.c.startConnection(context.Background(), srConn, srTenant)
+
+	if err := f.c.updateConnectionStatus(srConn, srTenant, "error"); err != nil {
+		t.Errorf("the refused start wrote status after a stop: %v", err)
+	}
+	if err := f.mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("db: %v", err)
+	}
+}
+
+// #724: a refusing start for a connection that is already active is turned
+// away by the guard and writes no status.
+func TestStart_RefusedWhileActiveWritesNothing(t *testing.T) {
+	f := newSRFixture(t)
+	f.expectLookup(nil)
+	f.expectRunning()
+	f.c.startConnection(context.Background(), srConn, srTenant)
+	if n := f.activeCount(); n != 1 {
+		t.Fatalf("active = %d, want 1", n)
+	}
+	f.nodes = mpNodes("in/", "", "move", "")
+	f.mock.ExpectExec("UPDATE connections SET status").WithArgs("error", srConn, srTenant).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	f.c.startConnection(context.Background(), srConn, srTenant)
+
+	if err := f.c.updateConnectionStatus(srConn, srTenant, "error"); err != nil {
+		t.Errorf("the second start wrote status: %v", err)
+	}
+	if n := f.activeCount(); n != 1 {
+		t.Errorf("active = %d after the refused second start, want 1", n)
+	}
+}

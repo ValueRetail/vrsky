@@ -119,6 +119,9 @@ describe('cloud-storage move_prefix rule (#724)', () => {
     ['data/report_', 'data', true],
     ['', '/', true],
     ['/in/', 'in', true],
+    ['x/', '../x', false],
+    ['../', '../x', true],
+    ['in/', 'a/../../in', false],
   ])('moveInsideListing(%j, %j) = %s', (prefix, move, want) => {
     expect(moveInsideListing(prefix, move)).toBe(want)
   })

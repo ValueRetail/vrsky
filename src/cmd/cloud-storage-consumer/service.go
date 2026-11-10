@@ -240,16 +240,16 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 		return
 	}
 	if cfg.Bucket == "" {
-		s.refuseStart(connectionID, tenantID, logger, "cloud-storage config incomplete (need bucket)", nil)
+		s.refuseStart(claim, connectionID, tenantID, logger, "cloud-storage config incomplete (need bucket)", nil)
 		return
 	}
 	if cfg.AfterAction == "move" && cfg.MovePrefix == "" {
-		s.refuseStart(connectionID, tenantID, logger, "after_action=move requires move_prefix", nil)
+		s.refuseStart(claim, connectionID, tenantID, logger, "after_action=move requires move_prefix", nil)
 		return
 	}
 	if err := cfg.validateMoveOutsideListing(); err != nil {
 		if cfg.Mode != "event" {
-			s.refuseStart(connectionID, tenantID, logger, "invalid move_prefix", err)
+			s.refuseStart(claim, connectionID, tenantID, logger, "invalid move_prefix", err)
 			return
 		}
 		// Event mode starts anyway. A move there always writes
@@ -264,7 +264,7 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 	if cfg.Mode == "event" {
 		if err := cfg.validateEventConfig(); err != nil {
-			s.refuseStart(connectionID, tenantID, logger, "invalid event-mode config", err)
+			s.refuseStart(claim, connectionID, tenantID, logger, "invalid event-mode config", err)
 			return
 		}
 	}
@@ -303,23 +303,24 @@ type activeConn struct {
 // connection "error", so the user sees it instead of a "running" connection
 // that ingests nothing (#724). The management API refuses the same configs
 // when the connection is started; this covers one saved before that check, or
-// one RestoreRunning brings back on boot. The write takes its place in the
-// connection's status order, so it cannot land over a newer start's "running";
-// nothing is written if the connection is already active.
-func (s *cloudConsumer) refuseStart(connectionID, tenantID string, logger *slog.Logger, msg string, cause error) {
+// one RestoreRunning brings back on boot.
+//
+// The write takes the claim's place in the connection's status order through
+// Activate (with nothing to insert: the connection is not active), so it
+// cannot land over a newer start's "running". A stop that took the claim
+// while this start was in flight wins: Activate fails and nothing is written,
+// so the user's stop is not overwritten by "error".
+func (s *cloudConsumer) refuseStart(claim *sdk.StartClaim, connectionID, tenantID string, logger *slog.Logger, msg string, cause error) {
 	if cause != nil {
 		logger.Error(msg, "error", cause)
 	} else {
 		logger.Error(msg)
 	}
-	s.mu.Lock()
-	if _, active := s.active[connectionID]; active {
-		s.mu.Unlock()
+	if !claim.Activate(func() {}) {
+		logger.Info("Start refused after a stop arrived; leaving the status alone")
 		return
 	}
-	write := s.starts.StopStatusLocked(tenantID, connectionID)
-	s.mu.Unlock()
-	write.Write(func() {
+	claim.RunningStatus().Write(func() {
 		if err := s.updateConnectionStatus(connectionID, tenantID, "error"); err != nil {
 			logger.Error("could not mark the refused start as error", "error", err)
 		}
