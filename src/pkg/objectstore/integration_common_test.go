@@ -182,3 +182,95 @@ func assertStatVersionChanges(t *testing.T, ctx context.Context, store ObjectSto
 		t.Errorf("Stat version %q unchanged after the object was written again", a.Version)
 	}
 }
+
+// condSupport says which conditions a test store honours. Where one is
+// ignored the request still works, unconditionally; the consumer's Stat check
+// is the guard then. The real providers honour both.
+type condSupport struct {
+	// copy: MinIO and Azurite refuse a stale CopyIf.
+	copy bool
+	// delete: Azurite refuses a stale DeleteIf; MinIO's DeleteObject accepts
+	// If-Match and deletes anyway.
+	delete bool
+	// fake-gcs-server ignores ifGenerationMatch and ifSourceGenerationMatch
+	// alike (checked against its request log, #718): it honours neither.
+}
+
+// assertConditional checks DeleteIf and CopyIf (#718) against a live backend:
+// the version Stat returns works, an older one is refused with
+// ErrVersionChanged where the store honours the condition.
+func assertConditional(t *testing.T, ctx context.Context, store ObjectStore, honours condSupport) {
+	t.Helper()
+	c, ok := store.(Conditional)
+	if !ok {
+		t.Fatal("store does not implement Conditional")
+	}
+	const key, dst = "cond/a.txt", "cond/done/a.txt"
+	version := func() string {
+		t.Helper()
+		obj, err := store.Stat(ctx, key)
+		if err != nil {
+			t.Fatalf("Stat: %v", err)
+		}
+		if obj.Version == "" {
+			t.Fatal("Stat returned no version")
+		}
+		return obj.Version
+	}
+	if err := store.Put(ctx, key, []byte("one"), "text/plain"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	v1 := version()
+	if err := store.Put(ctx, key, []byte("two!"), "text/plain"); err != nil {
+		t.Fatalf("Put again: %v", err)
+	}
+	v2 := version()
+	if v1 == v2 {
+		t.Fatalf("version %q did not change when the object was written again", v1)
+	}
+
+	err := c.CopyIf(ctx, key, dst, v1)
+	switch {
+	case honours.copy && !errors.Is(err, ErrVersionChanged):
+		t.Fatalf("CopyIf at the old version = %v, want ErrVersionChanged", err)
+	case honours.copy:
+		if _, err := store.Stat(ctx, dst); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("refused copy left %s (Stat: %v)", dst, err)
+		}
+	default:
+		t.Logf("CopyIf at the old version on a store that ignores it: %v", err)
+	}
+	if err := c.CopyIf(ctx, key, dst, v2); err != nil {
+		t.Fatalf("CopyIf at the current version: %v", err)
+	}
+	if got, _, err := store.Get(ctx, dst); err != nil || string(got) != "two!" {
+		t.Fatalf("copied %q, %v; want the current object", got, err)
+	}
+
+	err = c.DeleteIf(ctx, key, v1)
+	switch {
+	case honours.delete && !errors.Is(err, ErrVersionChanged):
+		t.Fatalf("DeleteIf at the old version = %v, want ErrVersionChanged", err)
+	case honours.delete:
+		if version() != v2 {
+			t.Fatal("refused delete changed the object")
+		}
+	default:
+		_, statErr := store.Stat(ctx, key)
+		t.Logf("DeleteIf at the old version on a store that ignores it: %v; object gone: %v", err, errors.Is(statErr, ErrNotFound))
+		if errors.Is(statErr, ErrNotFound) {
+			if err := store.Put(ctx, key, []byte("two!"), "text/plain"); err != nil {
+				t.Fatalf("Put back: %v", err)
+			}
+		}
+	}
+	if err := c.DeleteIf(ctx, key, version()); err != nil {
+		t.Fatalf("DeleteIf at the current version: %v", err)
+	}
+	if _, err := store.Stat(ctx, key); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("object still there after DeleteIf (Stat: %v)", err)
+	}
+	if err := store.Delete(ctx, dst); err != nil {
+		t.Fatalf("Delete %s: %v", dst, err)
+	}
+}

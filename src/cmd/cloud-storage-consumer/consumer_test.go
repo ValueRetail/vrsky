@@ -28,8 +28,9 @@ type fakeStore struct {
 	// modified is each object's LastModified in the listing; zero when unset
 	// (#538).
 	modified map[string]time.Time
-	// gen counts writes per key through Put and PutStream, and is Stat's
-	// Version, like a provider's ETag or generation (#672).
+	// gen counts writes per key through Put and PutStream, and is the
+	// Version of Stat (#672) and List (#718), like a provider's ETag or
+	// generation.
 	gen map[string]int
 }
 
@@ -59,7 +60,8 @@ func (f *fakeStore) List(_ context.Context, prefix string) ([]objectstore.Object
 	out := make([]objectstore.Object, 0, len(f.objects))
 	for k, b := range f.objects {
 		if prefix == "" || strings.HasPrefix(k, prefix) {
-			out = append(out, objectstore.Object{Key: k, Size: int64(len(b)), LastModified: f.modified[k]})
+			out = append(out, objectstore.Object{Key: k, Size: int64(len(b)), LastModified: f.modified[k],
+				Version: strconv.Itoa(f.gen[k])})
 		}
 	}
 	return out, nil

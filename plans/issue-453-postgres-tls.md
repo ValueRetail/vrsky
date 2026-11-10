@@ -147,7 +147,7 @@ Decisions, each of which I made without asking:
 | --- | --- | --- |
 | A client without the CA on `verify-full` | that service cannot reach the database after its next restart | `urls verify-full` refuses until every client mounts it; the canary proves the path first; `restart` goes one deployment at a time, management-api first; a rolling update keeps the old pod until the new one is Ready |
 | Postgres does not start after step 2 | the control plane is down until fixed | the init-container logic was rehearsed on `postgres:18-alpine` with the same caps and args (below); step 2 starts with a dry run and a diff; `kubectl rollout undo statefulset/postgresql -n vrsky-database` plus `kubectl -n vrsky-database delete pod postgresql-0` goes back (a rolling update does not replace a pod that never became Ready; the disk re-attach can take longer than a minute) |
-| Certificate expires | `verify-full` clients fail everywhere | 1-year certificate, renewed at 90 days left, picked up at the next start; `check` flags a stale copy; no alert yet (backlog 156) |
+| Certificate expires | `verify-full` clients fail everywhere | 1-year certificate, renewed at 90 days left, picked up at the next start; `check` flags a stale copy; `PostgresCertExpiring` and `PostgresCertMetricsAbsent` since #729 |
 | The CA certificate renews and a ConfigMap is stale | not for ten years; clients keep verifying against the old certificate until it expires | `check` compares the copies; run `ca-sync` |
 | Restart of Postgres drops connections | a minute or more of errors | do it right after cluster start; services reconnect on their own, as at every start |
 | Drift in the live StatefulSet | `apply` also applies unrelated differences, or fails on immutable fields | step 2 shows `kubectl diff` first; a failed apply changes nothing |
@@ -292,13 +292,15 @@ kubectl -n vrsky-database delete job tls-check-1
 ```
 
 **Step 10, optional, after a few days of no plain connections:** refuse them.
-The commands are in `infrastructure/kubernetes/postgresql/README.md`
-("Optional last step"). Undo is the opposite `sed` and a reload.
+Done by hand on 2026-11-03; since #729 the rule is in the manifest
+(`infrastructure/kubernetes/postgresql/README.md`, "Plain connections are
+refused").
 
 **Step 11, record it.** Fill in the rollout record below, close #453, strike
 item 58 in `plans/backlog.md`.
 
-**Rollback at any point after step 6:**
+**Rollback at any point after step 6** (before step 10; after it, `urls
+disable` refuses and `urls require` is the client rollback, #729):
 ```bash
 CONFIRM=1 infrastructure/azure/postgres-tls.sh urls disable
 CONFIRM=1 infrastructure/azure/postgres-tls.sh restart

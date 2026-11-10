@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -138,11 +139,26 @@ func newAheadBC(t *testing.T, recs map[string]string) *aheadBC {
 		if _, v, ok := strings.Cut(f, " gt "); ok {
 			after, _ = time.Parse(time.RFC3339, v)
 		}
-		var out []string
+		// Key order, or cursor order when asked for it, as BC answers: a
+		// feed out of the order asked for turns the order off (#769).
+		ids := make([]string, 0, len(b.recs))
 		for id, ts := range b.recs {
 			if pt, _ := time.Parse(time.RFC3339, ts); pt.After(after) {
-				out = append(out, fmt.Sprintf(`{"id":%q,"lastModifiedDateTime":%q}`, id, ts))
+				ids = append(ids, id)
 			}
+		}
+		ordered := r.URL.Query().Get("$orderby") != ""
+		sort.Slice(ids, func(i, j int) bool {
+			ti, _ := time.Parse(time.RFC3339, b.recs[ids[i]])
+			tj, _ := time.Parse(time.RFC3339, b.recs[ids[j]])
+			if ordered && !ti.Equal(tj) {
+				return ti.Before(tj)
+			}
+			return ids[i] < ids[j]
+		})
+		out := make([]string, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, fmt.Sprintf(`{"id":%q,"lastModifiedDateTime":%q}`, id, b.recs[id]))
 		}
 		fmt.Fprintf(w, `{"value":[%s]}`, strings.Join(out, ","))
 	}))

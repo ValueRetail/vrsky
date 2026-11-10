@@ -68,13 +68,50 @@ const (
 )
 
 // Stamp is the version of a file or object a done name was published as: its
-// size and modification time from the listing. A done name whose listing shows
-// another stamp was replaced, and is published again. Stamps are only compared
-// for equality.
+// size and modification time from the listing, and the store's own version
+// when it has one. A done name whose listing shows another stamp was replaced,
+// and is published again. Compare stamps with a Match, not ==.
 type Stamp struct {
 	Size      int64 `json:"size"`
 	MTime     int64 `json:"mtime"`
 	MTimeNsec int64 `json:"mtime_nsec"`
+	// Version is the object's ETag (S3, Azure) or generation (GCS), empty
+	// for files and for stamps saved before #718. It tells apart two objects
+	// with the same size written in the same second. Old code reading a saved
+	// row ignores the field.
+	Version string `json:"version,omitempty"`
+}
+
+// Match is how two stamps of one name are compared.
+type Match int
+
+const (
+	// MatchTime: the same size and modification time, and the same version
+	// when both stamps have one. Files, S3 and Azure.
+	MatchTime Match = iota
+	// MatchVersion: the same size and version when both stamps have one,
+	// whatever the modification time; otherwise as MatchTime. For GCS, whose
+	// modification time also changes on a metadata-only edit while the
+	// generation stays (#718).
+	MatchVersion
+)
+
+// Same reports whether a and b are the same version of a name. A stamp
+// without a version (saved before #718) matches on size and modification
+// time alone, so a done set saved by an older release keeps its names.
+func (m Match) Same(a, b Stamp) bool {
+	if a.Size != b.Size {
+		return false
+	}
+	if a.Version != "" && b.Version != "" {
+		if a.Version != b.Version {
+			return false
+		}
+		if m == MatchVersion {
+			return true
+		}
+	}
+	return a.MTime == b.MTime && a.MTimeNsec == b.MTimeNsec
 }
 
 // StampOf returns the stamp of a listing entry.
@@ -136,6 +173,8 @@ type Set struct {
 	undecodable error
 	// retry holds the names whose after-action failed (#640); memory only.
 	retry map[string]retryState
+	// match compares stamps; MatchTime unless UseMatch says otherwise.
+	match Match
 }
 
 // New returns an empty Set for key and scope. With a nil store nothing is
@@ -151,6 +190,10 @@ func New(store checkpoint.Store, key Key, scope string) *Set {
 		now:    time.Now,
 	}
 }
+
+// UseMatch sets how stamps are compared (#718). Call it before the first
+// Done.
+func (s *Set) UseMatch(m Match) { s.match = m }
 
 // Loaded reports whether the saved set has been read. Until it has, the
 // consumer must not publish: it can't tell what is already done.
@@ -218,7 +261,18 @@ func (s *Set) Observe(listing map[string]Stamp) {
 // Done reports whether name was published with stamp st.
 func (s *Set) Done(name string, st Stamp) bool {
 	got, ok := s.done[name]
-	return ok && got == st
+	return ok && s.match.Same(got, st)
+}
+
+// Forget makes name not done, and drops its retries: what is under it now is
+// not what was published, so the next poll publishes it (#718).
+func (s *Set) Forget(name string) {
+	delete(s.retry, name)
+	if _, ok := s.done[name]; !ok {
+		return
+	}
+	delete(s.done, name)
+	s.touch(name)
 }
 
 // Mark records that name was published with stamp st.
@@ -269,11 +323,11 @@ func (s *Set) mergeSaved(ctx context.Context) error {
 	}
 	for name, theirs := range saved {
 		now, ok := s.present[name]
-		if !ok || now != theirs {
+		if !ok || !s.match.Same(now, theirs) {
 			// Gone, or replaced since the other poller published it.
 			continue
 		}
-		if mine, ok := s.done[name]; ok && mine == theirs {
+		if mine, ok := s.done[name]; ok && s.match.Same(mine, theirs) {
 			continue
 		}
 		s.done[name] = theirs

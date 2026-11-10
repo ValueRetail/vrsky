@@ -22,12 +22,14 @@ the `ENCRYPTION_KEY` environment variable. This checklist keeps that safe.
       (`infrastructure/azure/rotate-secrets.sh` builds those strings). TLS is
       enabled after the operator steps in the plan have run;
       `infrastructure/azure/postgres-tls.sh check` shows whether it is on.
-      Until then the connections are plain. Once on, Postgres still accepts
-      plain connections until the optional last step
-      in [the Postgres README](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/postgresql/README.md#tls-453)
-      turns them away. The rollout record is in
+      Production has run on it since 2026-11-02, and Postgres refuses plain
+      connections from other pods: by hand since 2026-11-03, and through the
+      `pg_hba.conf` in its manifest since #729 (see
+      [the Postgres README](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/postgresql/README.md#tls-453)).
+      The rollout record is in
       [plans/issue-453-postgres-tls.md](https://github.com/ValueRetail/vrsky/blob/main/plans/issue-453-postgres-tls.md).
-      Local Docker Compose and the k3d dev Secrets stay on plain connections.
+      Local Docker Compose stays on plain connections; the k3d dev Secrets
+      use `sslmode=require`, since k3d does not copy the CA.
       Connections that tenants configure to their own databases choose their
       `sslmode` themselves.
 - [ ] **Back up the key** alongside (but stored separately from) the database

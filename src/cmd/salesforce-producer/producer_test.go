@@ -74,10 +74,10 @@ func TestSalesforceProducer_RESTInsert(t *testing.T) {
 }
 
 // TestSalesforceProducer_BulkAPI: a batch ≥ threshold uses Bulk API 2.0
-// (create job → upload CSV → close), not per-record REST.
+// (create job → upload CSV → close → poll the job), not per-record REST.
 func TestSalesforceProducer_BulkAPI(t *testing.T) {
 	const connID = "sfp-bulk"
-	var create, upload, closed atomic.Bool
+	var create, upload, closed, polled atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs/ingest"):
@@ -91,6 +91,10 @@ func TestSalesforceProducer_BulkAPI(t *testing.T) {
 			closed.Store(true)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"id":"job-1","state":"UploadComplete"}`))
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/jobs/ingest/job-1"):
+			polled.Store(true)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"job-1","state":"JobComplete","numberRecordsProcessed":2,"numberRecordsFailed":0}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -105,8 +109,9 @@ func TestSalesforceProducer_BulkAPI(t *testing.T) {
 	mockConn(mock, connID, srv.URL, "insert")
 
 	p := &salesforceProducer{
-		bulkThreshold: 2, // force bulk for a tiny batch
-		resolveToken:  func(context.Context, string, string, bool) (string, error) { return "tok", nil },
+		bulkThreshold:   2, // force bulk for a tiny batch
+		bulkPollInitial: time.Millisecond,
+		resolveToken:    func(context.Context, string, string, bool) (string, error) { return "tok", nil },
 	}
 	h := harness.NewProducerHarness(t, p, harness.Options{Name: "salesforce-producer", DB: db})
 
@@ -117,7 +122,7 @@ func TestSalesforceProducer_BulkAPI(t *testing.T) {
 	env.Payload = []byte(`[{"Name":"Acme"},{"Name":"Globex"}]`)
 	h.Publish(t, env)
 
-	harness.Eventually(t, 5*time.Second, "bulk job created → uploaded → closed", func() bool {
-		return create.Load() && upload.Load() && closed.Load()
+	harness.Eventually(t, 5*time.Second, "bulk job created → uploaded → closed → polled", func() bool {
+		return create.Load() && upload.Load() && closed.Load() && polled.Load()
 	})
 }

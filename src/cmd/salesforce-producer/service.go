@@ -54,6 +54,17 @@ type salesforceProducer struct {
 	// written remembers records that went in during a delivery that then
 	// failed, so the redelivery does not send them again (#735).
 	written *writtenSet
+	// jobs remembers the Bulk API job submitted for a message and target
+	// until it is resolved, so a retry finds it instead of submitting a
+	// second one (#760).
+	jobs *jobSet
+
+	// Bulk API job polling and result reading (bulk.go); zero means the
+	// default.
+	bulkPollTimeout time.Duration
+	bulkPollInitial time.Duration
+	bulkPollMax     time.Duration
+	bulkResultsMax  int64
 }
 
 // SalesforceProducerConfig is the per-node configuration (config.salesforce).
@@ -107,6 +118,21 @@ func (p *salesforceProducer) Configure(ctx context.Context, res *sdk.Resources) 
 	if p.written == nil {
 		p.written = newWrittenSet(writtenTTL, writtenMax)
 	}
+	if p.jobs == nil {
+		p.jobs = newJobSet(writtenTTL, bulkJobsMax)
+	}
+	if p.bulkPollTimeout == 0 {
+		p.bulkPollTimeout = defaultBulkPollTimeout
+	}
+	if p.bulkPollInitial == 0 {
+		p.bulkPollInitial = defaultBulkPollInitial
+	}
+	if p.bulkPollMax == 0 {
+		p.bulkPollMax = defaultBulkPollMax
+	}
+	if p.bulkResultsMax == 0 {
+		p.bulkResultsMax = defaultBulkResultsMax
+	}
 	p.tokens = oauthtoken.New(os.Getenv("MGMT_API_URL"), os.Getenv("OAUTH_TOKEN_SERVICE_SECRET"))
 	if p.resolveToken == nil {
 		p.resolveToken = func(ctx context.Context, tenantID, grantID string, force bool) (string, error) {
@@ -129,8 +155,9 @@ func (p *salesforceProducer) Configure(ctx context.Context, res *sdk.Resources) 
 // rejects (a 4xx, named by its index with Salesforce's error code), a
 // transient failure (network, token, 401/403 after the token refresh, 408,
 // 429, 5xx), and the same answers while creating, filling or closing a Bulk
-// API job (#735). Records that went in are remembered, so the redelivery
-// sends only the rest. A non-JSON payload → sdk.Permanent. A missing
+// API job (#735); a record a Bulk job refuses or leaves unprocessed, and a job
+// that is not done within the poll bound (#760). Records that went in are
+// remembered, so the redelivery sends only the rest. A non-JSON payload → sdk.Permanent. A missing
 // producer config for the connection is not an error.
 func (p *salesforceProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connID := env.IntegrationID
@@ -233,7 +260,7 @@ func (p *salesforceProducer) writeRecords(ctx context.Context, env *envelope.Env
 	}
 
 	if len(records) >= p.bulkThreshold {
-		return p.bulkWrite(ctx, env.TenantID, &cfg, op, records, key(bulkRecord), res)
+		return p.bulkWrite(ctx, env.TenantID, &cfg, op, records, key, res)
 	}
 	return p.restWrite(ctx, env.TenantID, &cfg, op, records, key, res)
 }
@@ -425,66 +452,21 @@ func bulkStep(step string, status int, body []byte) error {
 	}
 }
 
-// bulkWrite ingests records via Bulk API 2.0: create job → upload CSV → close.
-// A job submitted for this message is remembered as one entry, so a
-// redelivery caused by another target does not submit it again.
-func (p *salesforceProducer) bulkWrite(ctx context.Context, tenantID string, cfg *SalesforceProducerConfig, op string, records []map[string]any, k writtenKey, res *writeResult) error {
-	if p.written.has(k, time.Now()) {
-		p.logger.Info("Salesforce Bulk API job already submitted for this message; skipping", "object", cfg.Object, "op", op)
-		res.done = append(res.done, k)
-		return nil
+// doRequest performs an authenticated request, refreshing the token once on
+// 401. The answer is read up to maxResponseBody; a body that cannot be read
+// whole is returned as far as it was read (a 2xx is still a 2xx).
+func (p *salesforceProducer) doRequest(ctx context.Context, tenantID, grantID, method, fullURL, contentType string, body []byte) (int, []byte, error) {
+	status, respBody, _, err := p.request(ctx, tenantID, grantID, method, fullURL, contentType, "application/json", body, maxResponseBody)
+	if err != nil && status != 0 {
+		return status, respBody, nil
 	}
-	base := strings.TrimRight(cfg.InstanceURL, "/")
-
-	jobReq := map[string]string{"object": cfg.Object, "operation": op, "contentType": "CSV", "lineEnding": "LF"}
-	if op == "upsert" {
-		jobReq["externalIdFieldName"] = cfg.ExternalIDField
-	}
-	jobBody, _ := json.Marshal(jobReq)
-	status, respBody, err := p.doRequest(ctx, tenantID, cfg.OAuthGrantID, http.MethodPost,
-		fmt.Sprintf("%s/services/data/%s/jobs/ingest", base, cfg.APIVersion), "application/json", jobBody)
-	if err != nil {
-		return fmt.Errorf("bulk create job: %w", err)
-	}
-	if err := bulkStep("create job", status, respBody); err != nil {
-		return err
-	}
-	var job struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(respBody, &job); err != nil || job.ID == "" {
-		return fmt.Errorf("bulk job response missing id: %s", truncate(respBody))
-	}
-
-	csvData, err := recordsToCSV(records)
-	if err != nil {
-		return fmt.Errorf("build CSV: %w", err)
-	}
-	status, respBody, err = p.doRequest(ctx, tenantID, cfg.OAuthGrantID, http.MethodPut,
-		fmt.Sprintf("%s/services/data/%s/jobs/ingest/%s/batches", base, cfg.APIVersion, job.ID), "text/csv", csvData)
-	if err != nil {
-		return fmt.Errorf("bulk upload data: %w", err)
-	}
-	if err := bulkStep("upload data", status, respBody); err != nil {
-		return err
-	}
-
-	closeBody := []byte(`{"state":"UploadComplete"}`)
-	status, respBody, err = p.doRequest(ctx, tenantID, cfg.OAuthGrantID, http.MethodPatch,
-		fmt.Sprintf("%s/services/data/%s/jobs/ingest/%s", base, cfg.APIVersion, job.ID), "application/json", closeBody)
-	if err != nil {
-		return fmt.Errorf("bulk close job: %w", err)
-	}
-	if err := bulkStep("close job", status, respBody); err != nil {
-		return err
-	}
-	res.wrote(k)
-	p.logger.Info("Salesforce Bulk API job submitted", "object", cfg.Object, "op", op, "job_id", job.ID, "records", len(records))
-	return nil
+	return status, respBody, err
 }
 
-// doRequest performs an authenticated request, refreshing the token once on 401.
-func (p *salesforceProducer) doRequest(ctx context.Context, tenantID, grantID, method, fullURL, contentType string, body []byte) (int, []byte, error) {
+// request is doRequest with the Accept header and the size cap chosen by the
+// caller. truncated reports a body longer than limit; a body that could not
+// be read whole comes back with the status and the read error.
+func (p *salesforceProducer) request(ctx context.Context, tenantID, grantID, method, fullURL, contentType, accept string, body []byte, limit int64) (status int, respBody []byte, truncated bool, err error) {
 	send := func(force bool) (*http.Response, error) {
 		tok, err := p.resolveToken(ctx, tenantID, grantID, force)
 		if err != nil {
@@ -496,24 +478,30 @@ func (p *salesforceProducer) doRequest(ctx context.Context, tenantID, grantID, m
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
 		req.Header.Set("Content-Type", contentType)
-		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Accept", accept)
 		return p.httpClient.Do(req)
 	}
 	resp, err := send(false)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, false, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		_ = resp.Body.Close()
 		p.logger.Info("Salesforce returned 401; refreshing token and retrying once", "grant_id", grantID)
 		resp, err = send(true)
 		if err != nil {
-			return 0, nil, fmt.Errorf("request after token refresh: %w", err)
+			return 0, nil, false, fmt.Errorf("request after token refresh: %w", err)
 		}
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return resp.StatusCode, respBody, nil
+	respBody, err = io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if int64(len(respBody)) > limit {
+		respBody, truncated = respBody[:limit], true
+	}
+	if err != nil {
+		return resp.StatusCode, respBody, truncated, fmt.Errorf("read answer: %w", err)
+	}
+	return resp.StatusCode, respBody, truncated, nil
 }
 
 // --- helpers ---
@@ -543,6 +531,21 @@ func parseRecords(payload []byte) ([]map[string]any, error) {
 
 // recordsToCSV renders records to CSV with a header = the sorted union of keys.
 func recordsToCSV(records []map[string]any) ([]byte, error) {
+	header, rows := csvTable(records)
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write(header); err != nil {
+		return nil, err
+	}
+	if err := w.WriteAll(rows); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), w.Error()
+}
+
+// csvTable is the header (the sorted union of keys) and the rows
+// recordsToCSV writes.
+func csvTable(records []map[string]any) ([]string, [][]string) {
 	keySet := map[string]struct{}{}
 	for _, r := range records {
 		for k := range r {
@@ -555,22 +558,15 @@ func recordsToCSV(records []map[string]any) ([]byte, error) {
 	}
 	sort.Strings(keys)
 
-	var buf bytes.Buffer
-	w := csv.NewWriter(&buf)
-	if err := w.Write(keys); err != nil {
-		return nil, err
-	}
-	for _, r := range records {
+	rows := make([][]string, len(records))
+	for j, r := range records {
 		row := make([]string, len(keys))
 		for i, k := range keys {
 			row[i] = csvValue(r[k])
 		}
-		if err := w.Write(row); err != nil {
-			return nil, err
-		}
+		rows[j] = row
 	}
-	w.Flush()
-	return buf.Bytes(), w.Error()
+	return keys, rows
 }
 
 func csvValue(v any) string {

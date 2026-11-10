@@ -21,6 +21,22 @@ import (
 // ever. The fake never stops; the context timeout is the net that turns a
 // missing cap into a failure instead of a hung test.
 
+// answerOrderProbe answers the order probe (#769), a request with $top, for a
+// fake that honours $orderby on lastModifiedDateTime and holds records from lo
+// to hi. It reports whether r was one, so the fake does not count it as a page.
+func answerOrderProbe(w http.ResponseWriter, r *http.Request, lo, hi string) bool {
+	q := r.URL.Query()
+	if !q.Has("$top") {
+		return false
+	}
+	v, key := lo, "probe-lo"
+	if strings.HasSuffix(q.Get("$orderby"), " desc") {
+		v, key = hi, "probe-hi"
+	}
+	fmt.Fprintf(w, `{"value":[{"number":%q,"lastModifiedDateTime":%q}]}`, key, v)
+	return true
+}
+
 func lowerPageCap(t *testing.T, n int) {
 	t.Helper()
 	old := pageCap
@@ -52,6 +68,9 @@ func TestFetchAndPublish_PageCap(t *testing.T) {
 			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/token" {
 					fmt.Fprint(w, `{"access_token":"tok","expires_in":3600}`)
+					return
+				}
+				if answerOrderProbe(w, r, "2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z") {
 					return
 				}
 				n := served.Add(1)
@@ -122,6 +141,9 @@ func TestFetchAndPublish_PageCap_LastPageAtTheCapIsFine(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			fmt.Fprint(w, `{"access_token":"tok","expires_in":3600}`)
+			return
+		}
+		if answerOrderProbe(w, r, "2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z") {
 			return
 		}
 		if n := served.Add(1); n < 3 {

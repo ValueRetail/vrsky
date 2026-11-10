@@ -3,6 +3,7 @@ package managementapi
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -108,11 +109,21 @@ func (r *PostgresRepository) UpdateUserLastLogin(ctx context.Context, userID str
 	return nil
 }
 
+// execer is what the user writes below need: *sql.DB, or *sql.Tx when they
+// run in the same transaction that spends a one-time token.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // UpdateUserPassword updates a user's password hash
 func (r *PostgresRepository) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	return updateUserPassword(ctx, r.db, userID, passwordHash)
+}
+
+func updateUserPassword(ctx context.Context, db execer, userID, passwordHash string) error {
 	query := `UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`
 	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
-	_, err := r.db.ExecContext(ctx, query, passwordHash, time.Now().UTC(), userID)
+	_, err := db.ExecContext(ctx, query, passwordHash, time.Now().UTC(), userID)
 	if err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
 	}
@@ -121,6 +132,10 @@ func (r *PostgresRepository) UpdateUserPassword(ctx context.Context, userID, pas
 
 // VerifyUserEmail marks a user's email as verified and activates the account
 func (r *PostgresRepository) VerifyUserEmail(ctx context.Context, userID string) error {
+	return verifyUserEmail(ctx, r.db, userID)
+}
+
+func verifyUserEmail(ctx context.Context, db execer, userID string) error {
 	now := time.Now().UTC()
 	query := `
 		UPDATE users 
@@ -128,7 +143,7 @@ func (r *PostgresRepository) VerifyUserEmail(ctx context.Context, userID string)
 		WHERE id = $4
 	`
 	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
-	_, err := r.db.ExecContext(ctx, query, now, UserStatusActive, now, userID)
+	_, err := db.ExecContext(ctx, query, now, UserStatusActive, now, userID)
 	if err != nil {
 		return fmt.Errorf("failed to verify email: %w", err)
 	}
@@ -279,8 +294,12 @@ func (r *PostgresRepository) InvalidateSession(ctx context.Context, tokenHash st
 
 // InvalidateAllUserSessions invalidates all sessions for a user
 func (r *PostgresRepository) InvalidateAllUserSessions(ctx context.Context, userID string) error {
+	return invalidateAllUserSessions(ctx, r.db, userID)
+}
+
+func invalidateAllUserSessions(ctx context.Context, db execer, userID string) error {
 	query := `UPDATE sessions SET is_active = false WHERE user_id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID)
+	_, err := db.ExecContext(ctx, query, userID)
 	if err != nil {
 		return fmt.Errorf("failed to invalidate user sessions: %w", err)
 	}
@@ -329,39 +348,51 @@ func (r *PostgresRepository) GetEmailVerificationToken(ctx context.Context, toke
 	return token, nil
 }
 
-// UseEmailVerificationToken marks a token as used and verifies the user's email
+// UseEmailVerificationToken marks a token as used and verifies the user's
+// email, in one transaction. The token row is locked first, so of several
+// requests with the same link exactly one gets past the used check; the others
+// wait for it and then get ErrTokenUsed (#767).
 func (r *PostgresRepository) UseEmailVerificationToken(ctx context.Context, tokenHash string) error {
-	// Get the token first
-	token, err := r.GetEmailVerificationToken(ctx, tokenHash)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to begin email verification: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
 
-	// Check if already used
-	if token.UsedAt != nil {
+	var id, userID string
+	var expiresAt time.Time
+	var usedAt *time.Time
+	// lint:tenant-ok — lookup by unique token hash; users are not tenant-scoped.
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, user_id, expires_at, used_at
+		FROM email_verification_tokens
+		WHERE token_hash = $1
+		FOR UPDATE
+	`, tokenHash).Scan(&id, &userID, &expiresAt, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return auth.ErrInvalidToken
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get email verification token: %w", err)
+	}
+	if usedAt != nil {
 		return auth.ErrTokenUsed
 	}
-
-	// Check if expired
-	if time.Now().UTC().After(token.ExpiresAt) {
+	if time.Now().UTC().After(expiresAt) {
 		return auth.ErrTokenExpired
 	}
 
-	// Mark token as used
-	now := time.Now().UTC()
-	query := `UPDATE email_verification_tokens SET used_at = $1 WHERE id = $2`
 	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
-	_, err = r.db.ExecContext(ctx, query, now, token.ID)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE email_verification_tokens SET used_at = $1 WHERE id = $2`,
+		time.Now().UTC(), id); err != nil {
 		return fmt.Errorf("failed to mark token as used: %w", err)
 	}
-
-	// Verify the user's email
-	err = r.VerifyUserEmail(ctx, token.UserID)
-	if err != nil {
+	if err := verifyUserEmail(ctx, tx, userID); err != nil {
 		return err
 	}
-
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit email verification: %w", err)
+	}
 	return nil
 }
 
@@ -407,45 +438,57 @@ func (r *PostgresRepository) GetPasswordResetToken(ctx context.Context, tokenHas
 	return token, nil
 }
 
-// UsePasswordResetToken validates and marks a password reset token as used
+// UsePasswordResetToken spends a password reset token, sets the new password
+// and ends the user's sessions, in one transaction: a failed write leaves the
+// token unused, and a spent token never sets a password. The token row is
+// locked first, so of several requests with the same link exactly one gets
+// past the used check; the others wait for it and then get ErrTokenUsed
+// (#767).
 func (r *PostgresRepository) UsePasswordResetToken(ctx context.Context, tokenHash, newPasswordHash string) error {
-	// Get the token first
-	token, err := r.GetPasswordResetToken(ctx, tokenHash)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to begin password reset: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
 
-	// Check if already used
-	if token.UsedAt != nil {
+	var id, userID string
+	var expiresAt time.Time
+	var usedAt *time.Time
+	// lint:tenant-ok — lookup by unique token hash; users are not tenant-scoped.
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, user_id, expires_at, used_at
+		FROM password_reset_tokens
+		WHERE token_hash = $1
+		FOR UPDATE
+	`, tokenHash).Scan(&id, &userID, &expiresAt, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return auth.ErrInvalidToken
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get password reset token: %w", err)
+	}
+	if usedAt != nil {
 		return auth.ErrTokenUsed
 	}
-
-	// Check if expired
-	if time.Now().UTC().After(token.ExpiresAt) {
+	if time.Now().UTC().After(expiresAt) {
 		return auth.ErrTokenExpired
 	}
 
-	// Mark token as used
-	now := time.Now().UTC()
-	query := `UPDATE password_reset_tokens SET used_at = $1 WHERE id = $2`
 	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
-	_, err = r.db.ExecContext(ctx, query, now, token.ID)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE password_reset_tokens SET used_at = $1 WHERE id = $2`,
+		time.Now().UTC(), id); err != nil {
 		return fmt.Errorf("failed to mark token as used: %w", err)
 	}
-
-	// Update the user's password
-	err = r.UpdateUserPassword(ctx, token.UserID, newPasswordHash)
-	if err != nil {
+	if err := updateUserPassword(ctx, tx, userID, newPasswordHash); err != nil {
 		return err
 	}
-
 	// Invalidate all sessions for security
-	err = r.InvalidateAllUserSessions(ctx, token.UserID)
-	if err != nil {
+	if err := invalidateAllUserSessions(ctx, tx, userID); err != nil {
 		return err
 	}
-
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit password reset: %w", err)
+	}
 	return nil
 }
 
