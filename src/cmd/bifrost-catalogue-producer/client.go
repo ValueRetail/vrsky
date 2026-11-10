@@ -145,19 +145,18 @@ func (c *bifrostClient) commit(ctx context.Context, id string) (*commitReport, e
 	}
 	// The commit is done once Bifrost answers 200, so a report that cannot
 	// be read is not worth a re-run of an import that landed. But a 200 that
-	// is not Bifrost's (a proxy's HTML page) is no proof of a commit: only a
-	// JSON object, or a report cut off by the read limit, counts.
+	// is not Bifrost's (a proxy's HTML page) proves nothing, so only a body starting with "{" counts.
 	var rep commitReport
 	if err := json.Unmarshal(resp, &rep); err != nil {
-		switch {
-		case len(resp) > maxResponseBytes:
-			c.logger.Warn("bifrost commit report is longer than the read limit; the rejected count is unknown", "import_id", id)
-			return &commitReport{ImportID: id}, nil
-		case bytes.HasPrefix(bytes.TrimSpace(resp), []byte("{")):
-			c.logger.Warn("bifrost commit answered 200 with a report that cannot be read", "import_id", id, "error", err)
-			return &commitReport{ImportID: id}, nil
+		if !bytes.HasPrefix(bytes.TrimSpace(resp), []byte("{")) {
+			return nil, sdk.Retriable(errors.New("bifrost commit: 200 answer is not a JSON report; check base_url and any proxy in front of Bifrost"))
 		}
-		return nil, sdk.Retriable(errors.New("bifrost commit: 200 answer is not a JSON report; check base_url and any proxy in front of Bifrost"))
+		if len(resp) > maxResponseBytes {
+			c.logger.Warn("bifrost commit report is longer than the read limit; the rejected count is unknown", "import_id", id)
+		} else {
+			c.logger.Warn("bifrost commit answered 200 with a report that cannot be read", "import_id", id, "error", err)
+		}
+		return &commitReport{ImportID: id}, nil
 	}
 	return &rep, nil
 }
@@ -255,10 +254,11 @@ func (c *bifrostClient) classify(op string, status int, body []byte, hdr http.He
 	case status == http.StatusNotFound:
 		return sdk.Retriable(fmt.Errorf("bifrost %s 404: %s", op, reason))
 	case status == http.StatusRequestEntityTooLarge || (status == http.StatusBadRequest && op == "items"):
-		// Always valid JSON from here, so only something in between refuses
-		// it: a proxy with a body limit (ingress-nginx defaults to 1 MiB).
+		// We always send well-formed JSON, so this is a proxy with a body limit
+		// (ingress-nginx defaults to 1 MiB) or an item with invalid UTF-8,
+		// which serde_json refuses with a 400.
 		// Node config, so retried and kept in the DLQ (#734).
-		return sdk.Retriable(fmt.Errorf("bifrost %s %d: %s; a proxy in front of Bifrost may be refusing the request size, lower batch_size, then retry the message from the DLQ", op, status, reason))
+		return sdk.Retriable(fmt.Errorf("bifrost %s %d: %s; either a proxy in front of Bifrost refused the request size (lower batch_size) or an item is not valid UTF-8/JSON (fix the source); then retry the message from the DLQ", op, status, reason))
 	case status >= 400 && status < 500:
 		return sdk.Permanent(fmt.Errorf("bifrost %s %d: %s", op, status, reason))
 	default:

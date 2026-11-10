@@ -690,7 +690,7 @@ func TestCommitReportReadability(t *testing.T) {
 		{"valid", `{"applied":3,"catalogue_size":3,"rejected":0,"errors":[]}`, false},
 		{"object with wrong types", `{"applied":"three"}`, false},
 		{"truncated by the read limit", `{"applied":3,"errors":[` + strings.Repeat(`{"row":1,"article_no":"x","error":"y"},`, 40000), false},
-		{"cut by the read limit, not starting with a brace", strings.Repeat("x", 1<<20+5), false},
+		{"large html over the read limit", strings.Repeat("x", 1<<20+5), true},
 		{"html", `<html>ok</html>`, true},
 		{"empty", ``, true},
 		{"array", `[1]`, true},

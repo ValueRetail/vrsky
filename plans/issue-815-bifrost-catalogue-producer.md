@@ -116,8 +116,8 @@ Sources: `docs/catalogue-doors.md`, `crates/catalogue-api/src/routes.rs`,
   any request.
 - 401/403 are retriable (DLQ-kept), not Permanent, as #838 did for the other
   destinations. 404 is retriable.
-- A commit answered 200 is success if its body is a JSON object or hit the
-  1 MiB read limit; any other body (a proxy page) is retriable. Items answers
+- A commit answered 200 is success if its body starts with `{` (cut by the
+  1 MiB read limit or not); any other body (a proxy page) is retriable. Items answers
   must carry a `total_so_far` equal to the cumulative count sent, else the
   import is abandoned and retried.
 - 413 and 400 at items are retriable with a "lower batch_size" hint (only a
