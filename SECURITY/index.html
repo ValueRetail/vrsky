@@ -1191,6 +1191,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator/webhook-mtls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound webhook mTLS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../SLA/" class="md-nav__link">
         
   
@@ -2326,6 +2354,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#verify-hosted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify (hosted)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#verify-compose" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3055,6 +3094,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#verify-hosted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify (hosted)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#verify-compose" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3680,6 +3730,10 @@ unaffected.</p>
 <p>Traefik exposes Prometheus metrics (scrape job <code>traefik</code> →
 <code>traefik_service_requests_total</code>, <code>traefik_service_request_duration_seconds</code>,
 rate-limit drops), visible in Grafana alongside the app metrics (#84).</p>
+<h3 id="verify-hosted">Verify (hosted)<a class="headerlink" href="#verify-hosted" title="Permanent link">&para;</a></h3>
+<p>See <a href="../operator/webhook-mtls/"><code>docs/operator/webhook-mtls.md</code></a>: the rollout,
+curl checks with and without a certificate, a forged <code>ssl-client-cert</code>, and
+the rollback.</p>
 <h3 id="verify-compose">Verify (compose)<a class="headerlink" href="#verify-compose" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>traefik<span class="w"> </span>management-api<span class="w"> </span>postgres-management<span class="w"> </span>nats<span class="w"> </span>prometheus
 <span class="c1"># Free tier is intentionally low for the demo (avg 5 / burst 10). Burst past it:</span>
@@ -3738,20 +3792,50 @@ self-signed cert (dev only) — mTLS security here comes from verifying the
 <strong>client</strong> cert, not from the client trusting the server cert.</p>
 <h3 id="behaviour">Behaviour<a class="headerlink" href="#behaviour" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Consumer:</strong> when <code>WORKER_MTLS_PORT</code> is set (9101 in compose) the worker runs
+<li><strong>Consumer, hosted (edge, #454):</strong> the client certificate is checked at
+  ingress-nginx and again in the worker. The Ingress <code>vrsky-webhooks-mtls</code>
+  (<code>infrastructure/kubernetes/ingress/webhooks-mtls-ingress.yaml</code>) serves its
+  own host, because <code>auth-tls-*</code> applies per host and the UI host must not ask
+  browsers for certificates. It sets <code>auth-tls-verify-client: "on"</code> against the
+  CA bundle in the Secret <code>webhook-client-ca</code> (every tenant's webhook client
+  CA) and <code>auth-tls-pass-certificate-to-upstream</code>, so nginx writes the
+  verified leaf into <code>ssl-client-cert</code> and <code>SUCCESS</code> into <code>ssl-client-verify</code>,
+  replacing any copy the caller sent. It proxies to the worker's edge port
+  (<code>WORKER_MTLS_EDGE_PORT</code>, 9102) over TLS, presenting its own client
+  certificate (<code>proxy-ssl-secret</code>, from a private CA cert-manager runs:
+  <code>webhook-edge-tls.yaml</code>). That listener requires and verifies that
+  certificate (<code>RequireAndVerifyClientCert</code>, client-auth EKU), so nothing else
+  in the cluster can set the header; an optional NetworkPolicy also limits the
+  port to ingress-nginx. The handler then requires exactly one
+  <code>ssl-client-verify: SUCCESS</code> and exactly one <code>ssl-client-cert</code>, URL-decodes
+  it, accepts exactly one PEM <code>CERTIFICATE</code> and nothing else, parses it and
+  verifies it against the <strong>connection's own</strong> CA. <code>SUCCESS</code> alone is never
+  enough: the bundle holds every tenant's CA. Only the subject and SHA-256
+  fingerprint are logged. No other port reads the header, and no other
+  Ingress may route to 9102: on a host without <code>auth-tls</code> nginx passes a
+  caller's <code>ssl-client-cert</code> through. Guard tests in
+  <code>src/pkg/managementapi/webhook_mtls_edge_guard_test.go</code> pin the annotations,
+  the routes, the certificate usages and the deployment wiring.</li>
+<li><strong>Consumer, direct (compose):</strong> when <code>WORKER_MTLS_PORT</code> is set (9101 in compose) the worker runs
   a dedicated TLS listener that demands <em>a</em> client cert at the handshake
   (<code>RequireAnyClientCert</code>) — a caller that presents none is refused at the TLS
   layer (no HTTP response). For a connection with <code>tls.client_ca</code>, the handler
   then verifies the presented cert chains to that per-connection CA (client-auth
   EKU only) and rejects with <strong>401</strong> if it does not. The same check also runs on
   the plain aux port (9100), where <code>r.TLS == nil</code> counts as "no cert" → <strong>401</strong> —
-  so an mTLS connection cannot be reached unauthenticated over plain HTTP.</li>
+  so an mTLS connection cannot be reached unauthenticated over plain HTTP. This
+  port reads the certificate from the TLS connection only, never from a
+  header. Production does not set <code>WORKER_MTLS_PORT</code> (a guard test checks).</li>
 <li><strong>Producer:</strong> when a node has a <code>tls</code> block with a resolved <code>cert</code>/<code>key</code>, the
   worker builds a dedicated <code>http.Client</code> that presents that client cert (and
   trusts <code>client_ca</code> as the server root if supplied), reused for every send.</li>
 <li>A connection with no <code>tls</code> block behaves exactly as before.</li>
 <li>Rejections increment <code>webhook_client_cert_failures_total{connection_id,reason}</code>
-  (<code>reason</code> = <code>missing_cert</code> | <code>untrusted_cert</code>).</li>
+  (<code>reason</code> = <code>missing_cert</code> | <code>untrusted_cert</code> | <code>malformed_cert</code> |
+  <code>untrusted_edge</code>; the last two only on the edge port).</li>
+<li>A tenant's certificate opens only connections whose CA it chains to. Two
+  tenants who configure the same CA can reach each other's mTLS webhooks
+  (#797 adds a per-connection pin).</li>
 </ul>
 <h3 id="verify-compose_1">Verify (compose)<a class="headerlink" href="#verify-compose_1" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1. Throwaway CA + server + client certs.</span>

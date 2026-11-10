@@ -1,0 +1,2719 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Operator, integrator, and API documentation for the VRSky integration platform.">
+      
+      
+      
+        <link rel="canonical" href="https://valueretail.github.io/vrsky/operator/webhook-mtls/">
+      
+      
+        <link rel="prev" href="../encryption-at-rest/">
+      
+      
+        <link rel="next" href="../../SLA/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Inbound webhook mTLS - VRSky Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#inbound-webhook-mtls" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VRSky Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Inbound webhook mTLS
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VRSky Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sdk/tutorial/first-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/workspaces-and-members/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces, members & your account
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/building-a-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/connectors-and-nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors & node types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/credentials-and-oauth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Credentials, secrets & OAuth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/deploying-and-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying & monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/data-sharing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing data between workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings: usage, notifications, audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operator guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deploy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../acr-rotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rotating the ACR password
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../remote-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../remote-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reaching a stack remotely
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cost-parking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost-parking the cluster
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alert-responder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alert responder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../billing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plans & billing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mail/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../encryption-at-rest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption-at-rest checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound webhook mTLS
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound webhook mTLS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#rollout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollback
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#renewal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renewal
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SLA/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status page & uptime SLA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEPLOYMENT_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment guide (detailed)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Disaster recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP & webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API polling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/sftp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/cloud-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/kafka/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apache Kafka
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/rabbitmq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RabbitMQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/salesforce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Salesforce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/sitoo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sitoo (POS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/front-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Front Systems (POS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/business-central/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamics 365 Business Central
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/visma/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visma.net
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/sap-s4hana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP S/4HANA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/brightpearl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Brightpearl (OMS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/remote-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/tenant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant-to-tenant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/filters-converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters & converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/whitepaper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Whitepaper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONNECTION_NODE_SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection node spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TENANT_MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../NATS_ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NATS architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../OBSERVABILITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TRACING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tracing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../LOAD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load & benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../oauth-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OAuth framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#rollout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollback
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#renewal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renewal
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="inbound-webhook-mtls">Inbound webhook mTLS<a class="headerlink" href="#inbound-webhook-mtls" title="Permanent link">&para;</a></h1>
+<p>A webhook connection with <code>tls.client_ca_secret_id</code> only accepts callers that
+present a client certificate signed by that CA
+(<a href="../../connectors/http/#mutual-tls-client-certificates">HTTP &amp; webhooks</a>). On
+AKS the certificate is checked by ingress-nginx on its own host,
+<code>mtls.vrsky.valueretail.no</code>, and again by the webhook consumer against the
+connection's own CA (#454).</p>
+<div class="highlight"><pre><span></span><code>caller --TLS + client cert--&gt; ingress-nginx, host mtls.vrsky.valueretail.no
+         checks it against the Secret webhook-client-ca (every tenant's CA)
+         writes it into ssl-client-cert, replacing any copy the caller sent
+       --TLS, nginx presents webhook-edge-client--&gt; webhook consumer :9102
+         accepts only that certificate (private edge CA)
+         checks ssl-client-cert against THIS connection's CA
+</code></pre></div>
+<p>The files, all in <code>infrastructure/kubernetes/ingress/</code> and all applied by
+hand (the deploy job only rolls the connector manifest):</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>webhook-edge-tls.yaml</code></td>
+<td>cert-manager: a private CA, the worker's server certificate (<code>webhook-edge-server</code>), nginx's client certificate (<code>webhook-edge-client</code>)</td>
+</tr>
+<tr>
+<td><code>webhook-client-ca.example.yaml</code></td>
+<td>the shape of the CA bundle Secret; create the real one with <code>kubectl</code></td>
+</tr>
+<tr>
+<td><code>webhooks-mtls-ingress.yaml</code></td>
+<td>the Ingress with the <code>auth-tls-*</code> and <code>proxy-ssl-*</code> annotations</td>
+</tr>
+<tr>
+<td><code>webhook-consumer-networkpolicy.yaml</code></td>
+<td>optional: only ingress-nginx may reach 9102</td>
+</tr>
+</tbody>
+</table>
+<p>The webhook consumer side (env, port 9102, the optional Secret mount) is in
+the connector manifest and deploys on merge. Until the edge Secret exists the
+consumer logs <code>Edge mTLS listener not started</code> once at start, and everything
+else works as before.</p>
+<h2 id="rollout">Rollout<a class="headerlink" href="#rollout" title="Permanent link">&para;</a></h2>
+<p>Run from a shell that may reach the cluster. Read-only checks first.</p>
+<p><strong>0. Check what is there.</strong></p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-A<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>ingress-nginx<span class="w"> </span>--show-labels
+kubectl<span class="w"> </span>-n<span class="w"> </span>ingress-nginx<span class="w"> </span>get<span class="w"> </span>deploy<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{..image}{"\n"}'</span>
+kubectl<span class="w"> </span>get<span class="w"> </span>clusterissuer<span class="w"> </span>letsencrypt-prod
+az<span class="w"> </span>aks<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod<span class="w"> </span>--query<span class="w"> </span>networkProfile.networkPolicy<span class="w"> </span>-o<span class="w"> </span>tsv
+</code></pre></div>
+<p>The NetworkPolicy file assumes namespace <code>ingress-nginx</code> and the label
+<code>app.kubernetes.io/name=ingress-nginx</code>; fix it if the first command says
+otherwise. If the last command prints nothing or <code>none</code>, the cluster enforces
+no NetworkPolicy and step 7 changes nothing (the mTLS hop to the worker is the
+boundary either way).</p>
+<p><strong>1. DNS.</strong> Point <code>mtls.vrsky.valueretail.no</code> at the same address as
+<code>vrsky.valueretail.no</code> (the ingress LoadBalancer):</p>
+<div class="highlight"><pre><span></span><code>dig<span class="w"> </span>+short<span class="w"> </span>vrsky.valueretail.no
+dig<span class="w"> </span>+short<span class="w"> </span>mtls.vrsky.valueretail.no<span class="w">   </span><span class="c1"># must print the same address</span>
+</code></pre></div>
+<p><strong>2. The edge certificates.</strong></p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ingress/webhook-edge-tls.yaml
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span><span class="nb">wait</span><span class="w"> </span>--for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>certificate/webhook-edge-ca<span class="w"> </span>certificate/webhook-edge-server<span class="w"> </span>certificate/webhook-edge-client<span class="w"> </span>--timeout<span class="o">=</span>120s
+</code></pre></div>
+<p><strong>3. Restart the webhook consumer</strong> so it reads the new Secret:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>rollout<span class="w"> </span>restart<span class="w"> </span>deploy/vrsky-webhook-consumer
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>deploy/vrsky-webhook-consumer
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>logs<span class="w"> </span>deploy/vrsky-webhook-consumer<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s1">'edge mtls'</span>
+<span class="c1"># want: "Edge mTLS webhook listener started" addr=[::]:9102</span>
+</code></pre></div>
+<p><strong>4. The Ingress, before the CA bundle exists.</strong> This also checks that a
+missing bundle fails closed:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ingress/webhooks-mtls-ingress.yaml
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span><span class="nb">wait</span><span class="w"> </span>--for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready<span class="w"> </span>certificate/vrsky-webhooks-mtls-tls<span class="w"> </span>--timeout<span class="o">=</span>300s
+<span class="nv">U</span><span class="o">=</span>https://mtls.vrsky.valueretail.no/webhook/x
+curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$U</span><span class="s2">"</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{}'</span>
+<span class="c1"># want 503 (ingress-nginx denies the location while auth-tls-secret is missing)</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$U</span><span class="s2">"</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'ssl-client-cert: forged'</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'ssl-client-verify: SUCCESS'</span>
+<span class="c1"># want 503 too: a forged header must not get through a broken edge</span>
+</code></pre></div>
+<p>Then the same with a bundle that doesn't parse:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">printf</span><span class="w"> </span><span class="s1">'not a certificate\n'</span><span class="w"> </span>&gt;<span class="w"> </span>junk.pem
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>webhook-client-ca<span class="w"> </span>--from-file<span class="o">=</span>ca.crt<span class="o">=</span>junk.pem
+sleep<span class="w"> </span><span class="m">10</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$U</span><span class="s2">"</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'ssl-client-cert: forged'</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'ssl-client-verify: SUCCESS'</span>
+<span class="c1"># want 503 (or a TLS error); never 401 or 202</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>delete<span class="w"> </span>secret<span class="w"> </span>webhook-client-ca
+</code></pre></div>
+<p>If any of these prints anything else, delete the Ingress (rollback below) and
+stop: the worker would still verify a forged certificate against the
+connection's CA, but nothing would prove the caller holds its key.</p>
+<p><strong>5. The CA bundle.</strong> One PEM file with every CA that a tenant has set as a
+webhook client CA. The tenant supplies their CA certificate (public material;
+VRSky stores it encrypted, and the bundle copy is only for the edge). For a
+first test, use a throwaway CA from the checks below.</p>
+<div class="highlight"><pre><span></span><code>cat<span class="w"> </span>tenant-a-ca.pem<span class="w"> </span>tenant-b-ca.pem<span class="w"> </span>&gt;<span class="w"> </span>bundle.pem
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>webhook-client-ca<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-file<span class="o">=</span>ca.crt<span class="o">=</span>bundle.pem<span class="w"> </span>--dry-run<span class="o">=</span>client<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-
+</code></pre></div>
+<p>ingress-nginx picks the Secret up by itself within a few seconds. Repeat this
+step whenever a tenant adds or rotates a client CA.</p>
+<p>Never add a public CA, one that issues certificates to anyone who asks. If a
+tenant's client certificates come from an intermediate, put the intermediate
+and its root in the bundle, and tell the tenant their connection's client CA
+must include the intermediate: the ingress forwards only the leaf, so the
+webhook service can't build the chain from the root alone.</p>
+<p><strong>6. Checks.</strong> Make two throwaway CAs and a client certificate from each, on
+your machine:</p>
+<div class="highlight"><pre><span></span><code><span class="k">for</span><span class="w"> </span>n<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-newkey<span class="w"> </span>ec<span class="w"> </span>-pkeyopt<span class="w"> </span>ec_paramgen_curve:P-256<span class="w"> </span>-nodes<span class="w"> </span>-days<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-subj<span class="w"> </span><span class="s2">"/CN=test-ca-</span><span class="nv">$n</span><span class="s2">"</span><span class="w"> </span>-keyout<span class="w"> </span>ca-<span class="nv">$n</span>.key<span class="w"> </span>-out<span class="w"> </span>ca-<span class="nv">$n</span>.crt<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-addext<span class="w"> </span><span class="nv">basicConstraints</span><span class="o">=</span>critical,CA:TRUE<span class="w"> </span>-addext<span class="w"> </span><span class="nv">keyUsage</span><span class="o">=</span>critical,keyCertSign
+<span class="w">  </span>openssl<span class="w"> </span>req<span class="w"> </span>-newkey<span class="w"> </span>ec<span class="w"> </span>-pkeyopt<span class="w"> </span>ec_paramgen_curve:P-256<span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s2">"/CN=client-</span><span class="nv">$n</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-keyout<span class="w"> </span>client-<span class="nv">$n</span>.key<span class="w"> </span>-out<span class="w"> </span>client-<span class="nv">$n</span>.csr
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'extendedKeyUsage=clientAuth\n'</span><span class="w"> </span>&gt;<span class="w"> </span>ext
+<span class="w">  </span>openssl<span class="w"> </span>x509<span class="w"> </span>-req<span class="w"> </span>-in<span class="w"> </span>client-<span class="nv">$n</span>.csr<span class="w"> </span>-CA<span class="w"> </span>ca-<span class="nv">$n</span>.crt<span class="w"> </span>-CAkey<span class="w"> </span>ca-<span class="nv">$n</span>.key<span class="w"> </span>-CAcreateserial<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-days<span class="w"> </span><span class="m">1</span><span class="w"> </span>-extfile<span class="w"> </span>ext<span class="w"> </span>-out<span class="w"> </span>client-<span class="nv">$n</span>.crt
+<span class="k">done</span>
+cat<span class="w"> </span>ca-a.crt<span class="w"> </span>ca-b.crt<span class="w"> </span>&gt;<span class="w"> </span>bundle.pem<span class="w">   </span><span class="c1"># step 5 with this bundle (plus the real CAs, if any)</span>
+</code></pre></div>
+<p>Make a test pipeline with a Webhook (HTTP) source, store <code>ca-a.crt</code> as a
+tenant secret, and set the source node's <code>tls.client_ca_secret_id</code> to it
+through the connections API (the builder has no field for it yet; see
+<a href="../../SECURITY/#config-surface">Config surface</a>). Start it and note its
+connection id. Then:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">U</span><span class="o">=</span>https://mtls.vrsky.valueretail.no/webhook/&lt;connection-id&gt;
+<span class="nv">A</span><span class="o">=</span><span class="k">$(</span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s1">'import urllib.parse;print(urllib.parse.quote(open("client-a.crt").read(),safe=""))'</span><span class="k">)</span>
+c<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}\n'</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"ping":true}'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$@</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+c<span class="w"> </span><span class="s2">"</span><span class="nv">$U</span><span class="s2">"</span><span class="w">                                                    </span><span class="c1"># 400: no certificate</span>
+c<span class="w"> </span>--cert<span class="w"> </span>client-a.crt<span class="w"> </span>--key<span class="w"> </span>client-a.key<span class="w"> </span><span class="s2">"</span><span class="nv">$U</span><span class="s2">"</span><span class="w">             </span><span class="c1"># 202</span>
+c<span class="w"> </span>--cert<span class="w"> </span>client-b.crt<span class="w"> </span>--key<span class="w"> </span>client-b.key<span class="w"> </span><span class="s2">"</span><span class="nv">$U</span><span class="s2">"</span><span class="w">             </span><span class="c1"># 401: CA b is in the bundle, not this connection's</span>
+c<span class="w"> </span>--cert<span class="w"> </span>client-b.crt<span class="w"> </span>--key<span class="w"> </span>client-b.key<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"ssl-client-cert: </span><span class="nv">$A</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'ssl-client-verify: SUCCESS'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$U</span><span class="s2">"</span><span class="w">   </span><span class="c1"># 401: nginx replaced the forged header</span>
+c<span class="w"> </span>-H<span class="w"> </span><span class="s2">"ssl-client-cert: </span><span class="nv">$A</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'ssl-client-verify: SUCCESS'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>https://vrsky.valueretail.no/webhook/&lt;connection-id&gt;<span class="w">   </span><span class="c1"># 401: the public host never trusts the header</span>
+</code></pre></div>
+<p>From inside the cluster, the edge port refuses anything but the ingress (any
+image with curl the cluster can pull will do):</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>run<span class="w"> </span>edge-probe<span class="w"> </span>--rm<span class="w"> </span>-i<span class="w"> </span>--restart<span class="o">=</span>Never<span class="w"> </span>--image<span class="o">=</span>curlimages/curl<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-sk<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}\n'</span><span class="w"> </span>https://vrsky-webhook-consumer:9102/webhook/x<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{}'</span>
+<span class="c1"># want 000 and a TLS error: the handshake needs nginx's client certificate</span>
+</code></pre></div>
+<p>The consumer logs each refusal with the subject and SHA-256 fingerprint of
+the certificate, and <code>webhook_client_cert_failures_total</code> counts them by
+reason. Delete the test pipeline and take <code>ca-a</code>/<code>ca-b</code> out of the bundle
+(step 5) afterwards.</p>
+<p><strong>7. Optional: the NetworkPolicy</strong>, if step 0 showed an enforcing engine:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ingress/webhook-consumer-networkpolicy.yaml
+</code></pre></div>
+<p>Then repeat the <code>202</code> check and an ordinary webhook to
+<code>https://vrsky.valueretail.no/webhook/&lt;id&gt;</code>, and check the management API can
+still reach the consumer (the webhook source panel's sample data loads).</p>
+<h2 id="rollback">Rollback<a class="headerlink" href="#rollback" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>delete<span class="w"> </span>ingress<span class="w"> </span>vrsky-webhooks-mtls
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>delete<span class="w"> </span>networkpolicy<span class="w"> </span>vrsky-webhook-consumer-edge<span class="w"> </span>--ignore-not-found
+</code></pre></div>
+<p>That closes the mTLS host; mTLS connections refuse every request again, as
+before #454, and nothing else changes. The edge port only accepts nginx's
+certificate, so it can stay. To remove everything, also
+<code>kubectl delete -f infrastructure/kubernetes/ingress/webhook-edge-tls.yaml</code>,
+delete the Secrets <code>webhook-edge-ca</code>, <code>webhook-edge-server</code>,
+<code>webhook-edge-client</code>, <code>webhook-client-ca</code> and <code>vrsky-webhooks-mtls-tls</code>, and
+revert the PR (the consumer then loses port 9102 on the next deploy).</p>
+<h2 id="renewal">Renewal<a class="headerlink" href="#renewal" title="Permanent link">&para;</a></h2>
+<p>cert-manager renews the edge certificates 90 days before they end. nginx
+reloads a changed Secret by itself; the webhook consumer reads its files at
+start, and pods restart at every cluster start
+(<a href="../cost-parking/">cost parking</a>), well inside those 90 days. The edge CA
+keeps its key across renewals.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

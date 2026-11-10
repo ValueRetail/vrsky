@@ -1191,6 +1191,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../operator/webhook-mtls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound webhook mTLS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../SLA/" class="md-nav__link">
         
   
@@ -1451,6 +1479,17 @@
     <span class="md-ellipsis">
       
         Retries and the Idempotency-Key header
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mutual-tls-client-certificates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutual TLS (client certificates)
       
     </span>
   </a>
@@ -2489,6 +2528,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#mutual-tls-client-certificates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutual TLS (client certificates)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2579,7 +2629,7 @@ page: a sender behind one cannot deliver, and sees only a TLS certificate
 error — nothing that points at DNS. See
 <a href="../../operator/troubleshooting/">Troubleshooting</a>.</p>
 </div>
-<p>You can optionally verify request signatures with HMAC and require client certificates with mutual TLS. Inbound mutual TLS works only where the worker's TLS port is exposed (the Docker Compose stack); the hosted service at <code>vrsky.valueretail.no</code> doesn't expose it yet, so use HMAC signatures there.</p>
+<p>You can optionally verify request signatures with HMAC and require client certificates with mutual TLS. A connection that requires a client certificate has its own host on the hosted service: see <a href="#mutual-tls-client-certificates">Mutual TLS</a> below.</p>
 <h3 id="the-url-is-stable">The URL is stable<a class="headerlink" href="#the-url-is-stable" title="Permanent link">&para;</a></h3>
 <p>The connection id in the URL survives Stop/Start, Deploy from the builder
 (which updates the connection in place) and restarts of the webhook service
@@ -2619,7 +2669,7 @@ the header means. Requests without the header behave exactly as before.</p>
 <li><code>secret_secret_id</code> — reference to the shared signing secret (minted from the plaintext secret you enter in the editor).</li>
 </ul>
 </li>
-<li><code>tls.client_ca_secret_id</code> — optional mutual TLS (#89). When set, the connection is reachable on the worker's dedicated TLS port (<code>9101</code> locally) and clients must present a certificate signed by this CA. Not available on the hosted service yet: there the TLS port isn't exposed, so such a connection rejects every request.</li>
+<li><code>tls.client_ca_secret_id</code> — optional mutual TLS (#89, #454). When set, callers must present a client certificate signed by this CA. The URL changes: see <a href="#mutual-tls-client-certificates">Mutual TLS</a>.</li>
 </ul>
 <p>Other request handling options not listed here are set via the in-app pipeline editor (Property panel).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
@@ -2638,6 +2688,45 @@ the header means. Requests without the header behave exactly as before.</p>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h3 id="mutual-tls-client-certificates">Mutual TLS (client certificates)<a class="headerlink" href="#mutual-tls-client-certificates" title="Permanent link">&para;</a></h3>
+<p>With <code>tls.client_ca_secret_id</code> set, every request must come with a client
+certificate that chains to that CA, is within its validity dates and allows
+client authentication. Anything else is refused (<code>400</code> from the ingress or
+<code>401</code> from the webhook service, see below), and nothing is published.</p>
+<p>If your client certificates are issued by an intermediate CA, put that
+intermediate in <code>client_ca</code> (with the root, or on its own). The ingress
+passes only the client's own certificate to the webhook service, not the
+chain, so a <code>client_ca</code> holding only the root refuses them with <code>401</code>.
+Rejections count in <code>webhook_client_cert_failures_total{connection_id,reason}</code>
+(<code>missing_cert</code>, <code>untrusted_cert</code>, <code>malformed_cert</code>, <code>untrusted_edge</code>).</p>
+<p>Where to send the requests:</p>
+<ul>
+<li><strong>Hosted service</strong> — <code>https://mtls.vrsky.valueretail.no/webhook/{connectionId}</code>.
+  The ingress checks the certificate in the TLS handshake and passes it to the
+  webhook service, which checks it again against this connection's own CA. A
+  certificate from another tenant's CA gets through the ingress but not the
+  second check. The ingress only asks for certificates from CAs it knows, so
+  an operator adds your CA to its list before the first request
+  (<a href="../../operator/webhook-mtls/">operator steps</a>). Until then, and until that
+  host is live, the connection refuses every request. The ordinary URL on
+  <code>vrsky.valueretail.no</code> never works for such a connection: that host doesn't
+  ask for certificates.</li>
+<li><strong>Local compose</strong> — <code>https://localhost:9101/webhook/{connectionId}</code>, the
+  webhook service's own TLS port. It asks for any client certificate in the
+  handshake and checks it against the connection's CA. The server certificate
+  is self-signed unless <code>WEBHOOK_TLS_CERT_FILE</code> and <code>_KEY_FILE</code> are set.</li>
+</ul>
+<p>Test with curl:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>--cert<span class="w"> </span>client.crt<span class="w"> </span>--key<span class="w"> </span>client.key<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"ping":true}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>https://mtls.vrsky.valueretail.no/webhook/&lt;connectionId&gt;
+</code></pre></div>
+<p><code>202</code> means accepted. A <code>400</code> with "No required SSL certificate was sent", or
+one about the certificate, comes from the ingress (no certificate, or its CA
+isn't on the list). A <code>401</code> comes from the webhook service (the certificate
+doesn't match this connection's CA, or has expired).</p>
+<p>A CA that two tenants both use (a public CA, say) lets each reach the other's
+mTLS webhooks; use a CA of your own, or add HMAC signing as well.</p>
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
 <p>A producer node sends each message as an outbound HTTP request. It supports OAuth-authenticated output and client-certificate mutual TLS.</p>
 <p>Config reference:</p>
@@ -2776,7 +2865,7 @@ working.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Secrets.</strong> Credential and key material (signing secret, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with <code>&lt;field&gt;_secret_id</code> references. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
-<li><strong>mTLS port.</strong> Connections using <code>tls.client_ca_secret_id</code> listen on the worker's dedicated TLS port (<code>9101</code> locally), separate from the standard webhook ingress. The hosted service at <code>vrsky.valueretail.no</code> doesn't expose that port yet, so there a connection with <code>tls.client_ca_secret_id</code> rejects every request. Use <code>http.signature</code> for inbound webhooks on the hosted service. Outbound mTLS (the producer's <code>http.tls</code>) works everywhere.</li>
+<li><strong>mTLS host.</strong> Connections using <code>tls.client_ca_secret_id</code> take requests on <code>mtls.vrsky.valueretail.no</code> on the hosted service and on the worker's TLS port (<code>9101</code>) locally, not on the ordinary webhook URL. See <a href="#mutual-tls-client-certificates">Mutual TLS</a>. Outbound mTLS (the producer's <code>http.tls</code>) works everywhere.</li>
 <li><strong>Example flow.</strong> A common pattern is webhook (consumer) to HTTP forward (producer): receive a signed webhook, then forward the payload to a downstream service over OAuth or mTLS.</li>
 </ul>
 
