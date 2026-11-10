@@ -14,19 +14,29 @@ import (
 )
 
 // Publisher is a thin wrapper around nats.JetStreamContext.Publish. The two
-// singleton streams (VRSKY_DATA and VRSKY_DLQ) are ensured exactly once per
-// process; subsequent Publish calls hit JS directly with no extra round
-// trips.
+// singleton streams (VRSKY_DATA and VRSKY_DLQ) are ensured once per
+// Publisher, on its first publish; later publishes hit JS directly with no
+// extra round trips. A failed ensure is not remembered: the next publish
+// tries it again (#811, a JetStream blip during the first DLQ copy used to
+// fail every later one until a restart).
 type Publisher struct {
 	js nats.JetStreamContext
 
-	ensureOnce sync.Once
-	ensureErr  error
+	ensureMu sync.Mutex
+	ensured  bool
 }
 
 // NewPublisher binds a Publisher to an existing JetStream context.
 func NewPublisher(js nats.JetStreamContext) *Publisher {
 	return &Publisher{js: js}
+}
+
+// newEnsuredPublisher is NewPublisher for a caller that has just run
+// EnsureStreams itself, as Subscribe does: its publishes, the DLQ copy among
+// them, go straight to JetStream, bounded by their own context, with no
+// stream probe first.
+func newEnsuredPublisher(js nats.JetStreamContext) *Publisher {
+	return &Publisher{js: js, ensured: true}
 }
 
 // Publish writes a message to the main data stream and waits for the
@@ -86,15 +96,21 @@ func (p *Publisher) PublishToDLQ(ctx context.Context, tenantID, connectionID, ms
 		}
 		msg.Header.Set(nats.MsgIdHdr, msgID)
 	}
-	if _, err := p.js.PublishMsg(msg); err != nil {
+	if _, err := p.js.PublishMsg(msg, nats.Context(ctx)); err != nil {
 		return fmt.Errorf("js.PublishMsg dlq %s: %w", subj, err)
 	}
 	return nil
 }
 
 func (p *Publisher) ensure() error {
-	p.ensureOnce.Do(func() {
-		p.ensureErr = EnsureStreams(p.js)
-	})
-	return p.ensureErr
+	p.ensureMu.Lock()
+	defer p.ensureMu.Unlock()
+	if p.ensured {
+		return nil
+	}
+	if err := EnsureStreams(p.js); err != nil {
+		return err
+	}
+	p.ensured = true
+	return nil
 }

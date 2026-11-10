@@ -306,8 +306,12 @@ Revert by reverting the merge in a PR; the revert deploys like any change.
   1 s, 5 s, 30 s, 2 min; `src/pkg/messaging/retry.go`), up to
   `messaging.MaxDeliveryAttempts` (5, `src/pkg/messaging/messaging.go`).
   After that the message moves to the DLQ. A plain `m.Nak()` would bring it
-  back at once (#794). Past `SubscriberOpts.MaxDelayed` waiting messages (8
-  per subscriber, 4 per connection by default) a failure is NAK'd without a
+  back at once (#794). A panic is treated as an error, and on the fifth
+  attempt nothing comes back, NAK or not: a failed DLQ copy is retried in
+  place (3 tries) and then left unacked, logged with its stream sequence and
+  counted in `vrsky_dlq_publish_failed_total` (#811). Past
+  `SubscriberOpts.MaxDelayed` waiting messages (8 per subscriber, 4 per
+  connection by default) a failure is NAK'd without a
   delay, so one connection can't hold every `MaxAckPending` slot of a shared
   durable. In the SDK, `sdk.RateLimited(err, d)` makes each wait at least
   `d` (clamped to 1 s .. 2 min); wrap an error that retrying can't fix in

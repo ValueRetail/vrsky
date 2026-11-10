@@ -1426,7 +1426,7 @@ Last updated 2026-10-28.
     the lifecycle budget with about twice the save timeout, or make it
     configurable per connector. Found in review of #795. Filed as #808.
 
-199. **A message whose last attempt fails to reach the DLQ is lost.** When
+199. ~~**A message whose last attempt fails to reach the DLQ is lost.**~~ (#811) When
     the DLQ publish fails on the fifth delivery, or the handler panics on
     it, `Subscriber.dispatch` NAKs and logs `will NAK and retry`. But
     nats-server makes no delivery past `MaxDeliver` (`getNextMsg` drops a
@@ -1489,6 +1489,26 @@ Last updated 2026-10-28.
     `src/pkg/managementapi/nodeconfig.go` (comment at the top) and
     `nodeconfig_test.go` still quote the HTTP destination's old
     `|| nodeConfig.HTTP.URL == ""` skip. Found in #734. Filed as #828.
+
+206. **Messages dropped at `MaxDeliver` never reach the DLQ on their own.**
+    Since #811 a failed DLQ copy on the fifth delivery is retried three
+    times and then logged with its stream sequence and counted
+    (`vrsky_dlq_publish_failed_total`), but recovering it is by hand
+    (`docs/operator/troubleshooting.md`). A worker killed during its fifth
+    attempt loses the message the same way, with only the server's
+    `MAX_DELIVERIES` advisory. A listener on
+    `$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.VRSKY_DATA.*` that copies the
+    message from `VRSKY_DATA` by sequence to the DLQ (when no copy with that
+    `Msg-Id` exists) would cover both; the other option is `MaxDeliver` one
+    above the attempts the subscriber counts
+    (`plans/issue-811-last-delivery-dlq.md`). New advisory consumer or
+    consumer config: needs a human decision. Found in #811. Filed as #832.
+
+207. **No alert on `vrsky_dlq_publish_failed_total`.** The counter from #811
+    marks a message that is in neither its durable nor the DLQ. Add a rule
+    to `infrastructure/prometheus-rules.yml` (any increase, platform
+    targets like `DLQGrowing`) with a `promtool test rules` case. Found
+    in #811. Filed as #833.
 
 ## Human
 

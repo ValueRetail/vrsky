@@ -17,6 +17,8 @@ import (
 // after MaxDeliveryAttempts the message moves to the DLQ. An error that asks
 // for a longer wait (it, or an error in its tree, has a method
 // RetryDelay() time.Duration, as sdk.RateLimited's does) gets that wait.
+// A panic is recovered and handled as a returned error, the last delivery
+// included (#811).
 type Handler func(ctx context.Context, msg *nats.Msg) error
 
 // SubscriberOpts configures a per-worker subscription on the main stream.
@@ -196,7 +198,9 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 	if err := ensureConsumer(js, opts); err != nil {
 		return nil, fmt.Errorf("ensure consumer %s: %w", opts.DurableName, err)
 	}
-	pub := NewPublisher(js)
+	// The streams were just ensured above, so the DLQ copy never probes them
+	// first: each try is one publish within DLQPublishTimeout (#811).
+	pub := newEnsuredPublisher(js)
 
 	sub, err := js.PullSubscribe(opts.FilterSubject, "",
 		nats.Bind(MainStreamName, opts.DurableName),
@@ -543,16 +547,6 @@ func (s *Subscriber) dispatch(m *nats.Msg) {
 		// Back from a delayed NAK (or never delayed): it waits no longer.
 		s.delayed.remove(meta.Sequence.Stream)
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			s.opts.Logger.Error("Handler panicked",
-				"durable", s.opts.DurableName, "panic", r)
-			processingSeconds.WithLabelValues(s.opts.DurableName, "panic").
-				Observe(time.Since(startNs).Seconds())
-			s.retry(m, meta, fmt.Errorf("handler panicked: %v", r))
-		}
-	}()
-
 	if meta != nil && meta.NumDelivered > 1 {
 		redeliveryCount.WithLabelValues(s.opts.DurableName).Inc()
 	}
@@ -561,55 +555,114 @@ func (s *Subscriber) dispatch(m *nats.Msg) {
 	// redelivers a message we're still processing (#139). This decouples the
 	// handler's wall-clock budget from AckWait, so a slow producer target /
 	// large payload / bulk API can take far longer than AckWait without causing
-	// a duplicate downstream delivery.
+	// a duplicate downstream delivery. On the last delivery it keeps running
+	// while the DLQ copy is retried.
 	stopHB := s.startHeartbeat(m)
-	defer stopHB() // panic-safety net; idempotent, no-op after the explicit stop
-	ctx := context.Background()
-	err := s.handler(ctx, m)
-	stopHB() // stop before Ack/Nak in the normal path
-	if err == nil {
-		processingSeconds.WithLabelValues(s.opts.DurableName, "ok").
-			Observe(time.Since(startNs).Seconds())
-		_ = m.Ack()
-		return
-	}
-	processingSeconds.WithLabelValues(s.opts.DurableName, "error").
+	defer stopHB() // idempotent, no-op after an explicit stop
+	status, err := s.runHandler(m)
+	processingSeconds.WithLabelValues(s.opts.DurableName, status).
 		Observe(time.Since(startNs).Seconds())
-
-	// Handler failed. If MaxDeliver is exhausted, copy the message to the
-	// DLQ stream (with the last error in a header) then ack the original.
-	if meta != nil && int(meta.NumDelivered) >= MaxDeliveryAttempts {
-		tenantID, connID := parseSubject(m.Subject)
-		headers := nats.Header{}
-		for k, v := range m.Header {
-			headers[k] = v
-		}
-		headers.Set("X-Vrsky-Last-Error", truncErr(err))
-		headers.Set("X-Vrsky-Delivered", fmt.Sprintf("%d", meta.NumDelivered))
-		headers.Set("X-Vrsky-Worker", s.opts.DurableName)
-		pubErr := s.pub.PublishToDLQ(context.Background(),
-			tenantID, connID,
-			fmt.Sprintf("%s-%d", meta.Stream, meta.Sequence.Stream),
-			m.Data, headers)
-		if pubErr != nil {
-			s.opts.Logger.Error("Failed to publish to DLQ; will NAK and retry",
-				"durable", s.opts.DurableName, "error", pubErr)
-			// A plain NAK, not retry: this was the last attempt. Note that
-			// nats-server makes no delivery past MaxDeliver, so this NAK does
-			// not bring the message back either (found in #794; backlog).
-			_ = m.Nak()
-			return
-		}
-		dlqCount.WithLabelValues(connID, s.opts.DurableName).Inc()
-		s.opts.Logger.Warn("Message moved to DLQ",
-			"durable", s.opts.DurableName,
-			"delivered", meta.NumDelivered,
-			"last_error", err.Error())
+	if err == nil {
+		stopHB() // stop before Ack
 		_ = m.Ack()
 		return
 	}
 
+	// Handler failed (an error or a panic, #811). On the last delivery copy
+	// the message to the DLQ: nats-server makes no delivery past MaxDeliver,
+	// so a NAK here would never bring it back.
+	if meta != nil && int(meta.NumDelivered) >= MaxDeliveryAttempts {
+		s.deadLetter(m, meta, err, stopHB)
+		return
+	}
+	stopHB()
 	s.retry(m, meta, err)
+}
+
+// runHandler runs the handler and turns a panic into an error, so that a
+// panic takes the same path as a returned error: retried on the backoff, and
+// dead-lettered on the last delivery (#811). status is the
+// vrsky_message_processing_seconds label: ok, error or panic.
+func (s *Subscriber) runHandler(m *nats.Msg) (status string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.opts.Logger.Error("Handler panicked",
+				"durable", s.opts.DurableName, "panic", r)
+			status, err = "panic", fmt.Errorf("handler panicked: %v", r)
+		}
+	}()
+	if err := s.handler(context.Background(), m); err != nil {
+		return "error", err
+	}
+	return "ok", nil
+}
+
+// DLQPublishAttempts is how many times the subscriber tries to copy a message
+// to the DLQ on its last delivery, dlqRetryWaits how long it waits between
+// tries, and DLQPublishTimeout how long one try may take (#811). The loop is
+// held meanwhile: about 8.5 s at worst, 2.5 s when the DLQ refuses at once.
+const (
+	DLQPublishAttempts = 3
+	DLQPublishTimeout  = 2 * time.Second
+)
+
+var dlqRetryWaits = [DLQPublishAttempts - 1]time.Duration{500 * time.Millisecond, 2 * time.Second}
+
+// deadLetter copies a message whose last delivery failed to the DLQ stream,
+// with the last error in a header, and then acks it. The heartbeat (stopHB
+// stops it) runs until then, so the message stays in flight on the server.
+//
+// A failed copy is retried in place, DLQPublishAttempts times in all. A retry
+// cannot leave two copies: the copy's Msg-Id is <stream>-<sequence>, which the
+// DLQ's duplicate window collapses. If every try fails the message is left
+// unacked, neither NAK'd nor termed: nats-server makes no delivery past
+// MaxDeliver, so none of those would keep it, and an ack or a term would claim
+// it was handled. It leaves the durable when its ack wait runs out (with the
+// server's MAX_DELIVERIES advisory) and stays in VRSKY_DATA until that ages
+// it out; the error log names its stream sequence, and
+// vrsky_dlq_publish_failed_total counts it.
+func (s *Subscriber) deadLetter(m *nats.Msg, meta *nats.MsgMetadata, err error, stopHB func()) {
+	tenantID, connID := parseSubject(m.Subject)
+	headers := nats.Header{}
+	for k, v := range m.Header {
+		headers[k] = v
+	}
+	headers.Set("X-Vrsky-Last-Error", truncErr(err))
+	headers.Set("X-Vrsky-Delivered", fmt.Sprintf("%d", meta.NumDelivered))
+	headers.Set("X-Vrsky-Worker", s.opts.DurableName)
+	msgID := fmt.Sprintf("%s-%d", meta.Stream, meta.Sequence.Stream)
+
+	var pubErr error
+	for attempt := 1; attempt <= DLQPublishAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), DLQPublishTimeout)
+		pubErr = s.pub.PublishToDLQ(ctx, tenantID, connID, msgID, m.Data, headers)
+		cancel()
+		if pubErr == nil || attempt == DLQPublishAttempts {
+			break
+		}
+		wait := dlqRetryWaits[attempt-1]
+		s.opts.Logger.Warn("Failed to publish to DLQ; retrying",
+			"durable", s.opts.DurableName, "tenant_id", tenantID, "connection_id", connID,
+			"stream_seq", meta.Sequence.Stream, "dlq_attempt", attempt, "retry_in", wait,
+			"error", pubErr)
+		time.Sleep(wait)
+	}
+	stopHB()
+	if pubErr != nil {
+		dlqPublishFailedCount.WithLabelValues(connID, s.opts.DurableName).Inc()
+		s.opts.Logger.Error("Could not copy the message to the DLQ; it is left unacked and stays only in "+meta.Stream,
+			"durable", s.opts.DurableName, "tenant_id", tenantID, "connection_id", connID,
+			"stream", meta.Stream, "stream_seq", meta.Sequence.Stream,
+			"delivered", meta.NumDelivered, "dlq_attempts", DLQPublishAttempts,
+			"last_error", err.Error(), "error", pubErr)
+		return
+	}
+	dlqCount.WithLabelValues(connID, s.opts.DurableName).Inc()
+	s.opts.Logger.Warn("Message moved to DLQ",
+		"durable", s.opts.DurableName,
+		"delivered", meta.NumDelivered,
+		"last_error", err.Error())
+	_ = m.Ack()
 }
 
 // parseSubject pulls the tenant and connection IDs out of a
