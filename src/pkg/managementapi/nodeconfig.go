@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ValueRetail/vrsky/pkg/objectstore"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
 )
 
@@ -199,6 +200,9 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "remote_agent" {
 		errs = append(errs, validateRemoteAgentTarget(node, raw)...)
 	}
+	if configType == "cloud_storage" && node.Type == "consumer" {
+		errs = append(errs, validateCloudStorageConsumer(node, raw)...)
+	}
 	if configType == "sitoo" {
 		errs = append(errs, validateSitooBaseURL(node, raw)...)
 	}
@@ -287,6 +291,36 @@ func validateSitooBaseURL(node *Node, raw map[string]json.RawMessage) []string {
 	}
 	if err := safeurl.CheckBaseURL(baseURL, safeurl.AllowPrivateFromEnv()); err != nil {
 		return []string{fmt.Sprintf("node %s (sitoo): sitoo.%s (served by %s)", node.ID, err, nodeConfigRules[nodeKind{node.Type, "sitoo"}].service)}
+	}
+	return nil
+}
+
+// validateCloudStorageConsumer refuses the after_action=move settings the
+// cloud-storage consumer would refuse at start (#724): without move_prefix, or
+// with a move_prefix inside what prefix lists in poll mode (#567). Without
+// this the connection would report "running" and ingest nothing. The overlap
+// rule is the consumer's own (objectstore.MoveInsideListing). Event mode is
+// not refused for an overlap, as in the consumer: a moved object that comes
+// back is published once more, not lost (#594).
+func validateCloudStorageConsumer(node *Node, raw map[string]json.RawMessage) []string {
+	var block struct {
+		Mode        string `json:"mode"`
+		Prefix      string `json:"prefix"`
+		AfterAction string `json:"after_action"`
+		MovePrefix  string `json:"move_prefix"`
+	}
+	if json.Unmarshal(raw["cloud_storage"], &block) != nil || block.AfterAction != "move" {
+		return nil
+	}
+	svc := nodeConfigRules[nodeKind{node.Type, "cloud_storage"}].service
+	if block.MovePrefix == "" {
+		return []string{fmt.Sprintf("node %s (cloud_storage): cloud_storage.move_prefix is required when after_action is move — the consumer refuses to start without it (served by %s)", node.ID, svc)}
+	}
+	if block.Mode == "event" {
+		return nil
+	}
+	if err := objectstore.MoveInsideListing(block.Prefix, block.MovePrefix); err != nil {
+		return []string{fmt.Sprintf("node %s (cloud_storage): cloud_storage.%v (served by %s)", node.ID, err, svc)}
 	}
 	return nil
 }

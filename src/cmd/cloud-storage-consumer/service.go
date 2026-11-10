@@ -240,16 +240,16 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 		return
 	}
 	if cfg.Bucket == "" {
-		logger.Error("cloud-storage config incomplete (need bucket)")
+		s.refuseStart(claim, connectionID, tenantID, logger, "cloud-storage config incomplete (need bucket)", nil)
 		return
 	}
 	if cfg.AfterAction == "move" && cfg.MovePrefix == "" {
-		logger.Error("after_action=move requires move_prefix")
+		s.refuseStart(claim, connectionID, tenantID, logger, "after_action=move requires move_prefix", nil)
 		return
 	}
 	if err := cfg.validateMoveOutsideListing(); err != nil {
 		if cfg.Mode != "event" {
-			logger.Error("invalid move_prefix", "error", err)
+			s.refuseStart(claim, connectionID, tenantID, logger, "invalid move_prefix", err)
 			return
 		}
 		// Event mode starts anyway. A move there always writes
@@ -264,7 +264,7 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 	if cfg.Mode == "event" {
 		if err := cfg.validateEventConfig(); err != nil {
-			logger.Error("invalid event-mode config", "error", err)
+			s.refuseStart(claim, connectionID, tenantID, logger, "invalid event-mode config", err)
 			return
 		}
 	}
@@ -297,6 +297,34 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 // its own (#408).
 type activeConn struct {
 	cancel context.CancelFunc
+}
+
+// refuseStart logs a start this consumer refuses for its config and marks the
+// connection "error", so the user sees it instead of a "running" connection
+// that ingests nothing (#724). The management API refuses the same configs
+// when the connection is started; this covers one saved before that check, or
+// one RestoreRunning brings back on boot.
+//
+// The write takes the claim's place in the connection's status order through
+// Activate (with nothing to insert: the connection is not active), so it
+// cannot land over a newer start's "running". A stop that took the claim
+// while this start was in flight wins: Activate fails and nothing is written,
+// so the user's stop is not overwritten by "error".
+func (s *cloudConsumer) refuseStart(claim *sdk.StartClaim, connectionID, tenantID string, logger *slog.Logger, msg string, cause error) {
+	if cause != nil {
+		logger.Error(msg, "error", cause)
+	} else {
+		logger.Error(msg)
+	}
+	if !claim.Activate(func() {}) {
+		logger.Info("Start refused after a stop arrived; leaving the status alone")
+		return
+	}
+	claim.RunningStatus().Write(func() {
+		if err := s.updateConnectionStatus(connectionID, tenantID, "error"); err != nil {
+			logger.Error("could not mark the refused start as error", "error", err)
+		}
+	})
 }
 
 // dropActive removes connID from the active map if the entry is still own.
@@ -1102,25 +1130,10 @@ func (c *cloudConfig) wantsEventKey(key string) bool {
 // therefore only warns in event mode, so a setup the docs used to recommend
 // (empty prefix, notification scoped to a folder) keeps running.
 func (c *cloudConfig) validateMoveOutsideListing() error {
-	if c.AfterAction != "move" || c.MovePrefix == "" {
+	if c.AfterAction != "move" {
 		return nil
 	}
-	prefix := strings.TrimLeft(c.Prefix, "/")
-	dir := strings.TrimLeft(path.Clean(c.MovePrefix), "/")
-	if dir == "." {
-		dir = ""
-	}
-	if dir != "" {
-		dir += "/"
-	}
-	rest, under := strings.CutPrefix(prefix, dir)
-	if !strings.HasPrefix(dir, prefix) && (!under || strings.Contains(rest, "/")) {
-		return nil
-	}
-	if c.Prefix == "" {
-		return fmt.Errorf("move_prefix %q is inside prefix \"\" (the whole bucket): moved objects would be published again", c.MovePrefix)
-	}
-	return fmt.Errorf("move_prefix %q is inside what prefix %q lists (prefix is matched as text, not as a folder; end it with \"/\" to read one folder): moved objects would be published again", c.MovePrefix, c.Prefix)
+	return objectstore.MoveInsideListing(c.Prefix, c.MovePrefix)
 }
 
 // eventTarget returns the provider-specific event identifier, for logging.
