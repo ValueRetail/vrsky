@@ -961,14 +961,56 @@ func TestHarness_BulkLongJobOneDelivery(t *testing.T) {
 // guard behind sendable: an empty single-column row would be skipped.
 func TestBulkCSV_ReadBackRowCount(t *testing.T) {
 	recs := []map[string]any{{"Name": "a"}, {"Name": ""}, {"Name": "c\r\nd"}}
-	if _, _, _, err := bulkCSV(recs, []int{0, 1, 2}); err == nil || !strings.Contains(err.Error(), "reads back as 2 rows") {
+	if _, _, _, err := bulkCSV(recs, []int{0, 1, 2}, "insert"); err == nil || !strings.Contains(err.Error(), "reads back as 2 rows") {
 		t.Errorf("bulkCSV with an empty single-column row: err = %v, want a read-back error", err)
 	}
-	_, header, rows, err := bulkCSV(recs, []int{0, 2})
+	_, header, rows, err := bulkCSV(recs, []int{0, 2}, "insert")
 	if err != nil {
 		t.Fatalf("bulkCSV: %v", err)
 	}
 	if strings.Join(header, ",") != "Name" || len(rows) != 2 || rows[1][0] != "c\nd" {
 		t.Errorf("read back header %q rows %q, want Name and the normalised c\\nd", header, rows)
+	}
+}
+
+// A Bulk upsert refuses locally a record with no external id (absent, null or
+// ""), as REST does, and sends the rest; the refused are named by index.
+func TestBulk_UpsertRecordsWithoutExternalIDAreRefused(t *testing.T) {
+	f := newFakeBulk(t)
+	p := newBulkProducer(t, f, "upsert")
+	env := testEnvelope(`[{"ExtId__c":null,"Name":"n0"},{"Name":"n1"},{"ExtId__c":"","Name":"n2"},{"ExtId__c":"e3","Name":"n3"}]`)
+	err := p.Deliver(context.Background(), env)
+	checkRetryable(t, err)
+	checkContains(t, err, []string{"record[0]", "record[1]", "record[2]", "no value for external id field ExtId__c", "3 of 4"}, []string{"record[3]"})
+	jobs := f.jobNames()
+	if len(jobs) != 1 || strings.Join(jobs[0], ",") != "n3" {
+		t.Errorf("jobs %v, want one job with only n3", jobs)
+	}
+}
+
+// Salesforce's failed results echo the uploaded values, #N/A included: the
+// refused upsert row is matched to its record (the matcher renders the
+// records as an upsert), and only that record goes in the next job.
+func TestBulk_RefusedUpsertRowWithNullIsMatched(t *testing.T) {
+	f := newFakeBulk(t)
+	refused := false
+	f.refuse = func(row map[string]string) string {
+		if row["Name"] == "a" && !refused {
+			refused = true
+			return "UNABLE_TO_LOCK_ROW:locked:--"
+		}
+		return ""
+	}
+	p := newBulkProducer(t, f, "upsert")
+	env := testEnvelope(`[{"ExtId__c":"e0","Name":"a","Phone":null},{"ExtId__c":"e1","Name":"b","Phone":"1"}]`)
+	err := p.Deliver(context.Background(), env)
+	checkRetryable(t, err)
+	checkContains(t, err, []string{"record[0]", "UNABLE_TO_LOCK_ROW", "1 of 2"}, []string{"record[1]"})
+	if err := p.Deliver(context.Background(), env); err != nil {
+		t.Fatalf("retry = %v, want nil", err)
+	}
+	jobs := f.jobNames()
+	if len(jobs) != 2 || strings.Join(jobs[1], ",") != "a" {
+		t.Errorf("jobs %v, want a second job with only a", jobs)
 	}
 }
