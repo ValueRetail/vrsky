@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -65,14 +64,16 @@ func (s *apiConsumer) handleSampleData() http.HandlerFunc {
 
 		resp, err := s.client().Do(httpReq)
 		if err != nil {
-			msg := err.Error()
-			if errors.Is(err, safeurl.ErrBlockedAddress) {
-				// Which address a name resolved to is internal detail: log it,
-				// do not hand it to the caller.
+			var msg string
+			if m, ok := safeurl.UserMessage(err); ok {
+				// A transport error names resolvers, resolved addresses and
+				// the request URL: log it, hand the caller a fixed text.
 				if s.logger != nil {
-					s.logger.Warn("sample-data target refused at dial", "error", err)
+					s.logger.Warn("sample-data request failed", "error", safeurl.Detail(err))
 				}
-				msg = "target address not allowed"
+				msg = m
+			} else {
+				msg = "request failed"
 			}
 			writeJSON(w, map[string]interface{}{"ok": false, "error": msg})
 			return

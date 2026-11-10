@@ -1138,7 +1138,7 @@ Last updated 2026-10-28.
     succeeded on redelivery (as #587 does for remote-agent multi-target
     writes), would fix it. Found in review of #669. Filed as #730.
 
-160. **`safeurl` dial errors show the resolved private address to the tenant.**
+160. ~~**`safeurl` dial errors show the resolved private address to the tenant.**~~ (#717)
     The error text includes the resolved IP and reaches the tenant's activity
     feed, so a tenant can map in-cluster DNS names to pod and service IPs. Keep
     the address in the server log and give the user "target address not
@@ -1225,7 +1225,7 @@ Last updated 2026-10-28.
     keeps returning them holds the poll forever. Cap the pages per poll
     (say 10 000) and log when the cap is hit. Found in review of #680.
 
-172. **Sample-data errors pass `err.Error()` through.** Apart from a dial
+172. ~~**Sample-data errors pass `err.Error()` through.**~~ (#717) Apart from a dial
     refusal, the sample-data endpoints of Sitoo, the API consumer, SAP and
     others return the raw error text, and a DNS failure names the cluster
     resolver (`lookup x on 10.0.0.10:53`). Map transport errors to fixed
@@ -1259,7 +1259,7 @@ Last updated 2026-10-28.
     BC that server paging keeps its place with a non-key `$orderby`, and how
     slow it is on large tables. Found in review of #701. Filed as #733.
 
-176. **`RedactURL` keeps a password that lands in the query.** For
+176. ~~**`RedactURL` keeps a password that lands in the query.**~~ (#717) For
     `http://apikey:1234?secret@host` url.Parse reads host `apikey`, port
     `1234` and query `secret@host`, and `RedactURL` shows it unchanged,
     because the HTTP producer's test pins `?email=a@b` as shown. #700 made
