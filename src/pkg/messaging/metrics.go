@@ -54,6 +54,19 @@ var (
 		[]string{"pipeline_id", "worker"},
 	)
 
+	// dlqPublishFailedCount counts messages whose last delivery failed and
+	// whose copy to the DLQ failed DLQPublishAttempts times (#811). Such a
+	// message is left unacked; nats-server drops it from the durable when its
+	// ack wait runs out, and it stays only in VRSKY_DATA, at the stream
+	// sequence the worker logs, until that ages it out.
+	dlqPublishFailedCount = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "vrsky_dlq_publish_failed_total",
+			Help: "Messages that failed their last delivery and could not be copied to the dead-letter queue; they remain only in the data stream.",
+		},
+		[]string{"pipeline_id", "worker"},
+	)
+
 	// processingSeconds measures end-to-end handler duration. Useful for
 	// tuning AckWait and spotting slow workers.
 	processingSeconds = promauto.NewHistogramVec(

@@ -217,6 +217,10 @@ error it hits into one of two kinds:
     `vrsky_message_retry_undelayed_total` goes up. When a target is down,
     expect most of that connection's messages in the DLQ within seconds and
     the first few after about 2.5 minutes.
+  - A worker that panics is handled like one that returned an error: retried,
+    then dead-lettered with `X-Vrsky-Last-Error: handler panicked: …`.
+  - If the copy to the DLQ fails on the last attempt, see
+    [A message that could not be dead-lettered](#a-message-that-could-not-be-dead-lettered).
 - **Dropped.** The error is marked permanent, because trying the same message
   again cannot work (a `4xx` from the target, an incomplete node, a payload
   that is not JSON). The message is acked and nothing is kept. There is no
@@ -289,6 +293,33 @@ Four things apply to every destination in the table:
   deliver anything, so treat that check as a precaution, not proof.
 - With several destinations on one connection, one failure retries the whole
   message and the destinations that already delivered get it again.
+
+## A message that could not be dead-lettered
+
+On a message's fifth and last attempt the worker copies it to the DLQ. If
+that copy fails, it tries twice more (after 500 ms and 2 s). If all three
+fail (#811):
+
+- The worker logs `Could not copy the message to the DLQ; it is left unacked
+  and stays only in VRSKY_DATA` at error level, with `tenant_id`,
+  `connection_id`, `durable`, `stream_seq`, `last_error` (why the delivery
+  failed) and `error` (why the DLQ copy failed).
+- `vrsky_dlq_publish_failed_total{pipeline_id, worker}` goes up. No alert
+  is wired to it yet.
+- The message is not retried again: NATS never delivers a message to the
+  same worker more than five times. It is not in the DLQ view either.
+
+The payload is still in the `VRSKY_DATA` stream at that sequence, for up to
+72 hours (less if the stream hits its size cap). There is no button for it
+yet. By hand: find the log line in Loki, read the message with the NATS CLI
+(`nats stream get VRSKY_DATA <stream_seq>`, from a nats-box pod), and once
+the cause is fixed publish its payload to
+`vrsky.dlq.<tenant_id>.pipeline.<connection_id>`. It then shows in the
+connection's DLQ view and can be retried or discarded there like any other
+entry.
+
+A failing DLQ copy usually means JetStream itself is unwell (a restart, a
+full disk): check the NATS pod and its logs first.
 
 ## The File Output panel says "Load failed", or shows no files
 

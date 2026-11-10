@@ -86,7 +86,7 @@ func (p *Publisher) PublishToDLQ(ctx context.Context, tenantID, connectionID, ms
 		}
 		msg.Header.Set(nats.MsgIdHdr, msgID)
 	}
-	if _, err := p.js.PublishMsg(msg); err != nil {
+	if _, err := p.js.PublishMsg(msg, nats.Context(ctx)); err != nil {
 		return fmt.Errorf("js.PublishMsg dlq %s: %w", subj, err)
 	}
 	return nil

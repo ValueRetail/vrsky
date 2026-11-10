@@ -324,8 +324,11 @@ handler returns an error, delivery n < 5 → NakWithDelay, redelivered Backoff[n
 handler returns an error, delivery = 5   → copy to vrsky.dlq.<tenant>.pipeline.<conn>
                                            with X-Vrsky-Last-Error, X-Vrsky-Delivered
                                            and X-Vrsky-Worker, then Ack
-                                           (if the DLQ publish fails: Nak)
-handler panics                           → as for an error, delivery n < 5
+  the DLQ publish fails                  → tried 3 times in all (500 ms, then 2 s apart),
+                                           then left unacked, logged and counted
+                                           (see "When the DLQ copy fails")
+handler panics                           → as for an error, on every delivery
+                                           (X-Vrsky-Last-Error: "handler panicked: …")
 ```
 
 SDK connectors don't call this directly. The SDK runner maps `Deliver`'s
@@ -385,6 +388,42 @@ pods' delays run out. A durable-wide bound is #813; raising `MaxAckPending`
 or moving retries to a delay stream are the alternatives
 (`plans/issue-794-backoff-nak.md`).
 
+#### When the DLQ copy fails (#811)
+
+nats-server makes no delivery past `MaxDeliver`. On the fifth delivery a
+NAK, delayed or not, and an ack wait that runs out all end the same way:
+the server drops the message from the durable's pending set and sends a
+`$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES` advisory (`getNextMsg` and
+`checkPending` → `hasMaxDeliveries` in the 2.15.1 source). So the DLQ copy is
+the last chance. Until #811 a failed copy was followed by a NAK, and a panic
+on the fifth delivery took the retry path; both lost the message without a
+trace beyond a log line.
+
+Now `Subscriber.deadLetter` (`pkg/messaging/subscriber.go`):
+
+- Tries the copy up to `messaging.DLQPublishAttempts` (3) times, 500 ms and
+  then 2 s apart, each try bounded by `DLQPublishTimeout` (2 s). The
+  heartbeat keeps the message in flight meanwhile. The copy's `Msg-Id` is
+  `<stream>-<sequence>`, so a try that was stored but whose answer got lost
+  does not make a second copy (the DLQ's 2-minute duplicate window). The
+  worker's loop is held for this: 2.5 s when the DLQ refuses at once, about
+  8.5 s at worst.
+- If every try fails, leaves the message unacked (no NAK, no term: neither
+  would keep it, and an ack or term would say it was handled). It logs
+  `Could not copy the message to the DLQ; it is left unacked and stays only
+  in VRSKY_DATA` at error level with `stream_seq`, tenant, connection,
+  worker, the last handler error and the DLQ error, and counts it in
+  `vrsky_dlq_publish_failed_total{pipeline_id, worker}`. When its ack wait
+  runs out the server drops it from the durable.
+
+The message is then only in `VRSKY_DATA`, at the logged sequence, until the
+stream's 72 h age limit or its size caps remove it. Recovering it is by hand
+(see the [operator guide](operator/troubleshooting.md#a-message-that-could-not-be-dead-lettered)).
+A worker killed during its fifth attempt loses the message the same way and
+leaves only the advisory. Making either case recover on its own needs a
+consumer config change or an advisory listener
+(`plans/issue-811-last-delivery-dlq.md`).
+
 ### AckWait, in-progress heartbeats & redelivery (#139)
 
 The durable consumer's **AckWait** is the crash-recovery window — how long
@@ -416,7 +455,10 @@ A message that fails five deliveries (`MaxDeliveryAttempts`; redelivered after
 1 s, 5 s, 30 s and 2 min, or at once over the cap above) is dead-lettered:
 
 1. The message is copied to the `VRSKY_DLQ` stream with the last error and
-   the attempt count, and acked on the data stream.
+   the attempt count, and acked on the data stream. A handler that panics
+   is dead-lettered the same way. If the copy fails three times the message
+   is not acked and stays only in `VRSKY_DATA`
+   ([When the DLQ copy fails](#when-the-dlq-copy-fails-811)).
 2. `vrsky_dlq_messages_total` goes up, and the `DLQGrowing` alert fires
    when a pipeline dead-letters messages for 10 minutes. The metric has no
    tenant label, so the alert goes to the platform's notification targets,

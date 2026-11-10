@@ -287,9 +287,9 @@ func TestProducer_ManyFailingConnectionsDoNotStallOthers(t *testing.T) {
 }
 
 // #794: a handler that panics is retried on the backoff schedule too, not at
-// once. The panic is recovered by the subscriber, not the SDK. The fifth
-// attempt panics as well and is not dead-lettered (#811), so the test checks
-// the gaps only.
+// once. The panic is recovered by the subscriber, not the SDK. That the
+// fifth panic is dead-lettered is TestProducer_LastDeliveryReachesTheDLQ
+// (#811); this test checks the gaps.
 func TestProducer_PanicRetriesFollowTheBackoff(t *testing.T) {
 	ms := time.Millisecond
 	backoff := []time.Duration{300 * ms, 600 * ms, 900 * ms, 1200 * ms}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -208,6 +209,59 @@ func TestSubscribeDelayedCapDefaults(t *testing.T) {
 			if sub.opts.MaxDelayed != tt.wantDelayed || sub.opts.MaxDelayedPerConnection != tt.wantPerConnec {
 				t.Errorf("caps = (%d, %d), want (%d, %d)", sub.opts.MaxDelayed, sub.opts.MaxDelayedPerConnection,
 					tt.wantDelayed, tt.wantPerConnec)
+			}
+		})
+	}
+}
+
+// #811 (review of #810): a message whose last delivery fails never comes
+// back, so it must not take a place in the delayed set. Before the fix a
+// panic on the last delivery went through retry, which added it: it held
+// one of the MaxDelayed places until its due time (up to 2 min in
+// production). A handler error on the last delivery never did; both now take
+// the DLQ path.
+func TestLastDeliveryHoldsNoDelayedSlot(t *testing.T) {
+	ms := time.Millisecond
+	tests := []struct {
+		name    string
+		handler Handler
+	}{
+		{"handler error", func(context.Context, *nats.Msg) error { return errors.New("target down") }},
+		{"handler panics", func(context.Context, *nats.Msg) error { panic("connector bug") }},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, js, cleanup := startServer(t)
+			defer cleanup()
+			var attempts atomic.Int32
+			// The last step is long, so a leftover entry is still due when
+			// the test looks.
+			sub, err := Subscribe(js, SubscriberOpts{
+				DurableName: fmt.Sprintf("last-delivery-slot-%d", i),
+				Backoff:     []time.Duration{50 * ms, 50 * ms, 50 * ms, 50 * ms, time.Minute},
+			}, func(ctx context.Context, m *nats.Msg) error {
+				attempts.Add(1)
+				return tt.handler(ctx, m)
+			})
+			if err != nil {
+				t.Fatalf("Subscribe: %v", err)
+			}
+			if err := NewPublisher(js).Publish(context.Background(), "tenant-a", "conn-a", "m-1", []byte("x")); err != nil {
+				t.Fatalf("publish: %v", err)
+			}
+			waitFor(t, func() bool { return attempts.Load() >= MaxDeliveryAttempts }, 10*time.Second)
+			time.Sleep(300 * ms) // the DLQ publish, or a sixth delivery that must not come
+			sub.Stop()           // the loop has exited: reading delayed is safe now
+			if n := attempts.Load(); n != MaxDeliveryAttempts {
+				t.Errorf("delivered %d times, want %d", n, MaxDeliveryAttempts)
+			}
+			if info, err := js.StreamInfo(DLQStreamName); err != nil {
+				t.Errorf("DLQ info: %v", err)
+			} else if info.State.Msgs != 1 {
+				t.Errorf("the DLQ holds %d messages, want 1", info.State.Msgs)
+			}
+			if n := sub.delayed.len(); n != 0 {
+				t.Errorf("%d messages still counted as waiting out a retry delay, want 0", n)
 			}
 		})
 	}
