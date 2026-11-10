@@ -1418,7 +1418,7 @@ Last updated 2026-10-28.
     timeout that scales with the size or bounds idle time instead. Found in
     #773. Filed as #774.
 
-194. **A message whose last attempt fails to reach the DLQ is lost.** When
+199. **A message whose last attempt fails to reach the DLQ is lost.** When
     the DLQ publish fails on the fifth delivery, or the handler panics on
     it, `Subscriber.dispatch` NAKs and logs `will NAK and retry`. But
     nats-server makes no delivery past `MaxDeliver` (`getNextMsg` drops a
@@ -1427,14 +1427,14 @@ Last updated 2026-10-28.
     source, not measured. Retry the DLQ publish in place, or ack only after
     it succeeded and otherwise leave the message to its ack wait with a
     `MaxDeliver` one higher than the attempts the subscriber counts. Found
-    in #794.
+    in #794. Filed as #811.
 
-195. **Some Postgres tests fail instead of skipping without a database.**
+200. **Some Postgres tests fail instead of skipping without a database.**
     `cmd/db-consumer/password_pg_test.go` and `cmd/db-producer/deliver_pg_test.go`
     say they are skipped without `VRSKY_TEST_POSTGRES_URL`, but they open
     `os.Getenv(testdb.EnvVar)` directly and fail on `dial tcp [::1]:5432`
     when it is unset, so `go test ./...` on a laptop goes red. Skip through
-    the `testdb` helper like the other database tests. Found in #794.
+    the `testdb` helper like the other database tests. Found in #794. Filed as #785.
 
 ## Human
 
