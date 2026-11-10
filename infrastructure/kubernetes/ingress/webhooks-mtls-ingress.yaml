@@ -1,0 +1,83 @@
+# Inbound webhooks that require a client certificate (#454).
+#
+# ingress-nginx checks the caller's certificate here, at the edge, against
+# the CA bundle in the Secret webhook-client-ca, and passes the verified
+# certificate to the webhook consumer in the ssl-client-cert header. The
+# worker then checks it again against the connection's OWN client CA, so a
+# certificate from one tenant's CA (which is in the bundle) does not open
+# another tenant's webhook.
+#
+# WHY A SEPARATE HOST: ingress-nginx applies auth-tls per host, not per path.
+# On vrsky.valueretail.no it would also ask every browser of the UI for a
+# client certificate. The host below needs its own DNS record.
+#
+# WHY ONLY THIS INGRESS MAY ROUTE TO 9102: for a location with auth-tls,
+# nginx sets ssl-client-cert itself (proxy_set_header), which replaces any
+# copy the caller sent, and drops it when there is no certificate. On a host
+# without auth-tls nginx passes a caller's header through untouched. So the
+# public webhook Ingress routes to 9100, which never reads the header, and
+# only this one routes to 9102, which does. A guard test pins both
+# (src/pkg/managementapi/webhook_mtls_edge_guard_test.go).
+#
+# The hop to the worker is TLS, and nginx presents its own client certificate
+# (proxy-ssl-secret, from webhook-edge-tls.yaml); the worker's 9102 listener
+# accepts no other, so nothing else in the cluster can set the header.
+#
+# No configuration or server snippets: they could rewrite the headers above.
+#
+# Applied by hand, after webhook-edge-tls.yaml and the CA bundle Secret. See
+# docs/operator/webhook-mtls.md for the order, the tests and the rollback.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrsky-webhooks-mtls
+  namespace: vrsky-platform
+  labels:
+    app: vrsky
+    component: webhooks-mtls
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Same bound as the public webhook Ingress (webhooks-ingress.yaml).
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # --- the caller's client certificate ---
+    # Secret with key ca.crt: every CA a tenant has configured as a webhook
+    # client CA, concatenated (webhook-client-ca.example.yaml). nginx sends
+    # these names in its certificate request, and Go and Java clients only
+    # offer a certificate whose issuer is on that list.
+    nginx.ingress.kubernetes.io/auth-tls-secret: "vrsky-platform/webhook-client-ca"
+    # "on": no certificate, or one that does not chain to the bundle, is
+    # refused at the edge (400). A missing Secret makes ingress-nginx deny
+    # the location (503), not skip the check.
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    # One intermediate between a tenant's root and the client certificate.
+    # nginx forwards only the leaf, so the connection's own client_ca must
+    # also hold that intermediate for the worker's check to pass.
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "2"
+    nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
+
+    # --- the hop to the worker ---
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-ssl-secret: "vrsky-platform/webhook-edge-client"
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "on"
+    nginx.ingress.kubernetes.io/proxy-ssl-name: "vrsky-webhook-consumer.vrsky-platform.svc"
+    nginx.ingress.kubernetes.io/proxy-ssl-server-name: "on"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - mtls.vrsky.valueretail.no
+      secretName: vrsky-webhooks-mtls-tls
+  rules:
+    - host: mtls.vrsky.valueretail.no
+      http:
+        paths:
+          # Public URL pattern: https://mtls.vrsky.valueretail.no/webhook/<connectionID>
+          - path: /webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-webhook-consumer
+                port:
+                  number: 9102

@@ -1,0 +1,46 @@
+# A second layer for the webhook consumer's edge port (#454). Optional.
+#
+# 9102 trusts the ssl-client-cert header. The worker already refuses any TLS
+# client there that does not present the ingress's edge certificate
+# (webhook-edge-tls.yaml); this policy also keeps every pod except
+# ingress-nginx from opening a connection to it.
+#
+# It does nothing unless the cluster runs a network policy engine (AKS: chosen
+# at cluster create, `az aks show --query networkProfile.networkPolicy`). If it
+# does, note that selecting the pod makes every port not listed below
+# unreachable, so 9100 (webhooks via the public Ingress, the management API's
+# calls) and 8080 (health, /metrics) stay open to all, as they are today.
+#
+# Check the ingress-nginx namespace and pod labels before applying:
+#   kubectl get pods -A -l app.kubernetes.io/name=ingress-nginx --show-labels
+#
+# Applied by hand; see docs/operator/webhook-mtls.md.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vrsky-webhook-consumer-edge
+  namespace: vrsky-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: vrsky-webhook-consumer
+  policyTypes:
+    - Ingress
+  ingress:
+    # Unchanged: anyone in the cluster, as before this policy.
+    - ports:
+        - protocol: TCP
+          port: 9100
+        - protocol: TCP
+          port: 8080
+    # The edge port: ingress-nginx only.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 9102

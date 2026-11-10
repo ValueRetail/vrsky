@@ -32,8 +32,12 @@ func incSignatureFailure(connectionID, reason string) {
 //
 // Labels:
 //   - connection_id: routes failures back to the specific pipeline
-//   - reason:        "missing_cert" (none presented / non-TLS) or
-//     "untrusted_cert" (presented but not signed by the configured CA)
+//   - reason:        "missing_cert" (none presented / non-TLS / none
+//     forwarded by the ingress), "untrusted_cert" (presented but not signed
+//     by the configured CA, expired, or not reported verified by the
+//     ingress), "malformed_cert" (the forwarded ssl-client-cert header did
+//     not parse, or appeared twice) or "untrusted_edge" (an edge-port request
+//     without the ingress's own certificate; #454)
 var webhookClientCertFailures = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "webhook_client_cert_failures_total",

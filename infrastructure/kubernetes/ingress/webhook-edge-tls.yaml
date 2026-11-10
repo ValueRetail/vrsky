@@ -1,0 +1,113 @@
+# The hop from ingress-nginx to the webhook consumer's edge mTLS port (#454).
+#
+# The mTLS webhook Ingress (webhooks-mtls-ingress.yaml) checks a caller's
+# client certificate and forwards it to the worker in the ssl-client-cert
+# header. The header holds only the public certificate, so the worker may
+# trust it only from the ingress. This private CA is how it knows: nginx
+# presents webhook-edge-client (proxy-ssl-secret), and the worker's edge
+# listener on 9102 accepts no other client certificate.
+#
+#   webhook-edge-selfsigned  (Issuer, selfSigned)
+#     -> webhook-edge-ca      (Certificate, isCA; Secret webhook-edge-ca)
+#       -> webhook-edge-ca    (Issuer, ca: signs with that Secret)
+#         -> webhook-edge-server (Certificate, server auth; Secret
+#            webhook-edge-server, mounted by the webhook consumer)
+#         -> webhook-edge-client (Certificate, client auth; Secret
+#            webhook-edge-client, read by ingress-nginx)
+#
+# Both leaf Secrets carry ca.crt (the edge CA): the worker verifies nginx with
+# it, and nginx verifies the worker with it (proxy-ssl-verify).
+#
+# Same shape as the Postgres CA (infrastructure/kubernetes/postgresql/tls.yaml).
+# Applied by hand; the deploy job never applies this directory. See
+# docs/operator/webhook-mtls.md.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-edge-selfsigned
+  namespace: vrsky-platform
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: webhook-edge-ca
+  namespace: vrsky-platform
+spec:
+  isCA: true
+  commonName: vrsky-webhook-edge-ca
+  secretName: webhook-edge-ca
+  # Ten years, renewed one year before the end. The leaves below carry the CA
+  # in their own Secrets, so a renewal reaches both sides on their next
+  # issue; keeping the key (rotationPolicy Never) keeps old leaves valid.
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    name: webhook-edge-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-edge-ca
+  namespace: vrsky-platform
+spec:
+  ca:
+    secretName: webhook-edge-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: webhook-edge-server
+  namespace: vrsky-platform
+spec:
+  secretName: webhook-edge-server
+  commonName: vrsky-webhook-consumer.vrsky-platform.svc
+  # One year, renewed 90 days before the end. The worker reads the files at
+  # start; pods restart at every cluster start, well inside 90 days.
+  duration: 8760h
+  renewBefore: 2160h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  # Server auth only: this certificate must not work as the ingress's client
+  # certificate (the worker requires the client-auth EKU).
+  usages:
+    - server auth
+    - digital signature
+  # proxy-ssl-name on the mTLS Ingress is the first of these.
+  dnsNames:
+    - vrsky-webhook-consumer.vrsky-platform.svc
+    - vrsky-webhook-consumer.vrsky-platform.svc.cluster.local
+  issuerRef:
+    name: webhook-edge-ca
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: webhook-edge-client
+  namespace: vrsky-platform
+spec:
+  secretName: webhook-edge-client
+  commonName: vrsky-ingress-webhook-edge
+  # nginx reloads a changed Secret on its own, so renewal needs no restart.
+  duration: 8760h
+  renewBefore: 2160h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  # Client auth only.
+  usages:
+    - client auth
+    - digital signature
+  issuerRef:
+    name: webhook-edge-ca
+    kind: Issuer

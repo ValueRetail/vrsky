@@ -1521,11 +1521,21 @@ spec:
             secretKeyRef:
               name: minio-credentials
               key: secretkey
+        - name: WORKER_MTLS_EDGE_PORT
+          value: "9102"
+        - name: WEBHOOK_EDGE_CERT_FILE
+          value: "/etc/vrsky/webhook-edge/tls.crt"
+        - name: WEBHOOK_EDGE_KEY_FILE
+          value: "/etc/vrsky/webhook-edge/tls.key"
+        - name: WEBHOOK_EDGE_CA_FILE
+          value: "/etc/vrsky/webhook-edge/ca.crt"
         - name: WORKER_HTTP_PORT
           value: "9100"
         ports:
         - name: http
           containerPort: 9100
+        - name: mtls-edge
+          containerPort: 9102
         resources:
           requests:
             # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
@@ -1543,10 +1553,17 @@ spec:
         - name: postgres-ca
           mountPath: /etc/vrsky/postgres-ca
           readOnly: true
+        - name: webhook-edge
+          mountPath: /etc/vrsky/webhook-edge
+          readOnly: true
       volumes:
       - name: postgres-ca
         configMap:
           name: postgres-ca
+          optional: true
+      - name: webhook-edge
+        secret:
+          secretName: webhook-edge-server
           optional: true
 ---
 apiVersion: v1
@@ -1563,6 +1580,9 @@ spec:
   - name: http
     port: 9100
     targetPort: 9100
+  - name: mtls-edge
+    port: 9102
+    targetPort: 9102
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -50,6 +50,16 @@ type webhookConsumer struct {
 	mtlsPort   string
 	mtlsServer *http.Server
 
+	// Edge mTLS (#454): production checks the caller's client certificate at
+	// ingress-nginx (auth-tls-*) and forwards it in the ssl-client-cert header.
+	// edgePort (WORKER_MTLS_EDGE_PORT) is the only listener that reads that
+	// header, and it accepts only a TLS client presenting the ingress's own
+	// certificate from the edge CA. Empty edgePort disables it. edgeAddr is the
+	// bound address once listening (tests use port 0).
+	edgePort   string
+	edgeServer *http.Server
+	edgeAddr   string
+
 	// Active connections: connectionId → connection info
 	activeConnections map[string]*ActiveConnection
 	mu                sync.RWMutex
@@ -96,7 +106,8 @@ func (s *webhookConsumer) Configure(ctx context.Context, res *sdk.Resources) err
 	s.logger = res.Logger
 	s.activeConnections = make(map[string]*ActiveConnection)
 	s.auxPort = envOr("WORKER_HTTP_PORT", "9100")
-	s.mtlsPort = os.Getenv("WORKER_MTLS_PORT") // empty → mTLS listener disabled
+	s.mtlsPort = os.Getenv("WORKER_MTLS_PORT")      // empty → mTLS listener disabled
+	s.edgePort = os.Getenv("WORKER_MTLS_EDGE_PORT") // empty → edge listener disabled
 	if s.keys == nil {
 		s.keys = idempotency.NewPostgresStore(res.DB)
 	}
@@ -120,6 +131,14 @@ func (s *webhookConsumer) Run(ctx context.Context, publish sdk.PublishFunc) erro
 
 	if err := s.startMTLSListener(); err != nil {
 		return fmt.Errorf("failed to start mTLS listener: %w", err)
+	}
+	// A broken edge setup must not take every other webhook down with it: the
+	// edge listener stays off (so mTLS connections stay unreachable, as before
+	// #454) and the reason is logged as an error. The deploy sets the port
+	// before a human has created the edge certificates.
+	if err := s.startEdgeListener(); err != nil {
+		s.logger.Error("Edge mTLS listener not started; webhook connections that require a client certificate are unreachable through the ingress",
+			"port", s.edgePort, "error", err)
 	}
 
 	startSub, err := s.nc.Subscribe("vrsky.commands.*.connection.start", s.handleStartCommand)
@@ -192,6 +211,9 @@ func (s *webhookConsumer) Stop(ctx context.Context) error {
 	if s.mtlsServer != nil {
 		_ = s.mtlsServer.Shutdown(ctx)
 	}
+	if s.edgeServer != nil {
+		_ = s.edgeServer.Shutdown(ctx)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -232,6 +254,62 @@ func (s *webhookConsumer) startMTLSListener() error {
 		s.logger.Info("mTLS webhook listener started", "port", s.mtlsPort)
 		if serr := s.mtlsServer.Serve(ln); serr != nil && serr != http.ErrServerClosed {
 			s.logger.Error("mTLS listener stopped", "error", serr)
+		}
+	}()
+	return nil
+}
+
+// startEdgeListener brings up the TLS listener on WORKER_MTLS_EDGE_PORT that
+// ingress-nginx proxies mTLS webhooks to (#454). The handshake demands a
+// client certificate chaining to the edge CA (the ingress's proxy-ssl-secret);
+// handleEdgeWebhook then reads the caller's certificate from the
+// ssl-client-cert header and verifies it against the connection's own CA.
+// No-op when WORKER_MTLS_EDGE_PORT is unset. Files come from
+// WEBHOOK_EDGE_CERT_FILE, WEBHOOK_EDGE_KEY_FILE and WEBHOOK_EDGE_CA_FILE; there
+// is no self-signed fallback, because without the edge CA anything could set
+// the header.
+func (s *webhookConsumer) startEdgeListener() error {
+	if s.edgePort == "" {
+		return nil
+	}
+	files := map[string]string{}
+	for _, env := range []string{"WEBHOOK_EDGE_CERT_FILE", "WEBHOOK_EDGE_KEY_FILE", "WEBHOOK_EDGE_CA_FILE"} {
+		path := os.Getenv(env)
+		if path == "" {
+			return fmt.Errorf("%s is not set", env)
+		}
+		b, err := os.ReadFile(path) //nolint:gosec // operator-set path to a mounted Secret
+		if err != nil {
+			return fmt.Errorf("read %s: %w", env, err)
+		}
+		files[env] = string(b)
+	}
+	tlsCfg, err := tlsconfig.EdgeServerConfig(
+		[]byte(files["WEBHOOK_EDGE_CERT_FILE"]),
+		[]byte(files["WEBHOOK_EDGE_KEY_FILE"]),
+		[]byte(files["WEBHOOK_EDGE_CA_FILE"]))
+	if err != nil {
+		return fmt.Errorf("build edge TLS config: %w", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/webhook/", s.handleEdgeWebhook())
+	srv := &http.Server{
+		Handler:           mux,
+		TLSConfig:         tlsCfg,
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+	}
+	ln, err := tls.Listen("tcp", ":"+s.edgePort, tlsCfg)
+	if err != nil {
+		return fmt.Errorf("listen on edge port %s: %w", s.edgePort, err)
+	}
+	s.edgeServer = srv
+	s.edgeAddr = ln.Addr().String()
+	go func() {
+		s.logger.Info("Edge mTLS webhook listener started", "addr", s.edgeAddr)
+		if serr := srv.Serve(ln); serr != nil && serr != http.ErrServerClosed {
+			s.logger.Error("Edge mTLS listener stopped", "error", serr)
 		}
 	}()
 	return nil
@@ -317,8 +395,8 @@ func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, ten
 	// Extract optional per-connection mTLS client CA (#89). When set, the webhook
 	// requires an inbound client cert that chains to it.
 	clientCA := s.extractClientCA(conn)
-	if len(clientCA) > 0 && s.mtlsPort == "" {
-		s.logger.Warn("Connection requires mTLS (tls.client_ca) but WORKER_MTLS_PORT is unset; the connection is unreachable — there is no TLS listener and plain-port requests are rejected as missing a client cert. Set WORKER_MTLS_PORT.",
+	if len(clientCA) > 0 && s.mtlsServer == nil && s.edgeServer == nil {
+		s.logger.Warn("Connection requires mTLS (tls.client_ca) but neither the edge listener (WORKER_MTLS_EDGE_PORT) nor the direct TLS listener (WORKER_MTLS_PORT) is running; the connection is unreachable, because plain-port requests are rejected as missing a client cert.",
 			"connection_id", connectionID)
 	}
 

@@ -56,6 +56,10 @@ ensure_file_api_secret() {
     --from-literal=consumer_token="$(openssl rand -hex 32)"
 }
 FILES_SIZE="${FILES_SIZE:-50Gi}"
+# The webhook consumer's edge mTLS port (#454): ingress-nginx proxies the mTLS
+# webhook host here. 9101 is the direct-TLS port in Docker Compose; this is a
+# different listener with a different trust model, so it gets its own number.
+WEBHOOK_EDGE_PORT=9102
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$REPO_ROOT"
 OUT="infrastructure/kubernetes/connectors"; mkdir -p "$OUT"
 MANIFEST="$OUT/connectors.yaml"
@@ -133,6 +137,26 @@ EOF
               key: consumer_token
 EOF
       ;;
+    # Edge mTLS (#454). ingress-nginx checks a caller's client certificate on
+    # the mTLS webhook host and proxies to the edge port over TLS, presenting
+    # its own certificate from the edge CA; only that listener reads the
+    # forwarded ssl-client-cert header. The files come from the cert-manager
+    # Secret webhook-edge-server (infrastructure/kubernetes/ingress/
+    # webhook-edge-tls.yaml, applied by hand). Until it exists the mount is
+    # empty and the worker logs that the edge listener is off; every other
+    # webhook is unaffected. WORKER_MTLS_PORT (direct TLS) is Compose only.
+    webhook-consumer)
+      cat <<EOF
+        - name: WORKER_MTLS_EDGE_PORT
+          value: "$WEBHOOK_EDGE_PORT"
+        - name: WEBHOOK_EDGE_CERT_FILE
+          value: "/etc/vrsky/webhook-edge/tls.crt"
+        - name: WEBHOOK_EDGE_KEY_FILE
+          value: "/etc/vrsky/webhook-edge/tls.key"
+        - name: WEBHOOK_EDGE_CA_FILE
+          value: "/etc/vrsky/webhook-edge/ca.crt"
+EOF
+      ;;
     file-producer)
       cat <<EOF
         - name: FILE_OUTPUT_DIR
@@ -149,8 +173,34 @@ EOF
   esac
 }
 
+# extra_ports / extra_service_ports — a second port beyond WORKER_HTTP_PORT.
+# Only the webhook consumer's edge mTLS listener (#454).
+extra_ports() {
+  case "$1" in
+    webhook-consumer)
+      cat <<EOF
+        - name: mtls-edge
+          containerPort: $WEBHOOK_EDGE_PORT
+EOF
+      ;;
+  esac
+}
+
+extra_service_ports() {
+  case "$1" in
+    webhook-consumer)
+      cat <<EOF
+  - name: mtls-edge
+    port: $WEBHOOK_EDGE_PORT
+    targetPort: $WEBHOOK_EDGE_PORT
+EOF
+      ;;
+  esac
+}
+
 # volume_mounts / volumes — every connector mounts the Postgres CA (#453); only
-# the file connectors also touch the shared share.
+# the file connectors also touch the shared share, and the webhook consumer its
+# edge certificate (#454).
 #
 # postgres-ca is the public ca.crt that postgres-tls.sh ca-sync copies into this
 # namespace. DATABASE_URL names it (sslrootcert=/etc/vrsky/postgres-ca/ca.crt).
@@ -170,6 +220,13 @@ EOF
           mountPath: /data
 EOF
       ;;
+    webhook-consumer)
+      cat <<EOF
+        - name: webhook-edge
+          mountPath: /etc/vrsky/webhook-edge
+          readOnly: true
+EOF
+      ;;
   esac
 }
 
@@ -187,6 +244,16 @@ EOF
       - name: files
         persistentVolumeClaim:
           claimName: $FILES_PVC
+EOF
+      ;;
+    webhook-consumer)
+      # Optional, so the pod starts before a human has applied the cert-manager
+      # resources; the worker then runs without the edge listener.
+      cat <<EOF
+      - name: webhook-edge
+        secret:
+          secretName: webhook-edge-server
+          optional: true
 EOF
       ;;
   esac
@@ -346,6 +413,7 @@ EOF
         - name: http
           containerPort: $port
 EOF
+    extra_ports "$name"
   fi
   cat <<EOF
         resources:
@@ -383,6 +451,7 @@ spec:
     port: $port
     targetPort: $port
 EOF
+    extra_service_ports "$name"
   fi
 
   # Only the scaled-out producers need a disruption budget; a singleton has
