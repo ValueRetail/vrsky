@@ -2659,7 +2659,9 @@ paging through all results, and emits each page as a JSON-array message.</p>
 <span class="p">}</span>
 </code></pre></div>
 <p>The connector honours Sitoo's rate limit: on HTTP <code>429</code> it waits for
-<code>X-Rate-Limit-Reset</code> / <code>Retry-After</code> and retries.</p>
+<code>X-Rate-Limit-Reset</code> / <code>Retry-After</code> (5 s when neither is set) and retries.
+The wait is capped at 2 min, and never shorter than the usual retry step
+for that attempt (1 s, 5 s, 30 s, 2 min).</p>
 <h3 id="incremental-polling">Incremental polling<a class="headerlink" href="#incremental-polling" title="Permanent link">&para;</a></h3>
 <p>By default every poll reads and publishes the whole collection. For the
 <code>orders</code> resource, set <code>incremental: true</code> to publish only orders that

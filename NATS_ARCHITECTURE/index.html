@@ -2733,7 +2733,7 @@ only one of them can be honestly claimed by a shared-broker design.</p>
 <p><strong>Use Cases</strong>:</p>
 <ul>
 <li>✅ The data stream: every pipeline message, one durable consumer per worker</li>
-<li>✅ Retries: JetStream redelivery of a NAK'd message, with backoff</li>
+<li>✅ Retries: JetStream redelivery of a message NAK'd with a delay, on the backoff schedule</li>
 <li>✅ Dead letter queue: the <code>VRSKY_DLQ</code> stream (failed messages)</li>
 <li>✅ Platform-wide events (tenant provisioning, etc.)</li>
 <li>✅ Cross-tenant integrations (future feature)</li>
@@ -2940,17 +2940,66 @@ record of the intended design, because it is one of the candidate answers to</p>
 (<code>messaging.DefaultBackoff</code>). <code>Subscriber.dispatch</code> in
 <code>pkg/messaging/subscriber.go</code> runs the handler and then:</p>
 <div class="highlight"><pre><span></span><code>handler returns nil                      → Ack
-handler returns an error, delivery &lt; 5   → Nak (redelivered after the backoff)
+handler returns an error, delivery n &lt; 5 → NakWithDelay, redelivered Backoff[n-1] later
+  the error asks for a delay d           → the longer of Backoff[n-1] and d
+                                           (sdk.RateLimited; d kept in 1 s .. 2 min)
+  the subscriber already holds its cap   → Nak, redelivered at once
+  of waiting messages
 handler returns an error, delivery = 5   → copy to vrsky.dlq.&lt;tenant&gt;.pipeline.&lt;conn&gt;
                                            with X-Vrsky-Last-Error, X-Vrsky-Delivered
                                            and X-Vrsky-Worker, then Ack
                                            (if the DLQ publish fails: Nak)
-handler panics                           → Nak
+handler panics                           → as for an error, delivery n &lt; 5
 </code></pre></div>
 <p>SDK connectors don't call this directly. The SDK runner maps <code>Deliver</code>'s
 result onto it: nil acks, <code>sdk.Permanent</code> acks and drops (logged, never
 dead-lettered), anything else is returned and so NAK'd
-(<code>pkg/sdk/lifecycle.go</code>).</p>
+(<code>pkg/sdk/lifecycle.go</code>). <code>sdk.RateLimited(err, d)</code> is the error that asks
+for a delay; <code>sdk.Permanent</code> wins if either wraps the other, and in an
+<code>errors.Join</code> the largest delay wins.</p>
+<h4 id="how-the-delay-is-sent-794">How the delay is sent (#794)<a class="headerlink" href="#how-the-delay-is-sent-794" title="Permanent link">&para;</a></h4>
+<p>A plain NAK puts the message straight back on the redelivery queue: the
+consumer's <code>BackOff</code> only applies when an ack wait runs out. Before #794 the
+subscriber NAK'd that way, so five failed attempts took under a second.</p>
+<p><code>NakWithDelay(d)</code> makes nats-server stamp the message as if it had been
+delivered at <code>now - AckWait + d</code>, and redeliver it once the step for its
+redelivery count, <code>Backoff[n-1]</code>, has passed since that stamp. So delivery
+<code>n</code> waits <code>d + Backoff[n-1] - AckWait</code>. The subscriber sends
+<code>d = wait - Backoff[n-1] + AckWait</code> (<code>retryWait</code> in
+<code>pkg/messaging/retry.go</code>); for a plain retry that is just <code>AckWait</code>, the
+attempt's ack wait starting over. <code>processNak</code> and <code>checkPending</code> read the
+same in nats-server 2.12.0 (production runs <code>nats:2.12-alpine</code>) and 2.15.1
+(the embedded test server), and <code>TestProducer_RetriesFollowTheBackoff</code>
+passes against both. The delay is written through <code>updateDelivered</code>, so it
+survives a leader change or a restart. Every redelivery, delayed or not,
+counts toward <code>MaxDeliver</code>.</p>
+<h4 id="waiting-messages-hold-slots-794">Waiting messages hold slots (#794)<a class="headerlink" href="#waiting-messages-hold-slots-794" title="Permanent link">&para;</a></h4>
+<p>A message waiting out its delay is still pending on the server and keeps one
+of the durable's <code>MaxAckPending</code> slots (32) from its first delivery until it
+is acked or dead-lettered: about 156 s with the default schedule, and the sum
+of the waits for a rate-limited one (up to 4 × 2 min = 8 min at the cap).
+Once every slot is pending, the server serves redeliveries only, so nothing
+new reaches the worker. Producer durables are shared by every connection of
+a type, so without a limit one tenant's dead target would stall everyone.</p>
+<p>Each subscriber therefore holds at most <code>SubscriberOpts.MaxDelayed</code> waiting
+messages (default <code>MaxAckPending/4</code>, 8) and at most
+<code>MaxDelayedPerConnection</code> of one connection (default half of that, 4). It
+tracks them by stream sequence until they are dispatched again or due. A
+failure over either cap is NAK'd without a delay, the old behaviour, and
+counted in <code>vrsky_message_retry_undelayed_total</code>. With two replicas on a
+durable, waiting messages hold at most 16 of the 32 slots, so in steady
+state a message on a healthy connection waits for the deliveries queued
+ahead of it, not for a retry timer
+(<code>TestProducer_FailingConnectionDoesNotStallOthers</code>,
+<code>TestProducer_ManyFailingConnectionsDoNotStallOthers</code>). The cost: past the
+cap, a connection's failing messages reach the DLQ within seconds.</p>
+<p>The caps are per process, not per durable. After a restart a replica may
+admit up to its cap again while the server still holds delays from before,
+and during a rolling update the old and the new pods count separately, so
+together they can fill all 32 slots and stall the durable until the old
+pods' delays run out. A durable-wide bound is #813; raising <code>MaxAckPending</code>
+or moving retries to a delay stream are the alternatives
+(<code>plans/issue-794-backoff-nak.md</code>).</p>
 <h3 id="ackwait-in-progress-heartbeats-redelivery-139">AckWait, in-progress heartbeats &amp; redelivery (#139)<a class="headerlink" href="#ackwait-in-progress-heartbeats-redelivery-139" title="Permanent link">&para;</a></h3>
 <p>The durable consumer's <strong>AckWait</strong> is the crash-recovery window — how long
 JetStream waits for an ack before assuming the worker died and redelivering. It
@@ -2970,12 +3019,14 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
   window</strong> (<code>Duplicates: 5*time.Minute</code>) collapses re-published duplicates. The
   full redelivery-to-DLQ backoff schedule (≈156s) fits well inside that window,
   so a message that is NAK'd and retried across the whole schedule is still
-  deduplicated. Downstream sinks should additionally treat writes as idempotent
+  deduplicated. A rate-limited destination can take longer (up to 8 minutes
+  at the 2 min cap), but a destination publishes nothing back to the stream,
+  so the window does not apply to it. Downstream sinks should additionally treat writes as idempotent
   where the target allows it (e.g. upsert by key).</li>
 </ul>
 <h3 id="dead-letter-queue">Dead Letter Queue<a class="headerlink" href="#dead-letter-queue" title="Permanent link">&para;</a></h3>
 <p>A message that fails five deliveries (<code>MaxDeliveryAttempts</code>; redelivered after
-1 s, 5 s, 30 s and 2 min) is dead-lettered:</p>
+1 s, 5 s, 30 s and 2 min, or at once over the cap above) is dead-lettered:</p>
 <ol>
 <li>The message is copied to the <code>VRSKY_DLQ</code> stream with the last error and
    the attempt count, and acked on the data stream.</li>

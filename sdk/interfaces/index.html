@@ -2468,7 +2468,7 @@ thing to clone when starting a new connector. It shows <code>Configure</code> (r
 </tr>
 <tr>
 <td><code>sdk.Retriable(err)</code></td>
-<td>NAK → redeliver with backoff → DLQ after <code>MaxDeliveryAttempts</code></td>
+<td>NAK → redelivered after 1 s, 5 s, 30 s, 2 min → DLQ after <code>MaxDeliveryAttempts</code> (see <a href="../../NATS_ARCHITECTURE/#what-a-worker-does-with-a-message">NATS architecture</a>)</td>
 </tr>
 <tr>
 <td><code>sdk.Permanent(err)</code></td>
@@ -2476,7 +2476,7 @@ thing to clone when starting a new connector. It shows <code>Configure</code> (r
 </tr>
 <tr>
 <td><code>sdk.RateLimited(err, d)</code></td>
-<td>NAK (retriable); the delay <code>d</code> is preserved via <code>RetryAfter</code></td>
+<td>Like <code>Retriable</code>, but each wait is the longer of <code>d</code> (kept between 1 s and the largest step, 2 min) and the backoff step; <code>sdk.Permanent</code> wins if either wraps the other</td>
 </tr>
 <tr>
 <td><code>sdk.ConfigUnavailable(err)</code></td>

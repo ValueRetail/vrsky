@@ -2645,16 +2645,19 @@ files received, files written, and failures.</p>
   time, in order. While the agent is offline the next message is held, not
   retried, so an outage does not use up retries. Stopping or redeploying the
   pipeline while a message is held does use one, unless the agent writes it
-  within a second of the stop: after five, that message goes to Failed
-  Messages, where it can be retried.</li>
+  within a second of the stop, and the message is offered again 30 s later,
+  not at once: after five, that message goes to Failed Messages, where it
+  can be retried.</li>
 <li><strong>Failures.</strong> A file the agent cannot write (disk full, checksum mismatch) is
-  retried with backoff and goes to Failed Messages after 5 attempts.</li>
+  offered again after 30 s, 30 s, 30 s and 2 min, and goes to Failed Messages
+  after 5 attempts, about 3.5 minutes after the first.</li>
 <li><strong>Several destinations.</strong> A pipeline with two or more destinations that
   each name one agent, or with two group destinations whose folders the same
   agent has, sends each message to all of them and counts it done once every
   one has written it. (Group members otherwise have a queue each.) If the
   pipeline stops while one has not, or one's write fails, the message comes
-  back and is offered only to the destinations that have not written it yet;
+  back on that schedule (30 s after the first failure) and is offered only
+  to the destinations that have not written it yet;
   the others keep the file they have and are not sent it again. VRSky
   remembers this in the remote-agent service, for 72 hours at most. If that
   service restarts before the message comes back (a VRSky deploy, say), every
