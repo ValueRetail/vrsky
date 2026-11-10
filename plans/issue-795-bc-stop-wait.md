@@ -19,6 +19,9 @@
 - Returning `ctx.Err()` on expiry (was always nil) so the SDK logs that the wait was cut short. The lifecycle gives Stop 5 s.
 - Hung pollers are not abandoned silently: the error is the signal. Duplicates on the next start remain possible in that case; that is the bound the issue asks for.
 
+## Known limit
+The SDK lifecycle (`pkg/sdk/lifecycle.go`) gives `Stop` 5 s. A worst-case save (first attempt fails on the cancelled context, the second gets `defaultSaveTimeout`, 5 s) can outlast that, so `Stop` returns its deadline error with the save still running. Out of scope here (`pkg/sdk` untouched); backlog item 194.
+
 ## Shared helper for Sitoo (#790)?
 `waitExited` is ten lines over `[]*poller`, and the poller type is local to each consumer. A shared helper would have to take `[]<-chan struct{}`, which is barely shorter than the loop. Not worth a package; Sitoo can copy the loop. If a third consumer needs it, move a `sdk.WaitAll(ctx, ...chan)` then.
 

@@ -25,10 +25,15 @@ func swReturns(c *bcConsumer, ctx context.Context) <-chan error {
 
 func swNotYet(t *testing.T, ch <-chan error, what string) {
 	t.Helper()
+	swNotFor(t, ch, 50*time.Millisecond, what)
+}
+
+func swNotFor(t *testing.T, ch <-chan error, d time.Duration, what string) {
+	t.Helper()
 	select {
 	case err := <-ch:
 		t.Fatalf("Stop returned (%v) %s", err, what)
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(d):
 	}
 }
 
@@ -136,7 +141,8 @@ func TestStop_ReturnsOnlyAfterTheLastSave(t *testing.T) {
 	f, store := swScenario(t)
 	res := swReturns(f.c, context.Background())
 	srAwait(t, store.entered, "the cancelled poller to store its checkpoint")
-	swNotYet(t, res, "while the poller's save was still held")
+	// Longer than the old fixed 2 s sleep, so a Stop that sleeps fails here.
+	swNotFor(t, res, 2500*time.Millisecond, "while the poller's save was still held")
 
 	close(store.release)
 	select {
