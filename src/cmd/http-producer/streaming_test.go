@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,5 +137,238 @@ func TestDeliverStream_NoEligibleConfigIsNoOp(t *testing.T) {
 	})
 	if err := p.DeliverStream(context.Background(), streamEnv(1), bytes.NewReader([]byte("x"))); err != nil {
 		t.Fatalf("expected a no-op, got %v", err)
+	}
+}
+
+// slowReader hands out chunks of `chunk` bytes with `gap` between them, up to
+// total bytes. With stallAfter > 0 it blocks forever (until release is closed)
+// once that many bytes are out.
+type slowReader struct {
+	total, chunk, sent, stallAfter int
+	gap                            time.Duration
+	release                        <-chan struct{}
+}
+
+func (r *slowReader) Read(b []byte) (int, error) {
+	if r.stallAfter > 0 && r.sent >= r.stallAfter {
+		<-r.release
+		return 0, iolib.ErrUnexpectedEOF
+	}
+	if r.sent >= r.total {
+		return 0, iolib.EOF
+	}
+	if r.sent > 0 {
+		time.Sleep(r.gap)
+	}
+	n := min(r.chunk, r.total-r.sent, len(b))
+	for i := 0; i < n; i++ {
+		b[i] = 'x'
+	}
+	r.sent += n
+	return n, nil
+}
+
+func streamingTimeoutProducer(t *testing.T, url string) *httpProducer {
+	p := newStreamingProducer(t, []*HTTPConfig{{NodeID: "n1", URL: url, Method: "POST"}})
+	p.requestTimeout = 200 * time.Millisecond
+	// A low minimum rate keeps the overall limit out of the way of the tests
+	// that are about the progress timeout; the limit has its own test.
+	p.streamMinRate = 1000
+	return p
+}
+
+// An upload that takes several times the request timeout, but keeps moving, is
+// not cut off (#774).
+func TestDeliverStream_SlowUploadThatKeepsMovingSucceeds(t *testing.T) {
+	var got atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := iolib.Copy(iolib.Discard, r.Body)
+		got.Store(n)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := streamingTimeoutProducer(t, srv.URL)
+	const total = 12 * 100
+	body := &slowReader{total: total, chunk: 100, gap: 60 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	if err := p.DeliverStream(ctx, streamEnv(total), body); err != nil {
+		t.Fatalf("slow but moving upload failed: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
+		t.Fatalf("upload took %v; the test must outlast the 200ms request timeout", elapsed)
+	}
+	if got.Load() != total {
+		t.Errorf("server got %d bytes, want %d", got.Load(), total)
+	}
+}
+
+// An upload that stops moving fails after the timeout, as a retriable error.
+func TestDeliverStream_StalledUploadFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = iolib.Copy(iolib.Discard, r.Body)
+	}))
+	t.Cleanup(srv.Close)
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	p := streamingTimeoutProducer(t, srv.URL)
+	body := &slowReader{total: 1000, chunk: 100, stallAfter: 100, release: release}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err := p.DeliverStream(ctx, streamEnv(1000), body)
+	if err == nil {
+		t.Fatal("want an error from a stalled upload")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("took %v, want about the 200ms timeout", elapsed)
+	}
+	if sdk.IsPermanent(err) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("want a retriable timeout error, got %v", err)
+	}
+}
+
+// A target that takes the whole body and never answers fails within the
+// timeout on the streaming path too.
+func TestDeliverStream_NoAnswerAfterUploadFails(t *testing.T) {
+	srv := hangingServer(t)
+	p := streamingTimeoutProducer(t, srv.URL)
+	body := bytes.NewReader(bytes.Repeat([]byte("y"), 512))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err := p.DeliverStream(ctx, streamEnv(512), body)
+	if err == nil {
+		t.Fatal("want an error from a target that never answers")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("took %v, want about the 200ms timeout", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("want a timeout error, got %v", err)
+	}
+}
+
+// The delivery context still bounds a stream that keeps moving.
+func TestDeliverStream_DeliveryContextBoundsTheWholeUpload(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = iolib.Copy(iolib.Discard, r.Body)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := streamingTimeoutProducer(t, srv.URL)
+	body := &slowReader{total: 100 * 100, chunk: 100, gap: 50 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if err := p.DeliverStream(ctx, streamEnv(100*100), body); err == nil {
+		t.Fatal("want an error once the delivery context ends")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("took %v, want about the 400ms delivery context", elapsed)
+	}
+}
+
+func TestStreamLimit(t *testing.T) {
+	const timeout = 30 * time.Second
+	const maxTime = 15 * time.Minute
+	cases := []struct {
+		name string
+		size int64
+		want time.Duration
+	}{
+		{"size not known", 0, maxTime},
+		{"negative size", -1, maxTime},
+		{"1 MiB", 1 << 20, timeout + 4*time.Second},
+		{"100 MiB", 100 << 20, timeout + 400*time.Second},
+		{"just under the cap", int64(maxTime/time.Second-31) * minStreamRate, maxTime - time.Second},
+		{"timeout pushes it over the cap", int64(maxTime/time.Second-1) * minStreamRate, maxTime},
+		{"1 GiB", 1 << 30, maxTime},
+		{"huge", 1 << 62, maxTime},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := streamLimit(timeout, tc.size, minStreamRate, maxTime); got != tc.want {
+				t.Errorf("streamLimit(%d) = %v, want %v", tc.size, got, tc.want)
+			}
+		})
+	}
+	// The producer defaults to the documented constants.
+	if got := (&httpProducer{}).streamLimit(1 << 20); got != defaultRequestTimeout+4*time.Second {
+		t.Errorf("default streamLimit(1 MiB) = %v, want %v", got, defaultRequestTimeout+4*time.Second)
+	}
+}
+
+// An upload that keeps moving, but too slowly, is cut off at its overall limit
+// with a retriable deadline error, so a slow target cannot hold the producer
+// for ever (#774 review). Small injected values stand in for 256 KiB/s and
+// 15 minutes.
+func TestDeliverStream_SlowUploadIsCutOffAtTheLimit(t *testing.T) {
+	const total = 100 * 100 // 100 chunks, 50 ms apart: about 5 s
+	cases := []struct {
+		name    string
+		rate    int64
+		maxTime time.Duration
+		want    time.Duration // 200 ms timeout + total/rate, or the cap
+	}{
+		{"size at the minimum rate", 10_000, time.Minute, 1200 * time.Millisecond},
+		{"capped", 1000, 700 * time.Millisecond, 700 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = iolib.Copy(iolib.Discard, r.Body)
+			}))
+			t.Cleanup(srv.Close)
+
+			p := streamingTimeoutProducer(t, srv.URL)
+			p.streamMinRate, p.streamMaxTime = tc.rate, tc.maxTime
+			body := &slowReader{total: total, chunk: 100, gap: 50 * time.Millisecond}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			start := time.Now()
+			err := p.DeliverStream(ctx, streamEnv(total), body)
+			elapsed := time.Since(start)
+			if err == nil {
+				t.Fatal("want an error from an upload that outlasts its limit")
+			}
+			if sdk.IsPermanent(err) || !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("want a retriable deadline error, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "limit") {
+				t.Errorf("error should name the overall limit, got %v", err)
+			}
+			if elapsed < tc.want-100*time.Millisecond || elapsed > tc.want+2*time.Second {
+				t.Errorf("took %v, want about %v", elapsed, tc.want)
+			}
+		})
+	}
+}
+
+// After the last byte leaves the source the target gets twice the timeout, one
+// for what is still in the socket buffers to drain and one to answer.
+func TestDeliverStream_AnswerWindowAfterTheLastByte(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = iolib.Copy(iolib.Discard, r.Body)
+		time.Sleep(750 * time.Millisecond) // more than one timeout, less than two
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := streamingTimeoutProducer(t, srv.URL)
+	p.requestTimeout = 500 * time.Millisecond
+	body := bytes.NewReader(bytes.Repeat([]byte("z"), 512))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.DeliverStream(ctx, streamEnv(512), body); err != nil {
+		t.Fatalf("an answer within twice the timeout after the last byte must count: %v", err)
 	}
 }
