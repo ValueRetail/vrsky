@@ -314,16 +314,37 @@ func (c *bcConsumer) Stop(ctx context.Context) error {
 		_ = c.resendSub.Unsubscribe()
 	}
 	c.mu.Lock()
+	// Every poller that may still be saving: the active ones, cancelled
+	// here, and those an earlier stop command is still waiting on (#795).
+	var exiting []*poller
 	for _, p := range c.active {
 		p.cancel()
+		exiting = append(exiting, p)
+	}
+	for _, p := range c.stopping {
+		exiting = append(exiting, p)
 	}
 	c.active = make(map[string]*poller)
 	// A start still in flight must not leave a poller nobody will cancel.
 	c.starts.StopAllLocked()
 	c.mu.Unlock()
-	select {
-	case <-ctx.Done():
-	case <-time.After(2 * time.Second):
+	return waitExited(ctx, exiting)
+}
+
+// waitExited waits until every poller's goroutine has returned, its last
+// checkpoint save included, or ctx ends. A poller without a done channel
+// (not started through startConnection) has nothing to wait for. When ctx
+// ends first it returns ctx's error, so the caller sees the wait was cut short.
+func waitExited(ctx context.Context, pollers []*poller) error {
+	for _, p := range pollers {
+		if p.done == nil {
+			continue
+		}
+		select {
+		case <-p.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return nil
 }

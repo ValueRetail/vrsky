@@ -1418,6 +1418,14 @@ Last updated 2026-10-28.
     timeout that scales with the size or bounds idle time instead. Found in
     #773. Filed as #774.
 
+198. **The SDK's 5 s Stop budget is shorter than a worst-case checkpoint
+    save.** `pkg/sdk/lifecycle.go` gives a connector's `Stop` 5 s, but a
+    Business Central poller's save can need two attempts (the first fails on
+    the cancelled context, the second gets `defaultSaveTimeout`, 5 s), so
+    `Stop` can return its deadline error with a save still running. Align
+    the lifecycle budget with about twice the save timeout, or make it
+    configurable per connector. Found in review of #795. Filed as #808.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource
