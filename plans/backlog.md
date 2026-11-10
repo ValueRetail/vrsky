@@ -1267,7 +1267,7 @@ Last updated 2026-10-28.
     `CheckRequestURL` still show it. Decide whether "@" in a query with no
     userinfo should become `[invalid URL]` there too. Found in #700. Filed as #717.
 
-177. **Decide whether permanent errors should be replayable.** Today a 4xx
+177. ~~**Decide whether permanent errors should be replayable.**~~ (#734) Today a 4xx
     from the target (`401`/`403` included), an incomplete node and a payload
     that is not JSON are acked and dropped (`sdk.Permanent`, or a bare `return
     nil` in the Kafka, RabbitMQ, SFTP, cloud-storage, Salesforce and HTTP
@@ -1443,6 +1443,52 @@ Last updated 2026-10-28.
     `os.Getenv(testdb.EnvVar)` directly and fail on `dial tcp [::1]:5432`
     when it is unset, so `go test ./...` on a laptop goes red. Skip through
     the `testdb` helper like the other database tests. Found in #794. Filed as #785.
+
+201. **A way to dead-letter on the first attempt.** Since #734 a node with a
+    setting missing, a template that cannot be rendered or a `401`/`403` is
+    retried and then dead-lettered, so it is kept for a replay. Its five
+    attempts fail the same way, about 2.5 minutes of retries (and slots) for
+    nothing. An `sdk.DeadLetter(err)` kind that the runner hands to
+    `pkg/messaging`'s subscriber to publish to the DLQ at once and ack would
+    cut that out. Needs `pkg/sdk` and `pkg/messaging` (kept out of #734
+    while #810 reworked them). Found in #734.
+
+202. **Count dropped messages.** A message acked with `sdk.Permanent`
+    (a payload that is not JSON, a `4xx` the target gives about the record)
+    leaves only a Warn log line; `vrsky_dlq_messages_total` does not see it.
+    A `vrsky_messages_dropped_total{worker,connection_id}` counter next to the
+    `IsPermanent` branch in `pkg/sdk/lifecycle.go` would let an alert see
+    drops. The HTTP destination's `4xx` (a per-node nil, for its skip set)
+    would need to report its drop too. Found in #734.
+
+203. **Evict the config cache on a connection command everywhere.** Only
+    the cloud-storage destination drops a connection's cached config on the
+    start/stop command (#141). The HTTP, Kafka, RabbitMQ, SFTP and Salesforce
+    destinations keep it 5 minutes, so a DLQ retry right after fixing a node
+    can meet the old config and land in the DLQ again (the docs now say to
+    wait). Found in #734.
+
+204. **`401`/`403` and incomplete nodes in the other six destinations.**
+    Ludvik's rule for #734 (a `401`/`403` is retried and kept in the DLQ) is
+    in the HTTP, Kafka, RabbitMQ, SFTP, cloud-storage and Salesforce
+    destinations. Sitoo, Front Systems, Visma, Brightpearl, Business Central
+    and SAP still mark a `401`/`403` and an incomplete node `sdk.Permanent`.
+    Apply the same split there and update the table in
+    `docs/operator/troubleshooting.md`. Found in #734.
+
+205. **Start-time checks for the destination fields.** `nodeConfigRules`
+    requires only the `kafka`, `rabbitmq`, `sftp` and `cloud_storage` blocks,
+    not `brokers`/`topic`, `url` and an exchange or queue, `host`/
+    `username`/`remote_dir` and a credential, or `bucket`. A connection with
+    one missing starts and then sends every message to the DLQ (#734).
+    Refusing it at start would catch it before any message. While there:
+    a node of the destination's own type whose config does not parse into
+    the typed struct (`"port":"22"`, `"brokers":"a,b"`) is still skipped as
+    "not ours" and its messages acked, in the HTTP, Kafka, RabbitMQ, SFTP
+    and cloud-storage destinations; keep it as a failing node instead. And
+    `src/pkg/managementapi/nodeconfig.go` (comment at the top) and
+    `nodeconfig_test.go` still quote the HTTP destination's old
+    `|| nodeConfig.HTTP.URL == ""` skip. Found in #734.
 
 ## Human
 

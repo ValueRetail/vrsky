@@ -78,8 +78,10 @@ Config bullets:
   endpoint — use the **Test connection** button to verify broker reachability
   and auth before deploying.
 - **Failed deliveries.** A destination without `brokers` or `topic` logs an
-  error and acks each message: it is dropped, not dead-lettered. Any failure to
-  open the writer or to write (broker down, topic missing, auth refused) is
-  retried and then dead-lettered. See the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
+  error and fails each message, so it is retried and then dead-lettered with
+  the error `kafka node has no brokers or topic`. Fix the node, wait 5 minutes
+  (the worker keeps a connection's config that long) and retry the messages
+  from the DLQ (#734). Any failure to open the writer or to write (broker
+  down, topic missing, auth refused) is retried and then dead-lettered too. See the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - Partitioning, message keys, and other producer/consumer tuning are
   configured via the in-app pipeline editor (Property panel).

@@ -355,8 +355,11 @@ Config bullets:
 - **Test connection.** The cloud-storage worker exposes a `/test-connection`
   endpoint; use the **Test connection** button in the editor to verify bucket
   access before deploying.
-- **Failed uploads.** A destination without a `bucket` logs an error and acks
-  each message: it is dropped, not dead-lettered. A failure to open the
+- **Failed uploads.** A destination without a `bucket` logs an error and fails
+  each message, so it is retried and then dead-lettered with the error
+  `cloud-storage node has no bucket`. Set the bucket, deploy the connection
+  again (that clears the worker's cached config) and retry the messages from
+  the DLQ (#734). A failure to open the
   provider or to write the object (for example credentials refused or the
   network down) is retried and then dead-lettered. A `key_template` that
   cannot be rendered does not drop anything: the object is written under a
