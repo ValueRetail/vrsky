@@ -118,6 +118,24 @@ func TestFanOut_FailingNodeDoesNotResendToHealthySibling(t *testing.T) {
 			},
 			want: "node bad: upstream 503",
 		},
+		{
+			// A wrong credential is retried too (#734): the node has not
+			// taken the message, so it is not skipped.
+			name: "401",
+			failing: func(t *testing.T) (string, func() int32) {
+				c := newCounter(t, http.StatusUnauthorized)
+				return c.srv.URL, c.hits.Load
+			},
+			want: "node bad: upstream 401",
+		},
+		{
+			name: "403",
+			failing: func(t *testing.T) (string, func() int32) {
+				c := newCounter(t, http.StatusForbidden)
+				return c.srv.URL, c.hits.Load
+			},
+			want: "node bad: upstream 403",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,8 +322,8 @@ func TestFanOut_SkipKey(t *testing.T) {
 	}
 }
 
-// A 4xx is final for that node (acked by design), so it is not sent again
-// when the message comes back for a failed sibling.
+// A 4xx other than 401/403 is final for that node (acked by design), so it is
+// not sent again when the message comes back for a failed sibling.
 func TestFanOut_4xxNodeIsNotRetried(t *testing.T) {
 	rejecting := newCounter(t, http.StatusBadRequest)
 	bad := newCounter(t, http.StatusServiceUnavailable)

@@ -107,6 +107,10 @@ type HTTPConfig struct {
 	// endpoint (built on the same guarded dialer, see newClient). nil means use
 	// the default (non-mTLS) client.
 	client *http.Client
+	// clientErr is why the node's mTLS client could not be built (a cert or
+	// key that does not parse). Nothing is sent to the node; its delivery
+	// fails and the message is retried, then kept in the DLQ (#734).
+	clientErr error
 }
 
 func main() {
@@ -382,13 +386,15 @@ func (p *httpProducer) clientFor(httpCfg *HTTPConfig) *http.Client {
 }
 
 // Deliver sends one envelope to every matching HTTP-producer node configured
-// for its connection. A transient failure (network error, 5xx, 429) returns
-// sdk.Retriable (the SDK NAKs → retries → DLQs); 4xx / malformed-request errors
-// are logged-and-acked (retrying can't help). A missing producer config for the
+// for its connection. A transient failure (network error, 5xx, 429), a 401 or
+// 403 (a wrong or expired credential), and a URL no request can be built from
+// return sdk.Retriable (the SDK NAKs → retries → DLQs), so the message can be
+// replayed once the node is fixed (#734). Any other 4xx is logged and acked:
+// the target refused the message itself. A missing producer config for the
 // connection is not an error — this binary just isn't the producer for it.
 //
 // With several nodes, the error names every node that failed, and a node that
-// took the message (2xx, or a 4xx that won't change) is not sent it again
+// took the message (2xx, or a 4xx other than 401/403) is not sent it again
 // when the message comes back for a failed sibling (#730, see sentSet).
 func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connectionID := env.IntegrationID
@@ -521,10 +527,12 @@ func (p *httpProducer) eligibleConfigs(configs []*HTTPConfig, lastProcessedBy st
 	return out
 }
 
-// sendHTTPRequest returns nil on a successful 2xx response or a non-retriable
-// 4xx, and a non-nil error on any *retriable* failure (network error, 5xx,
-// 429). 4xx responses return nil so the SDK doesn't retry them — the request is
-// malformed and will keep failing on every redelivery.
+// sendHTTPRequest returns nil on a successful 2xx response or a 4xx other than
+// 401/403, and a non-nil error on any *retriable* failure (network error, 5xx,
+// 429, 401/403, a URL no request can be built from). Those 4xx return nil so
+// the SDK doesn't retry them: the target refused the message itself and will
+// on every redelivery. A 401/403 is about the node's credential and a bad URL
+// about its config; both are kept in the DLQ for a replay after the fix (#734).
 // body, when non-nil, is streamed as the request body instead of env.Payload —
 // the payload is then never materialised in memory, so the activity feed shows
 // its size but not a content preview.
@@ -555,13 +563,20 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		method = "POST"
 	}
 
-	// Bad URL won't improve on retry — drop early (validated once).
+	// A URL no request can be built from is node config: nothing is sent, and
+	// the message is retried and then kept in the DLQ for a replay once the
+	// node is fixed (#734), like a refused address below.
 	if _, err := http.NewRequestWithContext(ctx, method, httpCfg.URL, nil); err != nil {
-		p.emitEvent(connectionID, HTTPEvent{
-			Type: "error", Message: "Failed to create request: " + requestErrText(err),
-			Time: now(),
-		})
-		return nil
+		msg := "Failed to create request: " + requestErrText(err)
+		p.logger.Error("HTTP request cannot be built", "error", requestErrText(err), "connection_id", connectionID, "node_id", httpCfg.NodeID)
+		p.emitEvent(connectionID, HTTPEvent{Type: "error", Message: msg, Time: now()})
+		return errors.New("cannot build request: " + requestErrText(err))
+	}
+
+	if httpCfg.clientErr != nil {
+		p.logger.Error("HTTP destination's mTLS client cannot be built", "error", httpCfg.clientErr, "connection_id", connectionID, "node_id", httpCfg.NodeID)
+		p.emitEvent(connectionID, HTTPEvent{Type: "error", Message: httpCfg.clientErr.Error(), Time: now()})
+		return fmt.Errorf("%w; fix the node's certificate, then retry the message from the DLQ", httpCfg.clientErr)
 	}
 
 	// The URL is tenant config and the node's credential goes with the request,
@@ -692,10 +707,16 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		StatusCode: resp.StatusCode, Response: respPreview,
 		Time: now(),
 	})
-	if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+	switch {
+	case resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests:
 		return fmt.Errorf("upstream %d", resp.StatusCode) // retriable
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		// The node's credential is wrong or expired (with OAuth, still after
+		// the refresh above). Retried, then the DLQ: replay it once the
+		// credential is fixed (#734).
+		return fmt.Errorf("upstream %d: check the node's credential, then retry the message from the DLQ", resp.StatusCode)
 	}
-	return nil // 4xx — don't retry
+	return nil // any other 4xx: the target refused the message itself, don't retry
 }
 
 // requestErrText is the text of an http.NewRequest error that is safe to show.
@@ -794,7 +815,10 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		if err := json.Unmarshal(node.Config, &nodeConfig); err != nil {
 			continue
 		}
-		if nodeConfig.Type != "http" || nodeConfig.HTTP.URL == "" {
+		// A node with no URL is still ours: sendHTTPRequest refuses the empty
+		// URL, so the message is retried and kept in the DLQ instead of acked
+		// as foreign (#734).
+		if nodeConfig.Type != "http" {
 			continue
 		}
 
@@ -834,11 +858,15 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 				[]byte(nodeConfig.TLS.ClientCA),
 			)
 			if err != nil {
-				return nil, fmt.Errorf("node %s: build mTLS client: %w", node.ID, err)
+				// Node config, not "not ours": an error here used to make
+				// Deliver ack the message. The node fails on its own, and its
+				// siblings still get the message (#734).
+				cfg.clientErr = fmt.Errorf("build mTLS client: %w", err)
+			} else {
+				// Same guarded dialer as every other node; only the TLS
+				// config differs.
+				cfg.client = p.newClient(tlsCfg)
 			}
-			// Same guarded dialer as every other node; only the TLS config
-			// differs.
-			cfg.client = p.newClient(tlsCfg)
 		}
 
 		configs = append(configs, cfg)

@@ -159,8 +159,10 @@ func (p *salesforceProducer) Configure(ctx context.Context, res *sdk.Resources) 
 // 429, 5xx), and the same answers while creating, filling or closing a Bulk
 // API job (#735); a record a Bulk job refuses or leaves unprocessed, and a job
 // that is not done within the poll bound (#760). Records that went in are
-// remembered, so the redelivery sends only the rest. A non-JSON payload → sdk.Permanent. A missing
-// producer config for the connection is not an error.
+// remembered, so the redelivery sends only the rest. A node with no object, or
+// an upsert with no external_id_field, is retried too, so the message can be
+// replayed once the node is fixed (#734). A non-JSON payload → sdk.Permanent.
+// A missing producer config for the connection is not an error.
 func (p *salesforceProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connID := env.IntegrationID
 	if connID == "" {
@@ -234,8 +236,10 @@ func (r *writeResult) wrote(k writtenKey) {
 func (p *salesforceProducer) writeRecords(ctx context.Context, env *envelope.Envelope, t *sfTarget, records []map[string]any, res *writeResult) error {
 	cfg := t.cfg
 	if cfg.Object == "" {
-		p.logger.Error("Salesforce producer missing object; skipping")
-		return nil
+		// Not nil: an ack would drop the message. Retried, then the DLQ, for
+		// a replay once the node is fixed (#734).
+		p.logger.Error("Salesforce producer missing object; message not acked, will retry")
+		return errors.New("salesforce node has no object; set it on the node, then retry the message from the DLQ")
 	}
 	if cfg.APIVersion == "" {
 		cfg.APIVersion = defaultAPIVersion
@@ -738,7 +742,10 @@ func (p *salesforceProducer) getTargets(ctx context.Context, connID, tenantID st
 		if err := json.Unmarshal(n.Config, &nc); err != nil {
 			continue
 		}
-		if nc.Type != "salesforce" || nc.Salesforce == nil || nc.Salesforce.Object == "" {
+		// A node with no object is still ours: writeRecords fails it, so the
+		// message is retried and kept in the DLQ instead of acked as foreign
+		// (#734).
+		if nc.Type != "salesforce" || nc.Salesforce == nil {
 			continue
 		}
 		var predID string

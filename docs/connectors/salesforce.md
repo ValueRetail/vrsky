@@ -73,10 +73,11 @@ Config bullets:
   endpoint — use the **Test connection** button to confirm the grant and
   instance are valid before deploying.
 - **Failed deliveries.** A payload that is not JSON is dropped (logged, not
-  dead-lettered), and so is a message for a node with no `object` (logged,
-  acked). An `upsert` node with no `external_id_field` fails every delivery
-  with an error that says so, so its messages end in the DLQ and can be
-  replayed once the node is fixed (#765). Everything else
+  dead-lettered). A node with no `object` (#734) and an `upsert` node with no
+  `external_id_field` (#765) fail every delivery with an error that says so,
+  so their messages end in the DLQ and can be replayed once the node is fixed.
+  Wait 5 minutes after the fix before the retry: the worker keeps a
+  connection's config that long. Everything else
   is retried and, after five attempts, dead-lettered with the error; see
   [What happens when a write fails](#what-happens-when-a-write-fails).
 - Field mapping, batch sizing, and other options not listed here are

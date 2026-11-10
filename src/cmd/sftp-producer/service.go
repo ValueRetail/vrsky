@@ -97,8 +97,11 @@ func (p *sftpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 }
 
 // Deliver uploads the envelope to every matching SFTP target. Transient
-// failures (connect/write) → sdk.Retriable. A missing producer config for the
-// connection is not an error — this binary just isn't the producer for it.
+// failures (connect/write), a node with a setting or credential missing and a
+// filename_template that cannot be parsed or rendered → sdk.Retriable:
+// retried, then the DLQ, so the message can be replayed once the node is
+// fixed (#734). A missing producer config for the connection is not an error
+// — this binary just isn't the producer for it.
 func (p *sftpProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connID := env.IntegrationID
 	if connID == "" {
@@ -140,20 +143,23 @@ func (p *sftpProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 
 // upload renders the filename and writes the payload to the remote dir.
 func (p *sftpProducer) upload(ctx context.Context, cfg *SFTPConfig, env *envelope.Envelope) error {
+	// The node's own settings come first. None of these is nil: an ack would
+	// drop the message. Retried, then the DLQ, for a replay once the node is
+	// fixed (#734).
 	if cfg.Host == "" || cfg.Username == "" || cfg.RemoteDir == "" {
-		p.logger.Error("SFTP producer config incomplete (need host, username, remote_dir); skipping")
-		return nil
+		p.logger.Error("SFTP producer config incomplete (need host, username, remote_dir); message not acked, will retry")
+		return errors.New("sftp node has no host, username or remote_dir; set them on the node, then retry the message from the DLQ")
 	}
 	if cfg.Password == "" && cfg.PrivateKey == "" {
-		p.logger.Error("SFTP producer has no credentials (set a password or a private key); skipping")
-		return nil
+		p.logger.Error("SFTP producer has no credentials (set a password or a private key); message not acked, will retry")
+		return errors.New("sftp node has no password or private key; set one on the node, then retry the message from the DLQ")
 	}
 
 	filename, err := p.renderFilename(cfg.FilenameTemplate, env)
 	if err != nil {
-		// A bad template won't improve on retry — log and drop (poison).
-		p.logger.Error("invalid filename template; dropping message", "template", cfg.FilenameTemplate, "error", err)
-		return nil
+		// The template is node config: fixed, the same message goes through.
+		p.logger.Error("invalid filename template; message not acked, will retry", "template", cfg.FilenameTemplate, "error", err)
+		return fmt.Errorf("filename_template: %w; fix it on the node, then retry the message from the DLQ", err)
 	}
 
 	conn, err := p.dialWithBackoff(ctx, cfg)

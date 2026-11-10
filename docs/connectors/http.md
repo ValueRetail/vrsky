@@ -148,26 +148,36 @@ instead (#774):
 Hitting any of them is a timeout like the one above: retried, then
 dead-lettered. None of them is a node setting.
 
+A `401` or `403` is retried too, so a bad credential means 5 attempts per
+message, each sending it. With OAuth every attempt forces a token refresh,
+about 5 refreshes per message, so a burst of messages can hit the identity
+provider or lock out a basic-auth account. A `403` from a WAF or from
+per-record authorization is retried and dead-lettered the same way.
+
 A `5xx`, a `429`, a network error and a failure to get an OAuth token are
-retried on the usual backoff and then dead-lettered with the payload. Any
-other answer below `500` (so every `4xx` except `429`, a `401` that is still
-refused after the one token refresh included) is logged, shown in the
-activity feed and acked: the message is dropped, not dead-lettered. A URL the
-request cannot be built from is dropped the same way. Which errors reach the
-DLQ for every destination is in the
+retried on the usual backoff and then dead-lettered with the payload. So is a
+`401` or `403` (a wrong or expired credential; with OAuth, one still refused
+after the one token refresh), and a node the request cannot be built for: no
+`url`, a URL the request cannot be built from, or a `tls` certificate or key
+that does not parse (nothing is sent to that node then). Fix the node, wait
+5 minutes (the worker keeps a connection's config that long), and retry the
+message from the DLQ (#734). Any other answer below `500` (so every other
+`4xx`: `400`, `404`, `422`, ...) is logged, shown in the activity feed and
+acked: the target refused the message itself, and it is dropped, not
+dead-lettered. Which errors reach the DLQ for every destination is in the
 [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 
 **Several HTTP nodes on one connection.** The message is acked only when no
 node failed in a way that is retried. When one node fails and another takes
 the message, the message is retried for the failing node only: a node that
-took it (a `2xx`, or a `4xx`, which is final) is not sent it again on the
-next attempts (#730). A node whose request failed on the way (the connection
+took it (a `2xx`, or a `4xx` other than `401`/`403`, which is final) is not sent
+it again on the next attempts (#730). A node whose request failed on the way (the connection
 dropped, a timeout) has not taken it and is tried again. The DLQ copy's last
 error names every node that still failed, as `node <node id>: <error>`. That
 header is cut at 512 bytes, so with many failing nodes the later ones show
 only in the worker's log (`HTTP destination refused`, `HTTP request failed`
-or `HTTP request returned error`, with `connection_id` and `node_id`). A retry from the DLQ skips the nodes that
-took the message as well.
+or `HTTP request returned error`, with `connection_id` and `node_id`). A retry
+from the DLQ skips the nodes that took the message as well.
 
 This memory is kept by the `http-producer` process: one entry per node per
 message, up to 10 000 entries, for 7 days (the DLQ's retention). If the

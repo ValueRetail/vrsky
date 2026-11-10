@@ -81,8 +81,10 @@ func (p *kafkaProducer) Configure(ctx context.Context, res *sdk.Resources) error
 }
 
 // Deliver publishes the envelope to every matching Kafka target. Transient
-// failures (connect/write) → sdk.Retriable. A missing producer config for the
-// connection is not an error — this binary just isn't the producer for it.
+// failures (connect/write) and a node with no brokers or topic →
+// sdk.Retriable: retried, then the DLQ, so the message can be replayed once
+// the node is fixed (#734). A missing producer config for the connection is
+// not an error — this binary just isn't the producer for it.
 func (p *kafkaProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connID := env.IntegrationID
 	if connID == "" {
@@ -131,8 +133,9 @@ func (p *kafkaProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 
 func (p *kafkaProducer) produce(ctx context.Context, cfg *KafkaConfig, key, value []byte) error {
 	if len(cfg.Brokers) == 0 || cfg.Topic == "" {
-		p.logger.Error("Kafka producer config incomplete (need brokers, topic); skipping")
-		return nil
+		// Not nil: an ack would drop the message. Retried, then the DLQ (#734).
+		p.logger.Error("Kafka producer config incomplete (need brokers, topic); message not acked, will retry")
+		return errors.New("kafka node has no brokers or topic; set them on the node, then retry the message from the DLQ")
 	}
 	w, err := p.newWriter(cfg)
 	if err != nil {
