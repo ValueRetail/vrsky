@@ -254,12 +254,14 @@ func (p *catalogueProducer) runImport(ctx context.Context, env *envelope.Envelop
 		}
 	}()
 
+	sent := 0
 	batches := splitBatches(items, n.cfg.batchSize(), maxBatchBytes)
 	for i, batch := range batches {
 		// The key is stable per envelope and position, so a resend of the
 		// same batch inside this import is recognised by Bifrost.
 		key := fmt.Sprintf("%s-%d", env.ID, i+1)
-		if err = c.addItems(ctx, importID, key, batch); err != nil {
+		sent += len(batch)
+		if err = c.addItems(ctx, importID, key, batch, sent); err != nil {
 			return fmt.Errorf("batch %d of %d: %w", i+1, len(batches), err)
 		}
 	}

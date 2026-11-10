@@ -234,7 +234,11 @@ func TestFailureAbandonsImport(t *testing.T) {
 		{"items 404 expired", "items", 2, fault{status: 404, body: `{"error":"no such import — it may have expired"}`}, retriable, "may have expired", true, false},
 		{"items 403", "items", 1, fault{status: 403, body: `{"error":"forbidden"}`}, retriable, "retry the message from the DLQ", true, false},
 		{"items 422 validation", "items", 3, fault{status: 422, body: `{"error":"Failed to deserialize the JSON body"}`}, permanent, "Failed to deserialize", true, false},
-		{"items 400", "items", 1, fault{status: 400, body: `{"error":"bad batch"}`}, permanent, "bad batch", true, false},
+		{"items 400 from a proxy", "items", 1, fault{status: 400, body: `{"error":"bad batch"}`}, retriable, "lower batch_size", true, false},
+		{"items 413 from a proxy", "items", 2, fault{status: 413, body: `<html>413 Request Entity Too Large</html>`}, retriable, "lower batch_size", true, false},
+		{"items total_so_far too low", "items", 2, fault{status: 200, body: `{"received":1000,"total_so_far":1,"replayed":false}`}, retriable, "import holds 1 items after this batch, sent 2000", true, false},
+		{"items 200 html", "items", 1, fault{status: 200, body: `<html>login</html>`}, retriable, "no total_so_far", true, false},
+		{"commit 200 html", "commit", 1, fault{status: 200, body: `<html>login</html>`}, retriable, "not a JSON report", true, true},
 		{"commit 422 shrink", "commit", 1, fault{status: 422, body: `{"error":"shrink guard: 10 of 100"}`}, permanent, "shrink guard: 10 of 100", true, true},
 		{"commit 500", "commit", 1, fault{status: 500, body: `{"error":"internal error"}`}, retriable, "bifrost commit 500", true, true},
 		{"commit 401", "commit", 1, fault{status: 401, body: `{"error":"unauthorized"}`}, retriable, "check the node's token", true, true},
@@ -672,5 +676,36 @@ func TestServesConnection(t *testing.T) {
 	}
 	if p.ServesConnection(context.Background(), "tenant-1", "") {
 		t.Error("true without a connection id")
+	}
+}
+
+// A 200 commit whose report cannot be read is a success only when it looks
+// like Bifrost's: a JSON object, or a report cut off by the read limit.
+func TestCommitReportReadability(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"valid", `{"applied":3,"catalogue_size":3,"rejected":0,"errors":[]}`, false},
+		{"object with wrong types", `{"applied":"three"}`, false},
+		{"truncated by the read limit", `{"applied":3,"errors":[` + strings.Repeat(`{"row":1,"article_no":"x","error":"y"},`, 40000), false},
+		{"cut by the read limit, not starting with a brace", strings.Repeat("x", 1<<20+5), false},
+		{"html", `<html>ok</html>`, true},
+		{"empty", ``, true},
+		{"array", `[1]`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := newBifrostStub(t)
+			stub.failOnce("commit", 1, fault{status: 200, body: tt.body})
+			err := deliver(t, testProducer(), &envelope.Envelope{Payload: []byte(items(3))}, `[]`, nodeJSON(stub.URL(), ``))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if err != nil && sdk.IsPermanent(err) {
+				t.Errorf("error is Permanent: %v", err)
+			}
+		})
 	}
 }

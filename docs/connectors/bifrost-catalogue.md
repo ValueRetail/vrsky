@@ -55,8 +55,9 @@ first, or use `delta`.
 - `token_secret_id` (required) — secret holding the tenant's bearer token. It
   needs the permission `catalogue.import` in Bifrost's credentials. Never put
   the raw token on the node.
-- `tenant_id` — sent as `X-Tenant-Id`. Optional: Bifrost takes the tenant from
-  the credential and answers 403 if the header names another one.
+- `tenant_id` — Bifrost's tenant ID (the one in its credentials file), not
+  VRSky's, sent as `X-Tenant-Id`. Optional: Bifrost takes the tenant from the
+  credential and answers 403 if the header names another one.
 - `mode` — `delta` (default) upserts the items. `full` makes the items the
   whole catalogue: articles not in the list are removed. The default is the
   safe one on purpose.
@@ -90,13 +91,19 @@ refused without contacting Bifrost.
 | Network error, timeout, 5xx, 3xx | Retried (1 s, 5 s, 30 s, 2 min), then the DLQ. The import is abandoned each time and starts over. |
 | 429 (too many imports open) | Retried after `Retry-After`. |
 | 401, 403 | Retried, then the DLQ. The token, its `catalogue.import` permission or `tenant_id` is wrong. Fix the node, then replay the message from the DLQ. |
+| 413, or 400 on items | Retried, then the DLQ. Bifrost's own answers are never these for a list we send, so a proxy in front of it is refusing the size (ingress-nginx defaults to 1 MiB). Lower `batch_size`, then replay from the DLQ. |
 | 404 | Retried: the import expired or Bifrost restarted (imports live in its memory). On the first call it can also mean `base_url` isn't the catalogue-api. |
+| 200 that isn't Bifrost's (an HTML page from a proxy, an items answer without `total_so_far`, or one whose count differs from what was sent) | Retried, then the DLQ. The import is abandoned. |
 | Other 4xx (the shrink guard, a file that is mostly bad rows, validation) | Dropped, not retried. The same list would be refused again. Bifrost's reason is in the log and in the error text. |
 | The node's settings are missing or wrong | Retried, then the DLQ, for a replay after the fix. |
 | The payload isn't a list of items | Dropped. |
 
 Error texts carry Bifrost's own reason (its `{"error": "..."}` body, cut at 300
 characters) and never the token or a network address.
+
+A commit answered 200 whose report can't be parsed counts as done only when
+the body is a JSON object or was cut off by the 1 MiB read limit (the rejected
+count is then unknown and logged as such). Any other body is retried.
 
 Rows Bifrost rejects while still accepting the import (it takes an import with
 a few bad rows) are logged as warnings with their row number, article number
@@ -108,8 +115,17 @@ A retry never commits a half-filled import: every attempt opens a new import,
 and an attempt that fails abandons its own. A message that was committed but
 whose acknowledgement was lost (a crash between the commit and the ack) is
 delivered again: a `full` import of the same list replaces the catalogue with
-the same list, and a `delta` upserts the same rows, so the catalogue ends up
-the same. The version number in Bifrost moves on each time.
+the same list, and a `delta` upserts the same rows. On its own that ends in the
+same catalogue.
+
+**Ordering is not guaranteed, though.** Bifrost's commit overwrites the
+snapshot, and a retry can arrive late (retries wait up to 2 minutes). If an
+older message is retried after a newer one has committed, the older list
+commits last and wins, delta or full, until the next import changes the
+catalogue. Closing that needs a version check in Bifrost (an import that says
+which source version it is built from); that is being filed there. Until then,
+send full lists from one source at a time and don't rely on a retried message
+being the latest.
 
 Limits worth knowing:
 

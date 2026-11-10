@@ -116,7 +116,14 @@ Sources: `docs/catalogue-doors.md`, `crates/catalogue-api/src/routes.rs`,
   any request.
 - 401/403 are retriable (DLQ-kept), not Permanent, as #838 did for the other
   destinations. 404 is retriable.
-- A commit answered 200 with an unreadable report is success.
+- A commit answered 200 is success if its body is a JSON object or hit the
+  1 MiB read limit; any other body (a proxy page) is retriable. Items answers
+  must carry a `total_so_far` equal to the cumulative count sent, else the
+  import is abandoned and retried.
+- 413 and 400 at items are retriable with a "lower batch_size" hint (only a
+  proxy can cause them); 422 at items stays permanent.
+- Ordering: a delayed retry of an older message can commit after a newer one
+  and win. Needs a version check in Bifrost; documented, not solved here.
 - `ALLOW_PRIVATE_UPSTREAMS` rules apply: a Bifrost on a private address (an
   in-cluster service) is refused like for every other connector. Bifrost has no
   TLS, so production needs a TLS front on a public or allowed address.
@@ -176,5 +183,9 @@ Every file a new connector type touches, with the exact change:
 9. OpenAPI registry: nothing (no management-API route).
 10. `docs/DEPLOYMENT_GUIDE.md`: add `bifrost-catalogue-producer` to the
     connectors row (line 31).
-11. `.github/workflows/`: nothing named per connector today (images come from
+11. Mark `token` as a secret field so a raw token can't be stored on the node,
+    only `token_secret_id`: `ui/src/utils/secrets.ts` and the management API's
+    secret-field handling (find where `api_password` is listed and add
+    `bifrost_catalogue.token` the same way).
+12. `.github/workflows/`: nothing named per connector today (images come from
     `affected.sh`); confirm after step 2.

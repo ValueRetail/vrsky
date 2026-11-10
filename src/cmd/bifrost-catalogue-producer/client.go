@@ -45,7 +45,8 @@ type bifrostClient struct {
 }
 
 // beginBody is the body of POST /v1/catalogue/imports. effective_from is left
-// out, so Bifrost uses the commit time; an item may carry its own.
+// out, so Bifrost uses the time of begin (Utc::now() in routes.rs) as the
+// default; an item may carry its own.
 type beginBody struct {
 	Kind        string `json:"kind"`
 	AllowShrink string `json:"allow_shrink,omitempty"`
@@ -103,7 +104,7 @@ func (c *bifrostClient) begin(ctx context.Context, kind, allowShrink string) (st
 
 // addItems sends one batch. key makes a resend of the same batch inside this
 // import a no-op on Bifrost's side (Idempotency-Key, remembered per import).
-func (c *bifrostClient) addItems(ctx context.Context, id, key string, items []json.RawMessage) error {
+func (c *bifrostClient) addItems(ctx context.Context, id, key string, items []json.RawMessage, wantTotal int) error {
 	body, err := json.Marshal(struct {
 		Items []json.RawMessage `json:"items"`
 	}{items})
@@ -116,6 +117,18 @@ func (c *bifrostClient) addItems(ctx context.Context, id, key string, items []js
 	}
 	if status != http.StatusOK {
 		return c.classify("items", status, resp, hdr)
+	}
+	// Bifrost counts what it holds. A different number means a batch was
+	// lost or doubled on the way (or the answer is not Bifrost's): commit
+	// would publish a different list than the one sent.
+	var out struct {
+		TotalSoFar *int `json:"total_so_far"`
+	}
+	if err := json.Unmarshal(resp, &out); err != nil || out.TotalSoFar == nil {
+		return sdk.Retriable(errors.New("bifrost items: answer has no total_so_far; check base_url and any proxy in front of Bifrost"))
+	}
+	if *out.TotalSoFar != wantTotal {
+		return sdk.Retriable(fmt.Errorf("bifrost items: import holds %d items after this batch, sent %d", *out.TotalSoFar, wantTotal))
 	}
 	return nil
 }
@@ -130,12 +143,21 @@ func (c *bifrostClient) commit(ctx context.Context, id string) (*commitReport, e
 	if status != http.StatusOK {
 		return nil, c.classify("commit", status, resp, hdr)
 	}
+	// The commit is done once Bifrost answers 200, so a report that cannot
+	// be read is not worth a re-run of an import that landed. But a 200 that
+	// is not Bifrost's (a proxy's HTML page) is no proof of a commit: only a
+	// JSON object, or a report cut off by the read limit, counts.
 	var rep commitReport
 	if err := json.Unmarshal(resp, &rep); err != nil {
-		// The commit is done; only the report is unreadable. Failing here
-		// would re-run an import that already landed.
-		c.logger.Warn("bifrost commit answered 200 with a report that cannot be read", "import_id", id, "error", err)
-		return &commitReport{ImportID: id}, nil
+		switch {
+		case len(resp) > maxResponseBytes:
+			c.logger.Warn("bifrost commit report is longer than the read limit; the rejected count is unknown", "import_id", id)
+			return &commitReport{ImportID: id}, nil
+		case bytes.HasPrefix(bytes.TrimSpace(resp), []byte("{")):
+			c.logger.Warn("bifrost commit answered 200 with a report that cannot be read", "import_id", id, "error", err)
+			return &commitReport{ImportID: id}, nil
+		}
+		return nil, sdk.Retriable(errors.New("bifrost commit: 200 answer is not a JSON report; check base_url and any proxy in front of Bifrost"))
 	}
 	return &rep, nil
 }
@@ -191,7 +213,7 @@ func (c *bifrostClient) do(ctx context.Context, method, path string, body []byte
 		return 0, nil, nil, sdk.Retriable(&userError{msg: "bifrost " + opName(method, path) + ": " + text, cause: err})
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return 0, nil, nil, sdk.Retriable(&userError{msg: "bifrost " + opName(method, path) + ": answer could not be read", cause: err})
 	}
@@ -232,6 +254,11 @@ func (c *bifrostClient) classify(op string, status int, body []byte, hdr http.He
 		return sdk.Retriable(fmt.Errorf("bifrost %s %d: %s; check the node's token, its catalogue.import permission and tenant_id, then retry the message from the DLQ", op, status, reason))
 	case status == http.StatusNotFound:
 		return sdk.Retriable(fmt.Errorf("bifrost %s 404: %s", op, reason))
+	case status == http.StatusRequestEntityTooLarge || (status == http.StatusBadRequest && op == "items"):
+		// Always valid JSON from here, so only something in between refuses
+		// it: a proxy with a body limit (ingress-nginx defaults to 1 MiB).
+		// Node config, so retried and kept in the DLQ (#734).
+		return sdk.Retriable(fmt.Errorf("bifrost %s %d: %s; a proxy in front of Bifrost may be refusing the request size, lower batch_size, then retry the message from the DLQ", op, status, reason))
 	case status >= 400 && status < 500:
 		return sdk.Permanent(fmt.Errorf("bifrost %s %d: %s", op, status, reason))
 	default:
