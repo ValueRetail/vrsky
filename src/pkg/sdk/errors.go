@@ -12,10 +12,12 @@ import (
 // semantics so connector authors express intent, not transport mechanics:
 //
 //   - nil               → ack (success)
-//   - Retriable(err)    → NAK; messaging retries with backoff, then DLQs
-//   - Permanent(err)    → ack + log (poison message; retrying can't help)
-//   - RateLimited(err)  → NAK; treated like Retriable today, with the delay
-//                         recorded for future use
+//   - Retriable(err)    → NAK; redelivered after 1 s, 5 s, 30 s and 2 min
+//                         (messaging.DefaultBackoff), then DLQs
+//   - Permanent(err)    → ack + log (poison message; retrying can't help).
+//                         Wins over RateLimited, whichever wraps the other
+//   - RateLimited(err, d) → like Retriable, but each wait is at least d
+//                         (d kept between 1 s and the largest step, 2 min)
 //   - any other error   → Retriable by default (safer than dropping)
 //   - ConfigUnavailable(err) → NAK like Retriable, plus an Error log line with
 //                         the connection id (see ErrConfigUnavailable)
@@ -40,6 +42,11 @@ type rateLimitedError struct {
 func (e *rateLimitedError) Error() string { return e.cause.Error() }
 func (e *rateLimitedError) Unwrap() error { return e.cause }
 
+// RetryDelay is how pkg/messaging reads the delay: the message waits the
+// larger of it (clamped to 1 s .. the largest backoff step) and the backoff
+// step for the attempt (#721, #794).
+func (e *rateLimitedError) RetryDelay() time.Duration { return e.after }
+
 // Retriable marks an error as transient — the SDK will NAK so the message is
 // redelivered (and eventually DLQ'd if it keeps failing).
 func Retriable(err error) error {
@@ -60,9 +67,15 @@ func Permanent(err error) error {
 }
 
 // RateLimited marks an error caused by downstream throttling; `after` is how
-// long to wait before retrying. Currently treated as Retriable at the
-// transport layer (the messaging backoff schedule applies); the delay is
-// preserved for callers that inspect it.
+// long to wait before retrying. The SDK NAKs the message so that it comes back
+// after the larger of `after` and the backoff step for the attempt (1 s, 5 s,
+// 30 s, 2 min), with `after` first raised to at least 1 s and cut to the
+// largest step (2 min). So the wait is never shorter than the clamped delay.
+// Each redelivery counts toward the five attempts, and the fifth failure
+// dead-letters the message, as for Retriable. Wrapped in Permanent (or
+// wrapping it), the error is permanent. In an errors.Join the largest delay
+// wins. A subscriber holding too many waiting messages retries at once
+// instead (messaging.SubscriberOpts.MaxDelayed).
 func RateLimited(err error, after time.Duration) error {
 	if err == nil {
 		return nil

@@ -12,8 +12,11 @@ import (
 )
 
 // Handler is the callback shape data-flow workers implement.
-// Returning nil acks the message. Returning a non-nil error NAKs it with
-// backoff; after MaxDeliveryAttempts the message moves to the DLQ.
+// Returning nil acks the message. Returning a non-nil error NAKs it so that it
+// comes back after the next step of the backoff schedule (see retryWait);
+// after MaxDeliveryAttempts the message moves to the DLQ. An error that asks
+// for a longer wait (it, or an error in its tree, has a method
+// RetryDelay() time.Duration, as sdk.RateLimited's does) gets that wait.
 type Handler func(ctx context.Context, msg *nats.Msg) error
 
 // SubscriberOpts configures a per-worker subscription on the main stream.
@@ -52,6 +55,17 @@ type SubscriberOpts struct {
 	// at 250ms. Must be < AckWait or redelivery can fire between heartbeats.
 	HeartbeatInterval time.Duration
 
+	// MaxDelayed caps how many messages this subscriber may hold NAK'd with a
+	// delay at once, and MaxDelayedPerConnection how many of those may belong
+	// to one connection. A message waiting out its retry delay keeps one of
+	// the durable's MaxAckPending slots, and producer durables are shared by
+	// every connection of a type: without a cap, one tenant's dead target
+	// could hold every slot and stall everyone (#794). A failed message over
+	// either cap is NAK'd without a delay instead, the behaviour before #794.
+	// Defaults: MaxAckPending/4 and half of that (8 and 4 with 32), at least 1.
+	MaxDelayed              int
+	MaxDelayedPerConnection int
+
 	// DeliverPolicy sets where a NEWLY CREATED consumer starts. The zero
 	// value is JetStream's default, DeliverAll: everything still in the
 	// stream, which is the replay a restarted worker relies on. A consumer
@@ -86,6 +100,8 @@ type Subscriber struct {
 	stopCh  chan struct{}
 	doneCh  chan struct{}
 	halt    sync.Once
+	// delayed is only touched by the dispatch loop's goroutine.
+	delayed delayedSet
 }
 
 // pollWait is how long the server holds each pull request open (its
@@ -105,7 +121,10 @@ const pollWait = 150 * time.Millisecond
 const fetchWait = 2 * time.Second
 
 // DefaultBackoff is the per-attempt delay schedule used when SubscriberOpts.
-// Backoff is empty. Total time from first delivery to DLQ ≈ 156 seconds.
+// Backoff is empty: a failed delivery n comes back Backoff[n-1] later, both
+// when the handler returned an error (a NAK with a delay, see retryWait) and
+// when the worker stopped answering (the ack wait ran out). Total time from
+// first delivery to DLQ ≈ 156 seconds plus the handler time.
 var DefaultBackoff = []time.Duration{
 	1 * time.Second,
 	5 * time.Second,
@@ -153,6 +172,13 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 		}
 	}
 	opts.AckWait = opts.Backoff[0]
+	if opts.MaxDelayed <= 0 {
+		opts.MaxDelayed = max(1, opts.MaxAckPending/4)
+	}
+	if opts.MaxDelayedPerConnection <= 0 {
+		opts.MaxDelayedPerConnection = max(1, opts.MaxDelayed/2)
+	}
+	opts.MaxDelayedPerConnection = min(opts.MaxDelayedPerConnection, opts.MaxDelayed)
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -512,17 +538,21 @@ func (s *Subscriber) startHeartbeat(m *nats.Msg) func() {
 
 func (s *Subscriber) dispatch(m *nats.Msg) {
 	startNs := time.Now()
+	meta, _ := m.Metadata()
+	if meta != nil {
+		// Back from a delayed NAK (or never delayed): it waits no longer.
+		s.delayed.remove(meta.Sequence.Stream)
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			s.opts.Logger.Error("Handler panicked",
 				"durable", s.opts.DurableName, "panic", r)
 			processingSeconds.WithLabelValues(s.opts.DurableName, "panic").
 				Observe(time.Since(startNs).Seconds())
-			_ = m.Nak()
+			s.retry(m, meta, fmt.Errorf("handler panicked: %v", r))
 		}
 	}()
 
-	meta, _ := m.Metadata()
 	if meta != nil && meta.NumDelivered > 1 {
 		redeliveryCount.WithLabelValues(s.opts.DurableName).Inc()
 	}
@@ -564,6 +594,9 @@ func (s *Subscriber) dispatch(m *nats.Msg) {
 		if pubErr != nil {
 			s.opts.Logger.Error("Failed to publish to DLQ; will NAK and retry",
 				"durable", s.opts.DurableName, "error", pubErr)
+			// A plain NAK, not retry: this was the last attempt. Note that
+			// nats-server makes no delivery past MaxDeliver, so this NAK does
+			// not bring the message back either (found in #794; backlog).
 			_ = m.Nak()
 			return
 		}
@@ -576,9 +609,7 @@ func (s *Subscriber) dispatch(m *nats.Msg) {
 		return
 	}
 
-	s.opts.Logger.Warn("Handler error, will retry",
-		"durable", s.opts.DurableName, "error", err)
-	_ = m.Nak()
+	s.retry(m, meta, err)
 }
 
 // parseSubject pulls the tenant and connection IDs out of a

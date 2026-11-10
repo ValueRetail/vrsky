@@ -194,9 +194,29 @@ Only some failures do. A destination (a producer in the code) sorts every
 error it hits into one of two kinds:
 
 - **Retried.** The message is delivered again after 1 s, 5 s, 30 s and 2 min.
-  After the fifth attempt it is copied to the connection's DLQ with the last
-  error, the attempt count and the worker's name, and kept there for 7 days.
-  Retry it from the DLQ once the cause is fixed.
+  After the fifth attempt, about 2.5 minutes after the first, it is copied to
+  the connection's DLQ with the last error, the attempt count and the
+  worker's name, and kept there for 7 days. Retry it from the DLQ once the
+  cause is fixed. The worker logs `Handler error, will retry` with `attempt`
+  and `retry_in`. Two exceptions:
+  - A rate limit (`429` from Sitoo or Front Systems; `429` or `503` from
+    Visma, Brightpearl, Business Central or SAP) waits at least as long as
+    the destination asked. Sitoo and Front Systems read it from the answer
+    (`X-Rate-Limit-Reset` or `Retry-After`) and use 5 s when it has none; the
+    other four always use 5 s. That wait is kept between 1 s and 2 min, and
+    the message waits the longer of it and the step above, so a 5 s wait
+    becomes 5 s, 5 s, 30 s and 2 min.
+  - Each worker pod holds at most 8 messages waiting for their next attempt,
+    and at most 4 per connection (#794). Each waiting message keeps one of
+    the 32 places the worker's durable consumer has for unsettled messages,
+    and every connection of a type shares that consumer, so without the
+    limit one dead target could hold up every other customer's messages. A failed message
+    over the limit is retried at once: its five attempts take about a
+    second, and it lands in the DLQ. The worker logs `Handler error,
+    retrying at once: too many messages waiting out a retry delay` and
+    `vrsky_message_retry_undelayed_total` goes up. When a target is down,
+    expect most of that connection's messages in the DLQ within seconds and
+    the first few after about 2.5 minutes.
 - **Dropped.** The error is marked permanent, because trying the same message
   again cannot work (a `4xx` from the target, an incomplete node, a payload
   that is not JSON). The message is acked and nothing is kept. There is no

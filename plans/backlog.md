@@ -1325,7 +1325,7 @@ Last updated 2026-10-28.
     API path retries every non-`2xx`, a `4xx` too, so the two paths disagree.
     Found in #698. Filed as #735.
 
-182. **`sdk.RateLimited` carries a delay nothing reads.** `sdk.RetryAfter` has
+182. ~~**`sdk.RateLimited` carries a delay nothing reads.**~~ (#794) `sdk.RetryAfter` has
     no caller; the SDK NAKs and the redelivery follows the fixed backoff
     (1 s, 5 s, 30 s, 2 min) whatever `Retry-After` or the 5 s that Visma,
     Brightpearl, Business Central and SAP pass. Either honour it (NAK with a
@@ -1417,6 +1417,17 @@ Last updated 2026-10-28.
     upload that takes longer ends in the DLQ. Give the streamed path a
     timeout that scales with the size or bounds idle time instead. Found in
     #773. Filed as #774.
+
+194. **A message whose last attempt fails to reach the DLQ is lost.** When
+    the DLQ publish fails on the fifth delivery, or the handler panics on
+    it, `Subscriber.dispatch` NAKs and logs `will NAK and retry`. But
+    nats-server makes no delivery past `MaxDeliver` (`getNextMsg` drops a
+    redelivery with `dc > maxdc` from pending, with only an advisory), so
+    the message is neither retried nor dead-lettered. Read in the 2.15.1
+    source, not measured. Retry the DLQ publish in place, or ack only after
+    it succeeded and otherwise leave the message to its ack wait with a
+    `MaxDeliver` one higher than the attempts the subscriber counts. Found
+    in #794.
 
 ## Human
 

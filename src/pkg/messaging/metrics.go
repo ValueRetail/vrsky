@@ -32,6 +32,18 @@ var (
 		[]string{"durable"},
 	)
 
+	// retryUndelayedCount counts failed deliveries NAK'd without a delay
+	// because the subscriber already held its cap of messages waiting out a
+	// retry delay (SubscriberOpts.MaxDelayed, #794). Such a message comes back
+	// at once and, if it keeps failing, reaches the DLQ in about a second.
+	retryUndelayedCount = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "vrsky_message_retry_undelayed_total",
+			Help: "Failed deliveries retried at once, without the backoff, because too many messages were already waiting out a retry delay.",
+		},
+		[]string{"durable"},
+	)
+
 	// dlqCount counts every message moved into the DLQ stream because a
 	// worker exhausted MaxDeliver.
 	dlqCount = promauto.NewCounterVec(

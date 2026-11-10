@@ -379,6 +379,9 @@ func TestWrittenSet(t *testing.T) {
 // attempt are not remembered: nothing would ever look them up.
 func TestOutput_MultiTargetLastAttemptRemembersNothing(t *testing.T) {
 	e := newTestEnv(t)
+	// Every NAK'd attempt waits its backoff step (#794); 1 s each keeps the
+	// five attempts inside the poll timeouts.
+	e.g.outputBackoff = []time.Duration{time.Second, time.Second, time.Second, time.Second}
 	const connID = "last"
 	e.startTwoAgentPipeline(t, connID, agentA, agentA2)
 	acks := e.watchAcks(t, outputDurable(connID))
