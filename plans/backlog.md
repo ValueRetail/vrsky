@@ -1451,7 +1451,7 @@ Last updated 2026-10-28.
     nothing. An `sdk.DeadLetter(err)` kind that the runner hands to
     `pkg/messaging`'s subscriber to publish to the DLQ at once and ack would
     cut that out. Needs `pkg/sdk` and `pkg/messaging` (kept out of #734
-    while #810 reworked them). Found in #734.
+    while #810 reworked them). Found in #734. Filed as #825.
 
 202. **Count dropped messages.** A message acked with `sdk.Permanent`
     (a payload that is not JSON, a `4xx` the target gives about the record)
@@ -1459,14 +1459,14 @@ Last updated 2026-10-28.
     A `vrsky_messages_dropped_total{worker,connection_id}` counter next to the
     `IsPermanent` branch in `pkg/sdk/lifecycle.go` would let an alert see
     drops. The HTTP destination's `4xx` (a per-node nil, for its skip set)
-    would need to report its drop too. Found in #734.
+    would need to report its drop too. Found in #734. Filed as #825.
 
 203. **Evict the config cache on a connection command everywhere.** Only
     the cloud-storage destination drops a connection's cached config on the
     start/stop command (#141). The HTTP, Kafka, RabbitMQ, SFTP and Salesforce
     destinations keep it 5 minutes, so a DLQ retry right after fixing a node
     can meet the old config and land in the DLQ again (the docs now say to
-    wait). Found in #734.
+    wait). Found in #734. Filed as #826.
 
 204. **`401`/`403` and incomplete nodes in the other six destinations.**
     Ludvik's rule for #734 (a `401`/`403` is retried and kept in the DLQ) is
@@ -1474,7 +1474,7 @@ Last updated 2026-10-28.
     destinations. Sitoo, Front Systems, Visma, Brightpearl, Business Central
     and SAP still mark a `401`/`403` and an incomplete node `sdk.Permanent`.
     Apply the same split there and update the table in
-    `docs/operator/troubleshooting.md`. Found in #734.
+    `docs/operator/troubleshooting.md`. Found in #734. Filed as #827.
 
 205. **Start-time checks for the destination fields.** `nodeConfigRules`
     requires only the `kafka`, `rabbitmq`, `sftp` and `cloud_storage` blocks,
@@ -1488,7 +1488,7 @@ Last updated 2026-10-28.
     and cloud-storage destinations; keep it as a failing node instead. And
     `src/pkg/managementapi/nodeconfig.go` (comment at the top) and
     `nodeconfig_test.go` still quote the HTTP destination's old
-    `|| nodeConfig.HTTP.URL == ""` skip. Found in #734.
+    `|| nodeConfig.HTTP.URL == ""` skip. Found in #734. Filed as #828.
 
 ## Human
 
