@@ -26,6 +26,12 @@
 # the same hostname — redundant, and it spends a Let's Encrypt duplicate-cert
 # quota for nothing. The tradeoff to know: this Ingress depends on that one for
 # HTTPS, so deleting the UI Ingress would take webhook TLS with it.
+#
+# mTLS: webhook connections that require a client certificate are served by
+# webhooks-mtls-ingress.yaml on a host of its own (#454). This Ingress has no
+# auth-tls, so nginx passes a caller's ssl-client-cert header through: it must
+# route the webhook consumer to 9100 only, never to 9102 (the port that trusts
+# that header). A guard test enforces it.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

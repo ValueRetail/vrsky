@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,9 +34,88 @@ type tunnelState struct {
 	running   bool
 }
 
-// handleWebhook routes POST /webhook/{connectionId} to the active connection,
-// verifies the HMAC signature (if configured), and publishes the body.
+// certSource says where a webhook request's client certificate comes from.
+type certSource int
+
+const (
+	// certFromTLS: the request's own TLS connection. The aux port (plain HTTP,
+	// so never a certificate) and the direct mTLS port (WORKER_MTLS_PORT).
+	// The ssl-client-cert header is never read here: on the public host
+	// nginx passes a caller's copy of it straight through.
+	certFromTLS certSource = iota
+	// certFromEdge: the ssl-client-cert header ingress-nginx sets after
+	// checking the caller's certificate (#454). Trusted only on a TLS
+	// connection that presented the ingress's edge certificate.
+	certFromEdge
+)
+
+// Headers ingress-nginx sets for a location with auth-tls and
+// auth-tls-pass-certificate-to-upstream. proxy_set_header replaces any copy
+// the caller sent.
+const (
+	headerClientCert   = "ssl-client-cert"
+	headerClientVerify = "ssl-client-verify"
+)
+
+// handleWebhook serves /webhook/ on the aux port and the direct mTLS port:
+// the client certificate, when a connection needs one, comes from the TLS
+// connection itself.
 func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
+	return s.webhookHandler(certFromTLS)
+}
+
+// handleEdgeWebhook serves /webhook/ on the edge port, behind ingress-nginx:
+// the client certificate comes from the ssl-client-cert header.
+func (s *webhookConsumer) handleEdgeWebhook() http.HandlerFunc {
+	return s.webhookHandler(certFromEdge)
+}
+
+// clientCertFailure is why a request to an mTLS connection was refused: the
+// metric reason label and the log message.
+type clientCertFailure struct {
+	reason string
+	msg    string
+}
+
+// clientChain returns the certificate chain the request's caller presented, by
+// source. For certFromEdge it checks, in order, that the request came over a
+// TLS connection that presented the ingress certificate (the listener already
+// insists, this guards a mis-wired handler), that nginx reported a successful
+// verification, and that exactly one certificate header parses.
+func clientChain(r *http.Request, src certSource) ([]*x509.Certificate, *clientCertFailure) {
+	switch src {
+	case certFromEdge:
+		if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 {
+			return nil, &clientCertFailure{"untrusted_edge", "Edge webhook request did not come from the ingress (no verified edge certificate)"}
+		}
+		verify := r.Header.Values(headerClientVerify)
+		certs := r.Header.Values(headerClientCert)
+		if len(certs) == 0 || (len(certs) == 1 && certs[0] == "") {
+			return nil, &clientCertFailure{"missing_cert", "Webhook requires mTLS but the ingress forwarded no client certificate"}
+		}
+		if len(verify) != 1 || verify[0] != "SUCCESS" {
+			return nil, &clientCertFailure{"untrusted_cert", "Webhook requires mTLS but the ingress did not report a verified client certificate"}
+		}
+		if len(certs) != 1 {
+			return nil, &clientCertFailure{"malformed_cert", "Forwarded client certificate header appears more than once"}
+		}
+		leaf, err := tlsconfig.ParseForwardedCert(certs[0])
+		if err != nil {
+			return nil, &clientCertFailure{"malformed_cert", "Forwarded client certificate rejected: " + err.Error()}
+		}
+		return []*x509.Certificate{leaf}, nil
+	default:
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			return nil, &clientCertFailure{"missing_cert", "Webhook requires mTLS but no client certificate presented"}
+		}
+		return r.TLS.PeerCertificates, nil
+	}
+}
+
+// webhookHandler routes POST /webhook/{connectionId} to the active connection,
+// checks the client certificate (if the connection requires one) and the HMAC
+// signature (if configured), and publishes the body.
+func (s *webhookConsumer) webhookHandler(src certSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
@@ -63,25 +143,34 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 			return
 		}
 
-		// mTLS client-cert verification (#89 / Phase 3F). When the connection
-		// configured a client CA, the caller must present a client cert that
-		// chains to it. This also closes the plain-port bypass: a request over
-		// the SDK aux HTTP port (no TLS) to an mTLS connection is rejected.
+		// mTLS client-cert verification (#89 / Phase 3F, #454). When the
+		// connection configured a client CA, the caller must present a client
+		// cert that chains to THIS connection's CA — also behind the ingress,
+		// whose CA bundle holds every tenant's CA. This also closes the
+		// plain-port bypass: a request over the SDK aux HTTP port (no TLS) to
+		// an mTLS connection is rejected, whatever headers it carries.
 		if len(ac.ClientCA) > 0 {
-			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-				incClientCertFailure(ac.ConnectionID, "missing_cert")
-				s.logger.Warn("Webhook requires mTLS but no client certificate presented",
-					"connection_id", ac.ConnectionID)
+			chain, fail := clientChain(r, src)
+			if fail != nil {
+				incClientCertFailure(ac.ConnectionID, fail.reason)
+				s.logger.Warn(fail.msg, "connection_id", ac.ConnectionID, "reason", fail.reason)
 				http.Error(w, "Client certificate required", http.StatusUnauthorized)
 				return
 			}
-			if err := tlsconfig.VerifyClientCert(r.TLS.PeerCertificates, ac.ClientCA); err != nil {
+			if err := tlsconfig.VerifyClientCert(chain, ac.ClientCA); err != nil {
 				incClientCertFailure(ac.ConnectionID, "untrusted_cert")
 				s.logger.Warn("Webhook client certificate verification failed",
-					"connection_id", ac.ConnectionID, "reason", err.Error())
+					"connection_id", ac.ConnectionID,
+					"subject", chain[0].Subject.String(),
+					"fingerprint_sha256", tlsconfig.Fingerprint(chain[0]),
+					"reason", err.Error())
 				http.Error(w, "Client certificate verification failed", http.StatusUnauthorized)
 				return
 			}
+			s.logger.Debug("Webhook client certificate accepted",
+				"connection_id", ac.ConnectionID,
+				"subject", chain[0].Subject.String(),
+				"fingerprint_sha256", tlsconfig.Fingerprint(chain[0]))
 		}
 
 		body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)) // 10MB limit

@@ -50,12 +50,17 @@ encrypted-secret path as other credentials.
   endpoint that requires one. This works on the hosted service and on
   self-hosted deployments.
 - **Inbound.** A webhook consumer can require a client certificate that chains
-  to a per-connection CA. The check runs in the worker, on its own TLS port,
-  so that port has to be reachable from outside. The Docker Compose stack
-  opens it; the Kubernetes manifests don't yet. The hosted service doesn't
-  expose it either: TLS for webhooks ends at the ingress. A webhook connection set to require a client certificate there
-  refuses every request rather than accepting one without a certificate. For
-  inbound webhooks on the hosted service, use HMAC request signing.
+  to a per-connection CA. On the hosted service the certificate is checked
+  twice. The ingress checks it in the TLS handshake, on a hostname used only
+  for these webhooks, against the CAs that tenants have registered. It then
+  passes the certificate to the webhook service, which checks it again
+  against that connection's own CA, so a certificate issued under one
+  tenant's CA does not open another tenant's webhook. The webhook service
+  accepts the forwarded certificate only from the ingress: that hop is
+  mutual TLS with a private CA, and the ingress overwrites any certificate
+  header a caller sends. A request without a valid certificate is refused,
+  never accepted without one. In the Docker Compose stack the webhook
+  service checks the certificate itself, on its own TLS port.
 
 Rejections are observable (`webhook_client_cert_failures_total`). See
 [HTTP & webhooks](../connectors/http.md).

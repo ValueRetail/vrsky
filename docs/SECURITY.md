@@ -505,6 +505,12 @@ Traefik exposes Prometheus metrics (scrape job `traefik` →
 `traefik_service_requests_total`, `traefik_service_request_duration_seconds`,
 rate-limit drops), visible in Grafana alongside the app metrics (#84).
 
+### Verify (hosted)
+
+See [`docs/operator/webhook-mtls.md`](operator/webhook-mtls.md): the rollout,
+curl checks with and without a certificate, a forged `ssl-client-cert`, and
+the rollback.
+
 ### Verify (compose)
 ```bash
 docker compose up -d traefik management-api postgres-management nats prometheus
@@ -553,20 +559,50 @@ self-signed cert (dev only) — mTLS security here comes from verifying the
 
 ### Behaviour
 
-- **Consumer:** when `WORKER_MTLS_PORT` is set (9101 in compose) the worker runs
+- **Consumer, hosted (edge, #454):** the client certificate is checked at
+  ingress-nginx and again in the worker. The Ingress `vrsky-webhooks-mtls`
+  (`infrastructure/kubernetes/ingress/webhooks-mtls-ingress.yaml`) serves its
+  own host, because `auth-tls-*` applies per host and the UI host must not ask
+  browsers for certificates. It sets `auth-tls-verify-client: "on"` against the
+  CA bundle in the Secret `webhook-client-ca` (every tenant's webhook client
+  CA) and `auth-tls-pass-certificate-to-upstream`, so nginx writes the
+  verified leaf into `ssl-client-cert` and `SUCCESS` into `ssl-client-verify`,
+  replacing any copy the caller sent. It proxies to the worker's edge port
+  (`WORKER_MTLS_EDGE_PORT`, 9102) over TLS, presenting its own client
+  certificate (`proxy-ssl-secret`, from a private CA cert-manager runs:
+  `webhook-edge-tls.yaml`). That listener requires and verifies that
+  certificate (`RequireAndVerifyClientCert`, client-auth EKU), so nothing else
+  in the cluster can set the header; an optional NetworkPolicy also limits the
+  port to ingress-nginx. The handler then requires exactly one
+  `ssl-client-verify: SUCCESS` and exactly one `ssl-client-cert`, URL-decodes
+  it, accepts exactly one PEM `CERTIFICATE` and nothing else, parses it and
+  verifies it against the **connection's own** CA. `SUCCESS` alone is never
+  enough: the bundle holds every tenant's CA. Only the subject and SHA-256
+  fingerprint are logged. No other port reads the header, and no other
+  Ingress may route to 9102: on a host without `auth-tls` nginx passes a
+  caller's `ssl-client-cert` through. Guard tests in
+  `src/pkg/managementapi/webhook_mtls_edge_guard_test.go` pin the annotations,
+  the routes, the certificate usages and the deployment wiring.
+- **Consumer, direct (compose):** when `WORKER_MTLS_PORT` is set (9101 in compose) the worker runs
   a dedicated TLS listener that demands *a* client cert at the handshake
   (`RequireAnyClientCert`) — a caller that presents none is refused at the TLS
   layer (no HTTP response). For a connection with `tls.client_ca`, the handler
   then verifies the presented cert chains to that per-connection CA (client-auth
   EKU only) and rejects with **401** if it does not. The same check also runs on
   the plain aux port (9100), where `r.TLS == nil` counts as "no cert" → **401** —
-  so an mTLS connection cannot be reached unauthenticated over plain HTTP.
+  so an mTLS connection cannot be reached unauthenticated over plain HTTP. This
+  port reads the certificate from the TLS connection only, never from a
+  header. Production does not set `WORKER_MTLS_PORT` (a guard test checks).
 - **Producer:** when a node has a `tls` block with a resolved `cert`/`key`, the
   worker builds a dedicated `http.Client` that presents that client cert (and
   trusts `client_ca` as the server root if supplied), reused for every send.
 - A connection with no `tls` block behaves exactly as before.
 - Rejections increment `webhook_client_cert_failures_total{connection_id,reason}`
-  (`reason` = `missing_cert` | `untrusted_cert`).
+  (`reason` = `missing_cert` | `untrusted_cert` | `malformed_cert` |
+  `untrusted_edge`; the last two only on the edge port).
+- A tenant's certificate opens only connections whose CA it chains to. Two
+  tenants who configure the same CA can reach each other's mTLS webhooks
+  (#797 adds a per-connection pin).
 
 ### Verify (compose)
 

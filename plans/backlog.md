@@ -379,14 +379,12 @@ Last updated 2026-10-28.
     docs and `infrastructure/azure/postgres-tls.sh`. Strike this line when a
     human has run the rollout in `plans/issue-453-postgres-tls.md` and
     `postgres-tls.sh check` is clean.
-59. **Inbound webhook mTLS can't reach production.** No manifest sets
+59. ~~**Inbound webhook mTLS can't reach production.**~~ (#454: checked at
+    the edge with ingress-nginx `auth-tls-*` on a host of its own, forwarded
+    to the worker over mutual TLS; `plans/issue-454-webhook-mtls-edge.md`.
+    The rollout is human item 13.) No manifest sets
     `WORKER_MTLS_PORT`, and the webhook Ingress terminates TLS, so the
-    worker never sees a client certificate. Wiring it up needs the TLS port
-    on the webhook-consumer Service plus SSL passthrough (or a separate
-    LoadBalancer) for those connections, or a switch to ingress-nginx
-    `auth-tls-*` with the CA check moved to the edge. Then update the
-    whitepaper §4 and `docs/connectors/http.md`. Ingress and manifests: PR
-    plus `agent:needs-human`. Found in #407. Filed as #454.
+    worker never sees a client certificate. Found in #407.
 60. ~~**The File watcher panel's `connected` event shows the full volume
     path**~~ (#455) (`src/cmd/file-consumer/server.go`, `handleEvents`): "Watching
     /data/input/<tenant-id>/orders". It's the tenant's own folder, but the
@@ -1418,6 +1416,38 @@ Last updated 2026-10-28.
     timeout that scales with the size or bounds idle time instead. Found in
     #773. Filed as #774.
 
+194. **The edge CA bundle for inbound webhook mTLS is kept by hand.** The
+    Secret `webhook-client-ca` must hold every tenant's webhook client CA
+    (#454), so a tenant who adds or rotates one waits for an operator.
+    Build it from the connections instead: the management API (or a small
+    job) collects each running webhook connection's resolved `client_ca`
+    and writes the Secret. Needs RBAC to write one Secret in
+    `vrsky-platform`: PR plus `agent:needs-human`. Found in #454. Filed as #798.
+
+195. **Two tenants with the same client CA can reach each other's mTLS
+    webhooks.** The worker checks a caller's certificate against the
+    connection's CA only, so a CA that two tenants share (a public CA, a
+    parent company's) opens both. Add an optional per-connection pin
+    (subject, SAN or SHA-256 fingerprint) to the `tls` block and check it
+    after the chain. Applies to the direct-TLS mode too. Found in #454. Filed as #797.
+
+196. **The builder doesn't know about inbound mTLS.** A Webhook (HTTP)
+    source has no client CA field (`tls.client_ca_secret_id` is API only),
+    and its panel shows `https://vrsky.valueretail.no/webhook/<id>` even for
+    a connection that requires a client certificate, where that URL always
+    answers 401. Add the field and show `https://mtls.vrsky.valueretail.no/webhook/<id>`
+    for such a connection (`ui/src/config/env.ts`, the source panel in
+    `PropertyEditor.tsx`). Found in #454. Filed as #798.
+
+197. **The webhook consumer reads its edge certificate once.** cert-manager
+    renews `webhook-edge-server` 90 days before it ends, but the consumer
+    loads the files at start (#454), so a pod that runs past the old
+    certificate's end breaks the hop from the ingress (mTLS webhooks get
+    502). Parking restarts pods daily, which hides it. Reload on change
+    (`tls.Config.GetCertificate` reading the mounted files when they change),
+    or alert on the served certificate's expiry. Found in review of #454.
+    Filed as #799.
+
 198. **The SDK's 5 s Stop budget is shorter than a worst-case checkpoint
     save.** `pkg/sdk/lifecycle.go` gives a connector's `Stop` 5 s, but a
     Business Central poller's save can need two attempts (the first fails on
@@ -1538,3 +1568,9 @@ Last updated 2026-10-28.
 12. ~~**Check `$orderby` paging against a live Business Central.**~~ (done
    2026-11-03 for #733: `$orderby=lastModifiedDateTime asc` keeps its order
    across 40 server pages with no duplicates, at about the same cost)
+13. **Roll out inbound webhook mTLS at the edge** (#454). DNS record for
+   `mtls.vrsky.valueretail.no`, the cert-manager resources, the CA bundle
+   Secret, the Ingress, and the curl checks, in that order:
+   `docs/operator/webhook-mtls.md`. Also say whether the cluster enforces
+   NetworkPolicy (`az aks show --query networkProfile.networkPolicy`),
+   which decides whether the optional policy there does anything.
