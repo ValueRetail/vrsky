@@ -63,9 +63,17 @@ func TestSend_NoAnswerFailsWithinTheTimeout(t *testing.T) {
 	}
 }
 
-func TestSend_DefaultTimeoutIs30s(t *testing.T) {
-	if got := (&httpProducer{}).newClient(nil).Timeout; got != 30*time.Second {
-		t.Errorf("default client timeout = %v, want 30s", got)
+// The client carries no overall Timeout any more (#774): it counts the time
+// spent writing the body, which cut off large streamed uploads that were making
+// progress. Each request is bounded by its own guard instead, 30 s without
+// progress by default.
+func TestSend_DefaultTimeoutIs30sWithoutClientTimeout(t *testing.T) {
+	p := &httpProducer{}
+	if got := p.newClient(nil).Timeout; got != 0 {
+		t.Errorf("client Timeout = %v, want 0 (requests are bounded by reqGuard)", got)
+	}
+	if got := p.timeout(); got != 30*time.Second {
+		t.Errorf("default request timeout = %v, want 30s", got)
 	}
 }
 

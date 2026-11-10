@@ -64,9 +64,9 @@ type httpProducer struct {
 	// mTLS; it is built on first use, so a producer that was not configured
 	// still gets a guarded client and never a plain http.Client.
 	allowPrivate bool
-	// requestTimeout bounds one request end to end (connect, TLS, waiting for
-	// the answer, reading the body). Zero means defaultRequestTimeout; tests
-	// set a short one.
+	// requestTimeout bounds one request with no progress: a buffered request
+	// end to end, a streamed one between body chunks and then for the answer
+	// (see reqGuard). Zero means defaultRequestTimeout; tests set a short one.
 	requestTimeout time.Duration
 	defaultOnce    sync.Once
 	defaultClient  *http.Client
@@ -155,11 +155,128 @@ func (p *httpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 	return nil
 }
 
-// defaultRequestTimeout is how long one request to a target may take. A target
-// that accepts the connection and never answers fails the delivery after this,
-// as an ordinary retriable error (NAK, then the DLQ), so it cannot hold the
-// dispatch goroutine (#763).
+// defaultRequestTimeout is how long a request to a target may go without
+// progress. A target that accepts the connection and never answers fails the
+// delivery after this, as an ordinary retriable error (NAK, then the DLQ), so
+// it cannot hold the dispatch goroutine (#763). A buffered request is held to
+// it end to end; a streamed upload only while it stalls (#774).
 const defaultRequestTimeout = 30 * time.Second
+
+func (p *httpProducer) timeout() time.Duration {
+	if p.requestTimeout > 0 {
+		return p.requestTimeout
+	}
+	return defaultRequestTimeout
+}
+
+// reqGuard enforces the request timeout. The http.Client has no Timeout of its
+// own, because that would count the time spent writing the body and cut off a
+// multi-GB upload that is making progress (#774). The guard cancels the
+// request's context when the timer fires. A buffered request never resets it,
+// so it is bounded end to end as before. A streamed one resets it every time
+// the transport asks for more body, so a stalled upload fails after d without
+// progress, and again when the body is done, for the answer.
+type reqGuard struct {
+	d      time.Duration
+	cancel context.CancelFunc
+
+	mu       sync.Mutex
+	timer    *time.Timer
+	timedOut bool
+	done     bool
+}
+
+// newReqGuard returns a context that is cancelled when the guard fires or the
+// parent is. Call stop when the request, response body included, is finished.
+func newReqGuard(parent context.Context, d time.Duration) (context.Context, *reqGuard) {
+	ctx, cancel := context.WithCancel(parent)
+	g := &reqGuard{d: d, cancel: cancel}
+	g.timer = time.AfterFunc(d, func() {
+		g.mu.Lock()
+		if !g.done {
+			g.timedOut = true
+		}
+		g.mu.Unlock()
+		cancel()
+	})
+	return ctx, g
+}
+
+func (g *reqGuard) reset() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.done && !g.timedOut {
+		g.timer.Reset(g.d)
+	}
+}
+
+func (g *reqGuard) stop() {
+	g.mu.Lock()
+	g.done = true
+	g.timer.Stop()
+	g.mu.Unlock()
+	g.cancel()
+}
+
+// wrap marks an error from a request that the guard cut off as a deadline.
+func (g *reqGuard) wrap(err error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err != nil && g.timedOut {
+		return fmt.Errorf("no progress for %v: %w", g.d, context.DeadlineExceeded)
+	}
+	return err
+}
+
+// progressReader resets the guard each time the transport pulls body bytes,
+// and once more at the end of the body so the target gets a full timeout to
+// answer.
+//
+// The transport waits for its body write to return before it reports a
+// cancelled request, so a source that blocks in Read (a stalled object-store
+// stream) would hold the delivery open past the timeout. Read therefore runs
+// the source read in its own goroutine, into a private buffer, and gives up
+// when the request context ends. The abandoned read finishes when the source
+// does, which closing the stream or ending the delivery context makes happen.
+type progressReader struct {
+	ctx context.Context
+	r   iolib.Reader
+	g   *reqGuard
+	buf []byte
+}
+
+type readResult struct {
+	n   int
+	err error
+}
+
+func (pr *progressReader) Read(b []byte) (int, error) {
+	pr.g.reset()
+	if len(b) == 0 {
+		return 0, nil
+	}
+	if cap(pr.buf) < len(b) {
+		pr.buf = make([]byte, len(b))
+	}
+	buf := pr.buf[:len(b)]
+	ch := make(chan readResult, 1)
+	go func() {
+		n, err := pr.r.Read(buf)
+		ch <- readResult{n, err}
+	}()
+	select {
+	case res := <-ch:
+		copy(b, buf[:res.n])
+		if res.err != nil || res.n > 0 {
+			pr.g.reset()
+		}
+		return res.n, res.err
+	case <-pr.ctx.Done():
+		// buf stays with the goroutine; the next Read, if any, allocates anew.
+		pr.buf = nil
+		return 0, pr.ctx.Err()
+	}
+}
 
 // newClient builds the guarded client every delivery uses. A tenant may point a
 // node at a public API over http or https, so the scheme is not restricted; the
@@ -169,11 +286,8 @@ const defaultRequestTimeout = 30 * time.Second
 // outbound call is a child span of the pipeline trace and carries traceparent
 // (a no-op when tracing is off).
 func (p *httpProducer) newClient(tlsCfg *tls.Config) *http.Client {
-	timeout := p.requestTimeout
-	if timeout <= 0 {
-		timeout = defaultRequestTimeout
-	}
-	c := safeurl.NewClientWith(timeout, safeurl.Options{
+	// No Client.Timeout: each request is bounded by its reqGuard instead.
+	c := safeurl.NewClientWith(0, safeurl.Options{
 		AllowPrivate:      p.allowPrivate,
 		SameHostRedirects: true,
 		TLSConfig:         tlsCfg,
@@ -388,14 +502,24 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	}
 
 	client := p.clientFor(httpCfg)
+	// The guards stay armed until the response has been read, so a target that
+	// sends headers and then stalls is cut off too.
+	var stops []func()
+	defer func() {
+		for _, stop := range stops {
+			stop()
+		}
+	}()
 	// buildAndSend creates a fresh request (re-readable body) per attempt and,
 	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
 	buildAndSend := func(force bool) (*http.Response, error) {
+		reqCtx, guard := newReqGuard(ctx, p.timeout())
+		stops = append(stops, guard.stop)
 		var reqBody iolib.Reader = bytes.NewReader(env.Payload)
 		if body != nil {
-			reqBody = body
+			reqBody = &progressReader{ctx: reqCtx, r: body, g: guard}
 		}
-		req, _ := http.NewRequestWithContext(ctx, method, httpCfg.URL, reqBody)
+		req, _ := http.NewRequestWithContext(reqCtx, method, httpCfg.URL, reqBody)
 		if body != nil {
 			// Declare the length so the request goes out with Content-Length
 			// rather than chunked encoding, which some endpoints reject. The
@@ -428,7 +552,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, redactTransportErr(err, shownURL)
+			return nil, guard.wrap(redactTransportErr(err, shownURL))
 		}
 		return resp, nil
 	}
