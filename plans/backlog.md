@@ -1429,6 +1429,13 @@ Last updated 2026-10-28.
     `MaxDeliver` one higher than the attempts the subscriber counts. Found
     in #794.
 
+195. **Some Postgres tests fail instead of skipping without a database.**
+    `cmd/db-consumer/password_pg_test.go` and `cmd/db-producer/deliver_pg_test.go`
+    say they are skipped without `VRSKY_TEST_POSTGRES_URL`, but they open
+    `os.Getenv(testdb.EnvVar)` directly and fail on `dial tcp [::1]:5432`
+    when it is unset, so `go test ./...` on a laptop goes red. Skip through
+    the `testdb` helper like the other database tests. Found in #794.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource
