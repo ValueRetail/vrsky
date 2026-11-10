@@ -1444,7 +1444,7 @@ Last updated 2026-10-28.
     when it is unset, so `go test ./...` on a laptop goes red. Skip through
     the `testdb` helper like the other database tests. Found in #794. Filed as #785.
 
-201. **Messages dropped at `MaxDeliver` never reach the DLQ on their own.**
+206. **Messages dropped at `MaxDeliver` never reach the DLQ on their own.**
     Since #811 a failed DLQ copy on the fifth delivery is retried three
     times and then logged with its stream sequence and counted
     (`vrsky_dlq_publish_failed_total`), but recovering it is by hand
@@ -1456,13 +1456,13 @@ Last updated 2026-10-28.
     `Msg-Id` exists) would cover both; the other option is `MaxDeliver` one
     above the attempts the subscriber counts
     (`plans/issue-811-last-delivery-dlq.md`). New advisory consumer or
-    consumer config: needs a human decision. Found in #811.
+    consumer config: needs a human decision. Found in #811. Filed as #832.
 
-202. **No alert on `vrsky_dlq_publish_failed_total`.** The counter from #811
+207. **No alert on `vrsky_dlq_publish_failed_total`.** The counter from #811
     marks a message that is in neither its durable nor the DLQ. Add a rule
     to `infrastructure/prometheus-rules.yml` (any increase, platform
     targets like `DLQGrowing`) with a `promtool test rules` case. Found
-    in #811.
+    in #811. Filed as #833.
 
 ## Human
 
