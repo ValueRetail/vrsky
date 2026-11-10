@@ -301,12 +301,19 @@ Revert by reverting the merge in a PR; the revert deploys like any change.
 - Pass a `context.Context` through anything that blocks, and stop
   goroutines when it is cancelled.
 - Don't write your own retry loop around a delivery. A handler that fails
-  returns an error and JetStream redelivers with backoff
-  (`messaging.DefaultBackoff`, `src/pkg/messaging/subscriber.go`), up to
+  returns an error; the subscriber NAKs it with a delay so JetStream
+  redelivers it after the next backoff step (`messaging.DefaultBackoff`,
+  1 s, 5 s, 30 s, 2 min; `src/pkg/messaging/retry.go`), up to
   `messaging.MaxDeliveryAttempts` (5, `src/pkg/messaging/messaging.go`).
-  After that the message moves to the DLQ. In the SDK, wrap an error that
-  retrying can't fix in `sdk.Permanent`: the message is acked and logged
-  instead of retried, and it does not go to the DLQ.
+  After that the message moves to the DLQ. A plain `m.Nak()` would bring it
+  back at once (#794). Past `SubscriberOpts.MaxDelayed` waiting messages (8
+  per subscriber, 4 per connection by default) a failure is NAK'd without a
+  delay, so one connection can't hold every `MaxAckPending` slot of a shared
+  durable. In the SDK, `sdk.RateLimited(err, d)` makes each wait at least
+  `d` (clamped to 1 s .. 2 min); wrap an error that retrying can't fix in
+  `sdk.Permanent`: the message is acked and logged instead of retried, and
+  it does not go to the DLQ. Tests shorten the schedule with
+  `harness.Options.Backoff` (`sdk.WithDispatchBackoff`).
 - Tests are table-driven where there is more than one case. NATS behaviour
   is tested against the embedded server in `src/pkg/sdk/harness`, not only
   mocks; database behaviour that Postgres decides goes through

@@ -12,7 +12,8 @@ import (
 // envelope to Deliver; the connector implements only Configure + Deliver.
 //
 // Deliver's error is classified (see errors.go): nil acks, Retriable NAKs for
-// redelivery, Permanent acks+logs (poison), and a bare error is Retriable.
+// redelivery on the backoff schedule, RateLimited NAKs with at least its
+// delay, Permanent acks+logs (poison), and a bare error is Retriable.
 type Producer interface {
 	component.Component
 	Configure(ctx context.Context, res *Resources) error

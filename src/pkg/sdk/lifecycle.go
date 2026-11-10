@@ -449,7 +449,8 @@ func ackWaitFromEnv(logger *slog.Logger) time.Duration {
 // subscribeDispatch wires a durable JetStream subscription whose handler
 // unmarshals the envelope and calls deliver, mapping the SDK error classes
 // onto messaging's NAK/DLQ semantics: nil → ack; Permanent → ack+log (poison);
-// anything else → NAK (messaging retries with backoff, then DLQs).
+// anything else → NAK, redelivered after the backoff step for the attempt
+// (RateLimited: at least its delay), then DLQ'd on the fifth failure.
 // streamDeliver, when non-nil, is used INSTEAD of deliver for envelopes whose
 // payload was offloaded — the object is handed over as a stream and never
 // buffered (so the rehydrate cap does not apply). nil for connectors and node
@@ -534,7 +535,7 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 				"connection_id", env.IntegrationID, "tenant_id", env.TenantID,
 				"envelope_id", env.ID, "error", derr)
 		}
-		return derr // Retriable / bare → NAK → backoff → DLQ
+		return derr // Retriable / bare → NAK with the backoff step; RateLimited → at least its delay; then DLQ
 	})
 	if err != nil {
 		return nil, err
