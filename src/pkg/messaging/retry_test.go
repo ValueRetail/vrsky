@@ -133,6 +133,17 @@ func TestDelayedSet(t *testing.T) {
 			wantLen: 1, wantConnA: 1,
 		},
 		{
+			// Re-added at +20 s, it is due at +50 s, not at the first +30 s:
+			// at +40 s it still holds the connection's only place.
+			name: "adding the same message again refreshes its due time", maxTotal: 8, maxConn: 1,
+			ops: []op{
+				{kind: "add", seq: 1, conn: "a", now: t0, wantOK: true},
+				{kind: "add", seq: 1, conn: "a", now: t0.Add(20 * time.Second), wantOK: true},
+				{kind: "add", seq: 2, conn: "a", now: t0.Add(40 * time.Second), wantOK: false},
+			},
+			wantLen: 1, wantConnA: 1,
+		},
+		{
 			name: "removing an unknown message is a no-op", maxTotal: 8, maxConn: 4,
 			ops: []op{
 				{kind: "remove", seq: 9},

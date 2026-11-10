@@ -189,77 +189,137 @@ func TestProducer_PermanentWinsOverRateLimited(t *testing.T) {
 	}
 }
 
-// #794: one connection's failing target does not stall another connection
-// on the same durable. A message waiting out its retry delay keeps one of the
-// durable's MaxAckPending slots (32); before the cap, 32 waiting messages from
-// one connection held all of them and a message for any other connection
-// waited for the whole schedule (measured 10.1 s in the review of #721). The
-// subscriber holds at most MaxDelayed (8) waiting messages, at most 4 of them
-// per connection, and NAKs the rest without a delay, so the other slots keep
-// serving new messages.
+// #794: failing connections do not stall a healthy one on the same durable.
+// A message waiting out its retry delay keeps one of the durable's
+// MaxAckPending slots (32); before the caps, 32 waiting messages held all of
+// them and a message for any other connection waited for the failing ones'
+// whole schedule (measured 10.1 s in the review of #721). The subscriber holds
+// at most MaxDelayed (8) waiting messages, at most MaxDelayedPerConnection (4)
+// of one connection, and NAKs the rest without a delay, so the other slots
+// keep serving new messages.
 //
-// The bound: a message on a healthy connection waits only for the deliveries
-// queued ahead of it, never for a retry timer. Here that is under
-// stallBound, while the failing connection's schedule (4 × 2 s) is four times
-// longer. Without the cap this test waits about 8 s.
-func TestProducer_FailingConnectionDoesNotStallOthers(t *testing.T) {
-	const (
-		dead, alive = "conn-dead", "conn-alive"
-		queued      = 40 // more than MaxAckPending
-		stallBound  = 2500 * time.Millisecond
-	)
-	step := 2 * time.Second
+// The bound: the healthy message waits for the deliveries queued ahead of it,
+// not for a retry timer. stallBound is half of one step, so even a single
+// retry timer in its way fails the test; without the caps it waits for the
+// failing messages' whole schedule (4 steps).
+const (
+	stallStep  = 4 * time.Second
+	stallBound = stallStep / 2
+)
+
+// stallCase publishes perConn always-failing messages on each of conns
+// connections, then one message on a healthy connection, and checks that the
+// healthy one is delivered within stallBound and that exactly wantWaited of
+// the failing messages waited out the backoff (their second attempt a whole
+// step after the first).
+func stallCase(t *testing.T, name string, conns, perConn, wantWaited int) {
+	t.Helper()
+	const alive = "conn-alive"
 	var aliveAt sync.Once
 	delivered := make(chan time.Time, 1)
 	p := &failingProducer{fail: func(conn string) error {
-		if conn == dead {
-			return sdk.RateLimited(errors.New("503 maintenance"), step)
+		if conn != alive {
+			return sdk.RateLimited(errors.New("503 maintenance"), stallStep)
 		}
 		aliveAt.Do(func() { delivered <- time.Now() })
 		return nil
 	}}
 	h := harness.NewProducerHarness(t, p, harness.Options{
-		Name:    "test-producer-stall",
-		Backoff: []time.Duration{step, step, step, step},
+		Name:    name,
+		Backoff: []time.Duration{stallStep, stallStep, stallStep, stallStep},
 	})
-	var deadIDs []string
-	for i := range queued {
-		env := envelope.New()
-		env.TenantID, env.IntegrationID = "tenant-a", dead
-		env.Payload = []byte(fmt.Sprintf(`{"n":%d}`, i))
-		h.Publish(t, env)
-		deadIDs = append(deadIDs, env.ID)
+	var failingIDs []string
+	for c := range conns {
+		for i := range perConn {
+			env := envelope.New()
+			env.TenantID, env.IntegrationID = fmt.Sprintf("tenant-%d", c), fmt.Sprintf("conn-dead-%d", c)
+			env.Payload = []byte(fmt.Sprintf(`{"n":%d}`, i))
+			h.Publish(t, env)
+			failingIDs = append(failingIDs, env.ID)
+		}
 	}
 	env := envelope.New()
-	env.TenantID, env.IntegrationID = "tenant-b", alive
-	env.Payload = []byte(`{"n":"b"}`)
+	env.TenantID, env.IntegrationID = "tenant-healthy", alive
+	env.Payload = []byte(`{"n":"healthy"}`)
 	published := time.Now()
 	h.Publish(t, env)
 
+	limit := 4*stallStep + 5*time.Second
 	select {
 	case at := <-delivered:
 		took := at.Sub(published)
-		t.Logf("tenant-b's message delivered %v after it was published", took.Round(time.Millisecond))
+		t.Logf("the healthy message was delivered %v after it was published", took.Round(time.Millisecond))
 		if took > stallBound {
-			t.Errorf("tenant-b's message took %v, want at most %v", took.Round(time.Millisecond), stallBound)
+			t.Errorf("the healthy message took %v, want at most %v", took.Round(time.Millisecond), stallBound)
 		}
-	case <-time.After(4*step + 5*time.Second):
-		t.Fatalf("tenant-b's message was not delivered within %v", 4*step+5*time.Second)
+	case <-time.After(limit):
+		t.Fatalf("the healthy message was not delivered within %v", limit)
 	}
 
-	// The failing connection still got the backoff, for exactly as many
-	// messages as the per-connection cap allows (4 with MaxAckPending 32):
-	// those came back a whole step after their first attempt. The rest were
-	// retried at once.
-	time.Sleep(time.Until(published.Add(step + time.Second)))
+	// The rest were retried at once; their second attempt, if any, came
+	// well inside a step.
+	time.Sleep(time.Until(published.Add(stallStep + time.Second)))
 	waited := 0
-	for _, id := range deadIDs {
+	for _, id := range failingIDs {
 		at := p.envAttempts(id)
-		if len(at) >= 2 && at[1].Sub(at[0]) >= step-30*time.Millisecond {
+		if len(at) >= 2 && at[1].Sub(at[0]) >= stallStep-30*time.Millisecond {
 			waited++
 		}
 	}
-	if waited != 4 {
-		t.Errorf("%d of the failing connection's messages waited out the backoff, want 4 (the per-connection cap)", waited)
+	if waited != wantWaited {
+		t.Errorf("%d failing messages waited out the backoff, want %d", waited, wantWaited)
+	}
+}
+
+// One connection with more failing messages than MaxAckPending: the
+// per-connection cap (4) is what keeps slots free.
+func TestProducer_FailingConnectionDoesNotStallOthers(t *testing.T) {
+	t.Parallel()
+	stallCase(t, "test-producer-stall", 1, 40, 4)
+}
+
+// Ten failing connections with four messages each: every one stays within
+// the per-connection cap, so only the per-subscriber cap (8) keeps slots free.
+// Without it 32 messages would wait and fill the durable.
+func TestProducer_ManyFailingConnectionsDoNotStallOthers(t *testing.T) {
+	t.Parallel()
+	stallCase(t, "test-producer-stall-many", 10, 4, 8)
+}
+
+// #794: a handler that panics is retried on the backoff schedule too, not at
+// once. The panic is recovered by the subscriber, not the SDK. The fifth
+// attempt panics as well and is not dead-lettered (#811), so the test checks
+// the gaps only.
+func TestProducer_PanicRetriesFollowTheBackoff(t *testing.T) {
+	ms := time.Millisecond
+	backoff := []time.Duration{300 * ms, 600 * ms, 900 * ms, 1200 * ms}
+	p := &failingProducer{fail: func(string) error { panic("connector bug") }}
+	h := harness.NewProducerHarness(t, p, harness.Options{
+		Name:    "test-producer-panic",
+		Backoff: backoff,
+	})
+	env := envelope.New()
+	env.TenantID, env.IntegrationID = "tenant-a", "conn-a"
+	env.Payload = []byte(`{"n":1}`)
+	h.Publish(t, env)
+
+	deadline := time.Now().Add(3*time.Second + 10*time.Second)
+	for len(p.attempts("conn-a")) < messaging.MaxDeliveryAttempts && time.Now().Before(deadline) {
+		time.Sleep(50 * ms)
+	}
+	// Nothing comes back after the fifth attempt.
+	time.Sleep(500 * ms)
+	at := p.attempts("conn-a")
+	if len(at) != messaging.MaxDeliveryAttempts {
+		t.Fatalf("delivered %d times, want %d", len(at), messaging.MaxDeliveryAttempts)
+	}
+	const early, late = 30 * time.Millisecond, 450 * time.Millisecond
+	for i := 1; i < len(at); i++ {
+		gap, want := at[i].Sub(at[i-1]), backoff[i-1]
+		t.Logf("attempt %d: %v after attempt %d (want %v)", i+1, gap.Round(ms), i, want)
+		if gap < want-early || gap > want+late {
+			t.Errorf("attempt %d came %v after attempt %d, want %v (-%v/+%v)",
+				i+1, gap.Round(ms), i, want, early, late)
+		}
 	}
 }

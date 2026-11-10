@@ -370,13 +370,19 @@ messages (default `MaxAckPending/4`, 8) and at most
 tracks them by stream sequence until they are dispatched again or due. A
 failure over either cap is NAK'd without a delay, the old behaviour, and
 counted in `vrsky_message_retry_undelayed_total`. With two replicas on a
-durable, waiting messages hold at most 16 of the 32 slots, so a message on a
-healthy connection waits only for the deliveries queued ahead of it, never
-for a retry timer (`TestProducer_FailingConnectionDoesNotStallOthers`). The
-cost: past the cap, a connection's failing messages reach the DLQ within
-seconds. The table is per process, so after a restart a replica may admit up
-to its cap again while the server still holds delays from before. Raising
-`MaxAckPending` or moving retries to a delay stream are the alternatives
+durable, waiting messages hold at most 16 of the 32 slots, so in steady
+state a message on a healthy connection waits for the deliveries queued
+ahead of it, not for a retry timer
+(`TestProducer_FailingConnectionDoesNotStallOthers`,
+`TestProducer_ManyFailingConnectionsDoNotStallOthers`). The cost: past the
+cap, a connection's failing messages reach the DLQ within seconds.
+
+The caps are per process, not per durable. After a restart a replica may
+admit up to its cap again while the server still holds delays from before,
+and during a rolling update the old and the new pods count separately, so
+together they can fill all 32 slots and stall the durable until the old
+pods' delays run out. A durable-wide bound is #813; raising `MaxAckPending`
+or moving retries to a delay stream are the alternatives
 (`plans/issue-794-backoff-nak.md`).
 
 ### AckWait, in-progress heartbeats & redelivery (#139)

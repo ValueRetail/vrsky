@@ -93,15 +93,19 @@ What this bounds:
 
 - Per durable, waiting messages hold at most `replicas × MaxDelayed` slots:
   16 of 32 with two replicas, 8 with one. The other slots keep serving new
-  messages, so a message on a healthy connection waits only for the
-  deliveries queued ahead of it, never for a retry timer.
+  messages, so in steady state a message on a healthy connection waits for
+  the deliveries queued ahead of it, not for a retry timer. The caps are per
+  process: during a rolling update the old and the new pods count
+  separately and together can still fill all 32 slots for a while. The
+  durable-wide answer is #813.
 - One connection holds at most `replicas × MaxDelayedPerConnection` (8, or
   4) of those, so one dead target does not use up the delayed budget of
   other connections that have a short blip.
-- The test: a connection whose every delivery fails, with 40 messages queued,
-  does not delay a message on another connection by more than 1.5 s
-  (measured well under that). Without the cap the same test waits about
-  four seconds, the whole of the failing connection's schedule.
+- The tests (4 s steps): one connection with 40 failing messages, and ten
+  connections with 4 failing messages each, do not delay a message on a
+  healthy connection by more than 2 s, half a step (measured 0.8 to 0.9 s).
+  Without the caps the healthy message waited 8.7 s with 2 s steps and
+  16.5 s with 4 s steps, the failing messages' whole schedule.
 
 What it costs:
 
@@ -137,8 +141,11 @@ What it costs:
    schedule, the gaps between attempts follow `Backoff` within a tolerance,
    there are exactly five attempts, and the DLQ copy comes after the fifth.
    Fails on `main` (gaps of one poll).
-2. Harness test: one connection failing every delivery does not hold
-   another connection's message more than 1.5 s. Fails without the cap.
+2. Harness tests: one connection failing every delivery, and ten failing
+   connections each within the per-connection cap, do not hold a healthy
+   connection's message more than 2 s (half of the 4 s step). The first
+   fails without the per-connection cap, the second without the
+   per-subscriber cap. A panicking handler is retried on the schedule too.
 3. `sdk.RateLimited`: the wait is the larger of the step and the clamped
    delay; `Permanent(RateLimited(e, d))` and `RateLimited(Permanent(e), d)`
    are dropped, not retried; `errors.Join` takes the largest delay.
@@ -179,13 +186,23 @@ that one test sets 1 s steps. The test asserts the same things as before.
   for the same outage. Tests that expected a quick redelivery with the default
   schedule would need a short schedule (none found in the run).
 - Remote-agent output durables (`MaxAckPending: 1`): a NAK'd write now
-  comes back after 1 s, 5 s, … instead of at once. That is one connection's
-  own durable, so no one else waits.
+  comes back after 30 s, 30 s, 30 s and 2 min instead of at once (every step
+  is raised to the 30 s output ack wait). That is one connection's own
+  durable, so no one else waits, but a message held during a stop or
+  redeploy is offered again 30 s later.
 - Dedup window: the main stream's is 5 min. The default schedule (156 s)
   fits; a rate-limited destination at the 2 min cap can take 8 min, but
   destinations publish nothing back to the stream.
 
 ## Verification
+
+Follow-ups after review (2026-11-10): a panic harness test; stall tests
+with 4 s steps and a 2 s bound, one of them with ten failing connections for
+the per-subscriber cap; a duplicate add refreshes its due time (unit
+test). Mutations: plain `Nak()` on the panic path gives 76 ms gaps (fails);
+removing the per-subscriber cap stalls the healthy message 16.5 s with 32
+waiting (fails); removing the per-connection cap counts 8 waiting instead of
+4 (fails); no due refresh fails the unit test.
 
 Done on 2026-11-10: the backoff test measured gaps of 306/609/917/1223 ms
 for steps of 300/600/900/1200 ms on 2.15.1, and the same within 5 ms on

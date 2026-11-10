@@ -84,8 +84,10 @@ func retryWait(backoff []time.Duration, ackWait time.Duration, delivered uint64,
 // many it holds, in all and per connection (#794). An entry leaves when its
 // message is dispatched again, or once it is due (it may have gone to another
 // replica). The set is per process: after a restart it is empty while the
-// server may still hold delays from before. Not safe for concurrent use; only
-// the dispatch loop touches it.
+// server may still hold delays from before, and during a rolling update the
+// old and the new pods each have their own caps, so together they can still
+// fill every slot of a shared durable for a while. A durable-wide bound is
+// #813. Not safe for concurrent use; only the dispatch loop touches it.
 type delayedSet struct {
 	bySeq  map[uint64]delayedEntry
 	byConn map[string]int
@@ -102,8 +104,11 @@ type delayedEntry struct {
 func (d *delayedSet) add(seq uint64, conn string, due, now time.Time, maxTotal, maxPerConn int) (bool, int) {
 	d.prune(now)
 	held := d.byConn[conn]
-	if _, ok := d.bySeq[seq]; ok {
-		// Already counted (a NAK that did not reach the server, retried).
+	if e, ok := d.bySeq[seq]; ok {
+		// Already counted (a NAK that did not reach the server, retried):
+		// it waits from now, so the new due time replaces the old one.
+		e.due = due
+		d.bySeq[seq] = e
 		return true, held
 	}
 	if len(d.bySeq) >= maxTotal || held >= maxPerConn {
