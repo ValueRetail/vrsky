@@ -82,6 +82,8 @@ Config bullets:
   the error `kafka node has no brokers or topic`. Fix the node, wait 5 minutes
   (the worker keeps a connection's config that long) and retry the messages
   from the DLQ (#734). Any failure to open the writer or to write (broker
-  down, topic missing, auth refused) is retried and then dead-lettered too. See the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
+  down, topic missing, auth refused) is retried and then dead-lettered too.
+  Duplicates: when one node of a fan-out has a config error, the other nodes of that producer get the message again on each attempt (5 in all) and again on a DLQ replay, because this producer keeps no record of which node took it. Fix the node quickly or expect duplicates (skip set for these four: #758).
+  See the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - Partitioning, message keys, and other producer/consumer tuning are
   configured via the in-app pipeline editor (Property panel).

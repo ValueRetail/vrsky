@@ -363,7 +363,9 @@ Config bullets:
   provider or to write the object (for example credentials refused or the
   network down) is retried and then dead-lettered. A `key_template` that
   cannot be rendered does not drop anything: the object is written under a
-  generated key and a warning is logged. See the
+  generated key and a warning is logged.
+  Duplicates: when one node of a fan-out has a config error, the other nodes of that producer get the message again on each attempt (5 in all) and again on a DLQ replay, because this producer keeps no record of which node took it. Fix the node quickly or expect duplicates (skip set for these four: #758).
+  See the
   [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - Object-format handling and any provider-specific options not listed here are
   configured via the in-app pipeline editor (Property panel).

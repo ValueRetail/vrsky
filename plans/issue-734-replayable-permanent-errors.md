@@ -102,3 +102,18 @@ node lacks a required field (`pkg/managementapi`) is backlog item 205.
 From `src/`: `go build ./...`, `go vet ./...`, `golangci-lint run`,
 `go test -race -count=1` on the six packages, `make lint-tenant`,
 `make lint-connector`.
+
+## Accepted trade-offs
+- Duplicates on fan-out for Kafka, RabbitMQ, SFTP and cloud storage: when one
+  node has a config error, the other nodes of that producer get the message
+  again on each of the 5 attempts and on a DLQ replay, because these producers
+  keep no record of which node took it. Fix the node quickly. Follow-up: #758
+  (skip set for these four).
+- SFTP: a `filename_template` that fails for one record (missing field with
+  `missing-key=error`, renders to `""` or `..`, non-JSON or array payload) now
+  retries and dead-letters. Cloud storage falls back to a generated key.
+- HTTP: a `401`/`403` means 5 attempts with the bad credential; with OAuth each
+  attempt forces a token refresh (about 5 per message), so a burst can hit the
+  identity provider or lock out a basic-auth account. A `403` from a WAF or
+  per-record authorization is retried and dead-lettered too.
+- Follow-ups filed: #834 (DLQ size cap), #835 (node id in config errors).
