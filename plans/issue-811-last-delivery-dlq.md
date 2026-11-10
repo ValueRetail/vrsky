@@ -63,8 +63,17 @@ see Verification.
    `vrsky_dlq_publish_failed_total{pipeline_id, worker}` (the labels of
    `vrsky_dlq_messages_total`).
 
-`src/pkg/messaging/publisher.go`: `PublishToDLQ` now passes its context to
-`PublishMsg`, so the per-attempt timeout applies (it ignored `ctx` before).
+`src/pkg/messaging/publisher.go`:
+
+- `PublishToDLQ` now passes its context to `PublishMsg`, so the per-attempt
+  timeout applies (it ignored `ctx` before).
+- `ensure` remembers only success. It used a `sync.Once` that kept the
+  error, and the subscriber's own Publisher ran its first `EnsureStreams` on
+  the first DLQ copy: a JetStream blip there failed all three tries without
+  reaching NATS, and every later copy until a restart (review of #830).
+- Subscribe's Publisher starts out ensured (`newEnsuredPublisher`), since
+  Subscribe has just run `EnsureStreams`. So a DLQ try is one publish within
+  `DLQPublishTimeout`, with no unbounded stream probe before it.
 
 ## Why this, and not the other options
 
@@ -84,9 +93,10 @@ see Verification.
   holding the loop.
 - The halt does not cut the retries short. A stopping pod would otherwise
   give up on a message it could still save; the bound keeps Stop to a few
-  seconds more. Known gap: the SDK's Stop budget is 5 s (#808), shorter
-  than the 8.5 s worst case, so a pod stopped during a long DLQ outage can
-  exit mid-retry. The message then ends as it does today.
+  seconds more. The SDK runner waits up to `shutdownGrace` (30 s,
+  `pkg/sdk/lifecycle.go`) for the subscription to stop, so the 8.5 s worst
+  case fits. (The 5 s in #808 is the connector's own `Stop`, which runs
+  after the subscription has stopped and does not bound this.)
 - The `recover` now covers only the handler. Before, it also covered the
   ack, the DLQ copy and the NAK; none of those panics, and a panic there
   should not be turned into a retry.
@@ -164,3 +174,16 @@ Mutations, each caught:
 - a NAK after giving up: both give-up cases fail (the durable counts 0
   unacked right away instead of 1);
 - no `vrsky_dlq_publish_failed_total` increment: both give-up cases fail.
+
+After the review of #830 (`TestDeadLetterSurvivesJetStreamTrouble`,
+`TestPublisherRetriesAFailedEnsure`, package tests with a wrapped
+`JetStreamContext`):
+
+- `ensure` keeping its error again: `TestPublisherRetriesAFailedEnsure`
+  fails;
+- Subscribe's Publisher not marked ensured: the blip case fails (the DLQ
+  path probed the streams during the blip);
+- a `Msg-Id` unique per try: the lost-PubAck case fails with 2 copies in
+  the DLQ;
+- the original code (both of the first two) fails the blip case with 0
+  copies, as the reviewer measured.

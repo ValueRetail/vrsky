@@ -198,7 +198,9 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 	if err := ensureConsumer(js, opts); err != nil {
 		return nil, fmt.Errorf("ensure consumer %s: %w", opts.DurableName, err)
 	}
-	pub := NewPublisher(js)
+	// The streams were just ensured above, so the DLQ copy never probes them
+	// first: each try is one publish within DLQPublishTimeout (#811).
+	pub := newEnsuredPublisher(js)
 
 	sub, err := js.PullSubscribe(opts.FilterSubject, "",
 		nats.Bind(MainStreamName, opts.DurableName),

@@ -406,8 +406,11 @@ Now `Subscriber.deadLetter` (`pkg/messaging/subscriber.go`):
   heartbeat keeps the message in flight meanwhile. The copy's `Msg-Id` is
   `<stream>-<sequence>`, so a try that was stored but whose answer got lost
   does not make a second copy (the DLQ's 2-minute duplicate window). The
-  worker's loop is held for this: 2.5 s when the DLQ refuses at once, about
-  8.5 s at worst.
+  subscriber's Publisher counts the streams as ensured by `Subscribe`, so a
+  try is one publish, with no stream probe first; a Publisher whose ensure
+  failed tries it again on the next publish. The worker's loop is held for
+  this: 2.5 s when the DLQ refuses at once, about 8.5 s at worst, inside
+  the SDK runner's 30 s shutdown grace.
 - If every try fails, leaves the message unacked (no NAK, no term: neither
   would keep it, and an ack or term would say it was handled). It logs
   `Could not copy the message to the DLQ; it is left unacked and stays only

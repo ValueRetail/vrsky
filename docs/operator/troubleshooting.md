@@ -307,13 +307,20 @@ fail (#811):
 - `vrsky_dlq_publish_failed_total{pipeline_id, worker}` goes up. No alert
   is wired to it yet.
 - The message is not retried again: NATS never delivers a message to the
-  same worker more than five times. It is not in the DLQ view either.
+  same worker more than five times. Usually it is not in the DLQ view
+  either (but see below).
 
 The payload is still in the `VRSKY_DATA` stream at that sequence, for up to
 72 hours (less if the stream hits its size cap). There is no button for it
-yet. By hand: find the log line in Loki, read the message with the NATS CLI
-(`nats stream get VRSKY_DATA <stream_seq>`, from a nats-box pod), and once
-the cause is fixed publish its payload to
+yet. First check whether a copy got into the DLQ after all: when the tries
+timed out rather than being refused, one of them may have been stored with
+its answer lost. The connection's DLQ view would then show an entry from
+that worker at the time of the log line; to be sure, the entry's headers in
+`GET /api/v1/connections/{id}/dlq` include
+`Nats-Msg-Id: VRSKY_DATA-<stream_seq>`. If it is there, there is nothing to
+recover. Otherwise, by hand: find the log line in Loki, read the message
+with the NATS CLI (`nats stream get VRSKY_DATA <stream_seq>`, from a
+nats-box pod), and once the cause is fixed publish its payload to
 `vrsky.dlq.<tenant_id>.pipeline.<connection_id>`. It then shows in the
 connection's DLQ view and can be retried or discarded there like any other
 entry.

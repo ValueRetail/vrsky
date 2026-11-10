@@ -42,7 +42,9 @@ func TestProducer_LastDeliveryReachesTheDLQ(t *testing.T) {
 		// fail answers delivery n (from 1).
 		fail func(n int) error
 		// dlqDown breaks the DLQ before the message is published, and
-		// restoreAfter mends it that long after delivery 5 started (0: never).
+		// restoreAfter mends it that long after the first refused DLQ
+		// publish (0: never). The second try comes 500 ms after the first,
+		// so 100 ms leaves a wide margin on both sides.
 		dlqDown      bool
 		restoreAfter time.Duration
 		wantInDLQ    bool
@@ -87,7 +89,7 @@ func TestProducer_LastDeliveryReachesTheDLQ(t *testing.T) {
 			name:          "DLQ refuses, then recovers",
 			fail:          func(int) error { return errTarget },
 			dlqDown:       true,
-			restoreAfter:  300 * ms,
+			restoreAfter:  100 * ms,
 			wantInDLQ:     true,
 			wantLastErr:   "target down",
 			wantPublishes: 2,
@@ -123,12 +125,6 @@ func TestProducer_LastDeliveryReachesTheDLQ(t *testing.T) {
 				n := int(attempts.Add(1))
 				if n == messaging.MaxDeliveryAttempts {
 					lastAt.Store(time.Now().UnixNano())
-					if tt.dlqDown && tt.restoreAfter > 0 {
-						time.AfterFunc(tt.restoreAfter, func() {
-							setDLQMaxMsgSize(t, js, -1)
-							restored.Store(true)
-						})
-					}
 				}
 				return tt.fail(n)
 			}}
@@ -138,7 +134,14 @@ func TestProducer_LastDeliveryReachesTheDLQ(t *testing.T) {
 				t.Fatalf("jetstream: %v", err)
 			}
 			var publishes atomic.Int32
-			sub, err := h.NATS().Subscribe("vrsky.dlq.tenant-a.>", func(*nats.Msg) { publishes.Add(1) })
+			sub, err := h.NATS().Subscribe("vrsky.dlq.tenant-a.>", func(*nats.Msg) {
+				if publishes.Add(1) == 1 && tt.dlqDown && tt.restoreAfter > 0 {
+					time.AfterFunc(tt.restoreAfter, func() {
+						setDLQMaxMsgSize(t, js, -1)
+						restored.Store(true)
+					})
+				}
+			})
 			if err != nil {
 				t.Fatalf("subscribe: %v", err)
 			}
