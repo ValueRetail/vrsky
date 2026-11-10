@@ -119,3 +119,28 @@ func TestCheckURL_NamesTheField(t *testing.T) {
 		t.Errorf("CheckURL on a good URL = %v, want nil", err)
 	}
 }
+
+// A password containing "?" lands in the query (#717, backlog 176). With no
+// path before the "?" that is what "@" in a query means; with a path it is a
+// plain query (an email address, say) and stays visible.
+func TestRedactURL_QueryWithAt(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"http://apikey:1234?secret@host", "[invalid URL]"},
+		{"http://secret?pw@host", "[invalid URL]"},
+		{"https://apikey:1234?secret@host/v2", "[invalid URL]"},
+		{"http://host/x?email=a@b", "http://host/x?email=a@b"},
+		{"http://host:8080/?email=a@b", "http://host:8080/?email=a@b"},
+		{"http://host?a=1", "http://host?a=1"},
+		{"http://user:pw@host?a=1", "http://xxxxx@host?a=1"},
+	}
+	for _, tt := range tests {
+		if got := RedactURL(tt.in); got != tt.want {
+			t.Errorf("RedactURL(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	for _, raw := range []string{"http://apikey:1234?secret@host", "https://apikey:1234?secret@host/v2"} {
+		if err := CheckRequestURL(raw, true); err != nil && strings.Contains(err.Error(), "secret") {
+			t.Errorf("CheckRequestURL(%q) = %v, quotes the password", raw, err)
+		}
+	}
+}

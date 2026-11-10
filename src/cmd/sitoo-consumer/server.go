@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,13 +77,13 @@ func (s *sitooConsumer) handleSampleData() http.HandlerFunc {
 		}
 		body, err := s.get(r.Context(), &cfg, cfg.collectionURL(0, sitooSampleLimit, nil))
 		if err != nil {
-			if errors.Is(err, safeurl.ErrBlockedAddress) {
-				// Which address a name resolved to is internal detail: log
-				// it, do not hand it to the caller.
+			if msg, ok := safeurl.UserMessage(err); ok {
+				// A transport error names resolvers, resolved addresses and
+				// the request URL: log it, hand the caller a fixed text.
 				if s.logger != nil {
-					s.logger.Warn("sample-data target refused at dial", "error", err)
+					s.logger.Warn("sample-data request failed", "error", safeurl.Detail(err))
 				}
-				writeErr("target address not allowed")
+				writeErr(msg)
 				return
 			}
 			writeErr(err.Error())
