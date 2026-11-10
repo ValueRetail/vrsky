@@ -1412,6 +1412,12 @@ Last updated 2026-10-28.
     type parameter, together with #727, which makes it survive a restart.
     Found in #730 and #735. Filed as #758.
 
+193. ~~**A large streamed HTTP upload is cut off after 30 s.**~~ (#774) `DeliverStream`
+    uses the same client, whose 30 s timeout covers the whole request, so an
+    upload that takes longer ends in the DLQ. Give the streamed path a
+    timeout that scales with the size or bounds idle time instead. Found in
+    #773. Filed as #774.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource

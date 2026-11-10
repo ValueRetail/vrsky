@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -116,5 +118,123 @@ func TestDeliver_TimedOutNodeIsNotMarkedTaken(t *testing.T) {
 	}
 	if n := okHits.Load(); n != 1 {
 		t.Errorf("good node got %d requests, want 1 (the slow one must be retried, the good one skipped)", n)
+	}
+}
+
+// A target that sends its headers and part of the body and then goes quiet is
+// cut off too: the guard stays armed while the answer is read. The status is
+// what counts, so a 200 is still a delivery.
+func TestSend_StalledResponseBodyIsCutOff(t *testing.T) {
+	cases := []struct {
+		name     string
+		streamed bool
+	}{
+		{"buffered", false},
+		{"streamed", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("partial"))
+				w.(http.Flusher).Flush()
+				select {
+				case <-release:
+				case <-r.Context().Done():
+				}
+			}))
+			t.Cleanup(srv.Close)
+			t.Cleanup(func() { close(release) }) // runs first, so Close does not wait
+
+			p := timeoutProducer()
+			env := testEnv()
+			var body io.Reader
+			if tc.streamed {
+				p.streamMinRate = 1000
+				env.PayloadSize = int64(len(env.Payload))
+				body = bytes.NewReader(env.Payload)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			done := make(chan error, 1)
+			go func() {
+				done <- p.sendHTTPRequest(ctx, "conn-1", &HTTPConfig{URL: srv.URL, Method: "POST"}, env, body)
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("a 200 is a delivery even if its body stalls, got %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("still reading a stalled response body after 3s; want about the 200ms timeout")
+			}
+		})
+	}
+}
+
+// Fetching the OAuth token does not use up the request's timeout: the guard
+// starts once the token is there (#774 review).
+func TestSend_TokenFetchDoesNotCountAgainstTheTimeout(t *testing.T) {
+	var gotAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth.Store(r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := timeoutProducer() // 200 ms
+	p.resolveToken = func(ctx context.Context, _, _ string, _ bool) (string, error) {
+		select {
+		case <-time.After(400 * time.Millisecond):
+			return "tok", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cfg := &HTTPConfig{URL: srv.URL, Method: "POST", AuthType: "oauth", OAuthGrantID: "g1"}
+	if err := p.sendHTTPRequest(ctx, "conn-1", cfg, testEnv(), nil); err != nil {
+		t.Fatalf("a slow token fetch must not time out the request: %v", err)
+	}
+	if got, _ := gotAuth.Load().(string); got != "Bearer tok" {
+		t.Errorf("Authorization = %q, want %q", got, "Bearer tok")
+	}
+}
+
+// The error from a request the guard cut off keeps the (redacted) transport
+// error and says what ran out.
+func TestReqGuard_WrapKeepsTheCause(t *testing.T) {
+	cause := errors.New(`Post "http://example.test/x": context canceled`)
+	cases := []struct {
+		name     string
+		streamed bool
+		limit    bool
+		want     string
+	}{
+		{"buffered", false, false, "timed out after 10ms: context deadline exceeded"},
+		{"streamed", true, false, "timed out after 10ms without progress: context deadline exceeded"},
+		{"limit", true, true, "upload not finished within its 20ms limit: context deadline exceeded"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d, limit := 10*time.Millisecond, time.Duration(0)
+			if tc.limit {
+				d, limit = time.Hour, 20*time.Millisecond
+			}
+			ctx, g := newReqGuard(context.Background(), d, limit, tc.streamed)
+			defer g.stop()
+			<-ctx.Done()
+			err := g.wrap(cause)
+			if want := cause.Error() + ": " + tc.want; err.Error() != want {
+				t.Errorf("got %q, want %q", err, want)
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("want errors.Is DeadlineExceeded, got %v", err)
+			}
+		})
 	}
 }
