@@ -78,8 +78,10 @@ func (p *rabbitProducer) Configure(ctx context.Context, res *sdk.Resources) erro
 }
 
 // Deliver publishes the envelope to every matching RabbitMQ target. Transient
-// failures (connect/publish) → sdk.Retriable. A missing producer config for the
-// connection is not an error.
+// failures (connect/publish) and a node with no url, or neither exchange nor
+// queue → sdk.Retriable: retried, then the DLQ, so the message can be replayed
+// once the node is fixed (#734). A missing producer config for the connection
+// is not an error.
 func (p *rabbitProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connID := env.IntegrationID
 	if connID == "" {
@@ -121,8 +123,9 @@ func (p *rabbitProducer) Deliver(ctx context.Context, env *envelope.Envelope) er
 
 func (p *rabbitProducer) produce(ctx context.Context, cfg *RabbitMQConfig, body []byte, contentType string) error {
 	if cfg.URL == "" || (cfg.Exchange == "" && cfg.Queue == "") {
-		p.logger.Error("RabbitMQ producer config incomplete (need url and exchange or queue); skipping")
-		return nil
+		// Not nil: an ack would drop the message. Retried, then the DLQ (#734).
+		p.logger.Error("RabbitMQ producer config incomplete (need url and exchange or queue); message not acked, will retry")
+		return errors.New("rabbitmq node has no url, or neither exchange nor queue; set them on the node, then retry the message from the DLQ")
 	}
 	pub, err := p.dial(cfg)
 	if err != nil {

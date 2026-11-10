@@ -130,8 +130,10 @@ func (p *cloudProducer) Stop(ctx context.Context) error {
 }
 
 // Deliver uploads the envelope to every matching cloud-storage target. Transient
-// failures (connect/write) → sdk.Retriable. A missing producer config for the
-// connection is not an error — this binary just isn't the producer for it.
+// failures (connect/write) and a node with no bucket → sdk.Retriable: retried,
+// then the DLQ, so the message can be replayed once the node is fixed (#734).
+// A missing producer config for the connection is not an error — this binary
+// just isn't the producer for it.
 func (p *cloudProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	targets, err := p.eligibleTargets(ctx, env)
 	if err != nil {
@@ -222,8 +224,9 @@ func (p *cloudProducer) eligibleTargets(ctx context.Context, env *envelope.Envel
 // env.Payload is written.
 func (p *cloudProducer) upload(ctx context.Context, cfg *cloudConfig, env *envelope.Envelope, body io.Reader) error {
 	if cfg.Bucket == "" {
-		p.logger.Error("cloud-storage producer config incomplete (need bucket); skipping")
-		return nil
+		// Not nil: an ack would drop the message. Retried, then the DLQ (#734).
+		p.logger.Error("cloud-storage producer config incomplete (need bucket); message not acked, will retry")
+		return errors.New("cloud-storage node has no bucket; set it on the node, then retry the message from the DLQ")
 	}
 
 	// A media file that carries a name keeps it, template or not — the same

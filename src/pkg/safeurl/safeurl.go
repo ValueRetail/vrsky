@@ -19,11 +19,14 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -162,14 +165,20 @@ func shownBaseURL(raw string, u *url.URL) string {
 // "http://user:123/secret@host" as host "user" with "@" in the path. An "@" in
 // a real path costs only the display. Same for "@" in the fragment:
 // "http://apikey:1234#secret@host" is host "apikey", port 1234 and the rest of
-// the password as the fragment. The request itself keeps using the real URL.
+// the password as the fragment, and "http://apikey:1234?secret@host" puts it
+// in the query (see below). The request itself keeps using the real URL.
 func RedactURL(raw string) string {
 	const invalid = "[invalid URL]"
 	u, err := url.Parse(raw)
 	if err != nil {
 		return invalid
 	}
+	// "http://apikey:1234?secret@host" is host "apikey", port 1234 and query
+	// "secret@host". With no path between the authority and the "?" a password
+	// holding "?" can only parse this way, so "@" in the query shows nothing;
+	// with a path ("/x?email=a@b") it is a plain query and stays.
 	if u.Opaque != "" || strings.Contains(u.Path, "@") || strings.Contains(u.Fragment, "@") ||
+		(u.Path == "" && u.User == nil && strings.Contains(u.RawQuery, "@")) ||
 		(u.Host == "" && u.User == nil && strings.Contains(raw, "@")) {
 		return invalid
 	}
@@ -186,14 +195,23 @@ func RedactURL(raw string) string {
 // check on that. allowPrivate is the operator's dev switch.
 func CheckRequestURL(raw string, allowPrivate bool) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" {
+	if err != nil {
 		return fmt.Errorf("url %s is not an absolute URL", RedactURL(raw))
 	}
+	return checkParsedRequestURL(u, RedactURL(raw), allowPrivate)
+}
+
+// checkParsedRequestURL is CheckRequestURL on a parsed URL; its errors name
+// the URL as shown.
+func checkParsedRequestURL(u *url.URL, shown string, allowPrivate bool) error {
+	if u.Hostname() == "" {
+		return fmt.Errorf("url %s is not an absolute URL", shown)
+	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("url %s must use http or https", RedactURL(raw))
+		return fmt.Errorf("url %s must use http or https", shown)
 	}
 	if addr, perr := netip.ParseAddr(u.Hostname()); perr == nil && !allowPrivate && BlockedAddr(addr) {
-		return fmt.Errorf("url %s points at a private, loopback or link-local address", RedactURL(raw))
+		return fmt.Errorf("url %s points at a private, loopback or link-local address", shown)
 	}
 	return nil
 }
@@ -222,6 +240,76 @@ func EndpointURL(baseURL, path, params string) string {
 // ErrBlockedAddress is returned (wrapped) when a connection is refused.
 var ErrBlockedAddress = errors.New("connection to a private, loopback or link-local address refused")
 
+// blockedError is what the dial check returns. Its text is ErrBlockedAddress
+// alone: which address a name resolved to would let a tenant map in-cluster
+// names to pod and service IPs, and the text reaches the activity feed and a
+// dead-lettered message's X-Vrsky-Last-Error header. The address stays in the
+// value for Detail and in the server log.
+type blockedError struct{ addr string }
+
+func (e *blockedError) Error() string        { return ErrBlockedAddress.Error() }
+func (e *blockedError) Is(target error) bool { return target == ErrBlockedAddress }
+
+// Detail returns err's text for the server log: err.Error(), plus the address
+// a refused dial resolved to, which Error() leaves out. The URL of every
+// *url.Error in the chain is shown as scheme, host and path (userinfo
+// redacted, query and fragment dropped), since a key in the query does not
+// belong in the log either. Never show it to a tenant; UserMessage is the text
+// for that.
+func Detail(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	ues := urlErrors(err)
+	// Longest first, so a URL that extends another is replaced whole.
+	sort.SliceStable(ues, func(i, j int) bool { return len(ues[i].URL) > len(ues[j].URL) })
+	for _, ue := range ues {
+		if ue.URL == "" {
+			continue
+		}
+		shown := "[invalid URL]"
+		if u, perr := url.Parse(ue.URL); perr == nil {
+			shown = shownRequestURL(u)
+		}
+		// url.Error quotes its URL (%q); a caller may also have formatted it
+		// with %s.
+		msg = strings.ReplaceAll(msg, strconv.Quote(ue.URL), strconv.Quote(shown))
+		msg = strings.ReplaceAll(msg, ue.URL, shown)
+	}
+	var be *blockedError
+	if errors.As(err, &be) && be.addr != "" {
+		return fmt.Sprintf("%s (address %s)", msg, be.addr)
+	}
+	return msg
+}
+
+// urlErrors returns every *url.Error in err's tree.
+func urlErrors(err error) []*url.Error {
+	var out []*url.Error
+	var walk func(error)
+	walk = func(e error) {
+		for e != nil {
+			if ue, ok := e.(*url.Error); ok {
+				out = append(out, ue)
+			}
+			switch w := e.(type) {
+			case interface{ Unwrap() []error }:
+				for _, inner := range w.Unwrap() {
+					walk(inner)
+				}
+				return
+			case interface{ Unwrap() error }:
+				e = w.Unwrap()
+			default:
+				return
+			}
+		}
+	}
+	walk(err)
+	return out
+}
+
 // dialControl runs after name resolution, on each address about to be dialled.
 func dialControl(allowPrivate bool) func(network, address string, c syscall.RawConn) error {
 	return func(_, address string, _ syscall.RawConn) error {
@@ -230,10 +318,12 @@ func dialControl(allowPrivate bool) func(network, address string, c syscall.RawC
 		}
 		ap, err := netip.ParseAddrPort(address)
 		if err != nil {
-			return fmt.Errorf("%w: cannot parse %q", ErrBlockedAddress, address)
+			slog.Warn("safeurl: dial refused, address not parseable", "address", address)
+			return &blockedError{addr: address}
 		}
 		if BlockedAddr(ap.Addr()) {
-			return fmt.Errorf("%w (%s)", ErrBlockedAddress, ap.Addr())
+			slog.Warn("safeurl: dial refused", "address", ap.Addr().String())
+			return &blockedError{addr: ap.Addr().String()}
 		}
 		return nil
 	}
@@ -278,7 +368,14 @@ func NewClientWith(timeout time.Duration, o Options) *http.Client {
 		Transport: &http.Transport{
 			Proxy: nil,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return d.DialContext(ctx, network, addr)
+				conn, err := d.DialContext(ctx, network, addr)
+				// net wraps the refusal in an OpError whose text says
+				// "dial tcp [addr]:port: ...". Hand back the refusal alone.
+				var be *blockedError
+				if err != nil && errors.As(err, &be) {
+					return nil, be
+				}
+				return conn, err
 			},
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          10,
@@ -296,19 +393,20 @@ func NewClientWith(timeout time.Duration, o Options) *http.Client {
 func sameHostRedirect(allowPrivate bool) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) > maxRedirects {
-			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			return &redirectError{fmt.Sprintf("stopped after %d redirects", maxRedirects)}
 		}
-		if err := CheckRequestURL(req.URL.String(), allowPrivate); err != nil {
-			return fmt.Errorf("redirect refused: %w", err)
+		shown := shownRequestURL(req.URL)
+		if err := checkParsedRequestURL(req.URL, shown, allowPrivate); err != nil {
+			return &redirectError{"redirect refused: " + err.Error()}
 		}
 		first, prev := via[0].URL, via[len(via)-1].URL
 		if prev.Scheme == "https" && req.URL.Scheme == "http" {
-			return fmt.Errorf("redirect from https to http refused (%s)", RedactURL(req.URL.String()))
+			return &redirectError{fmt.Sprintf("redirect from https to http refused (%s)", shown)}
 		}
 		sameHost := strings.EqualFold(first.Hostname(), req.URL.Hostname())
 		samePort := effectivePort(prev) == effectivePort(req.URL) || isHTTPUpgrade(prev, req.URL)
 		if !sameHost || !samePort {
-			return fmt.Errorf("redirect to another host refused (%s to %s)", first.Host, req.URL.Host)
+			return &redirectError{fmt.Sprintf("redirect to another host refused (%s to %s)", first.Host, req.URL.Host)}
 		}
 		return nil
 	}
@@ -329,3 +427,25 @@ func isHTTPUpgrade(from, to *url.URL) bool {
 	return from.Scheme == "http" && to.Scheme == "https" &&
 		effectivePort(from) == "80" && effectivePort(to) == "443"
 }
+
+// shownRequestURL is how a refused redirect, and Detail, name a request URL:
+// scheme, host and path, with userinfo redacted. The query and fragment are
+// dropped, since the Location may carry a key there (and a relative one
+// inherits the userinfo of the request). A URL RedactURL will not show stays
+// hidden.
+func shownRequestURL(u *url.URL) string {
+	const invalid = "[invalid URL]"
+	if RedactURL(u.String()) == invalid {
+		return invalid
+	}
+	c := *u
+	c.RawQuery, c.ForceQuery, c.Fragment, c.RawFragment = "", false, "", ""
+	return RedactURL(c.String())
+}
+
+// redirectError is a refused redirect. Its text names hosts (no userinfo) and
+// URLs through shownRequestURL only, so no query or credential: UserMessage
+// may show it as it is.
+type redirectError struct{ msg string }
+
+func (e *redirectError) Error() string { return e.msg }

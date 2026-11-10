@@ -51,6 +51,12 @@ Config bullets (all under `cloud_storage`):
   `incoming/a/x.csv` and `incoming/b/x.csv` both land on
   `<move_prefix>/x.csv` and the second overwrites the first.
 
+  Starting the connection returns a 400 that names the node when `move` has
+  no `move_prefix`, or (poll mode) when `move_prefix` is inside what `prefix`
+  lists (#724). The editor shows the rule under "Move to prefix". A config
+  saved before that check, or restored on boot, is refused by the consumer,
+  which sets the connection to `error` instead of leaving it `running`.
+
   In poll mode the start is also refused when `prefix` would select moved
   objects again (#567). The log says `invalid move_prefix` and names both
   values. Event mode starts anyway, with a warning (below). `prefix` is
@@ -355,12 +361,17 @@ Config bullets:
 - **Test connection.** The cloud-storage worker exposes a `/test-connection`
   endpoint; use the **Test connection** button in the editor to verify bucket
   access before deploying.
-- **Failed uploads.** A destination without a `bucket` logs an error and acks
-  each message: it is dropped, not dead-lettered. A failure to open the
+- **Failed uploads.** A destination without a `bucket` logs an error and fails
+  each message, so it is retried and then dead-lettered with the error
+  `cloud-storage node has no bucket`. Set the bucket, deploy the connection
+  again (that clears the worker's cached config) and retry the messages from
+  the DLQ (#734). A failure to open the
   provider or to write the object (for example credentials refused or the
   network down) is retried and then dead-lettered. A `key_template` that
   cannot be rendered does not drop anything: the object is written under a
-  generated key and a warning is logged. See the
+  generated key and a warning is logged.
+  Duplicates: when one node of a fan-out has a config error, the other nodes of that producer get the message again on each attempt (5 in all) and again on a DLQ replay, because this producer keeps no record of which node took it. Fix the node quickly or expect duplicates (skip set for these four: #758).
+  See the
   [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - Object-format handling and any provider-specific options not listed here are
   configured via the in-app pipeline editor (Property panel).

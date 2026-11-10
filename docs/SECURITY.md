@@ -337,6 +337,29 @@ rebinding cannot swap it in. It ignores proxy environment variables and does
 not follow redirects, unless the connector asks for same-host redirects
 (`NewClientWith`): up to five, never to another host or from https to http.
 
+What a tenant sees of a failed request is fixed text (#717). A transport
+error's own text names the resolver (`lookup x on 10.0.0.10:53`), the resolved
+address and the request URL with its query, so it must not reach the activity
+feed, a sample-data response or a dead-lettered message's `X-Vrsky-Last-Error`
+header. A refused dial carries only "connection to a private, loopback or
+link-local address refused"; the address goes to the server log
+(`safeurl.Detail`, which also cuts every request URL in the error down to
+scheme, host and path, so a key in the query stays out of the log too).
+`safeurl.UserMessage(err)` maps a transport error to one of "target address
+not allowed", "host name could not be resolved", "request timed out",
+"request cancelled", "connection refused", "connection failed", "TLS
+certificate could not be verified" or "request failed". A refused redirect
+keeps its own text: "redirect from https to http refused (URL)", "redirect
+refused: url URL must use http or https" or "... points at a private,
+loopback or link-local address", "redirect to another host refused (host to
+host)" and "stopped after 5 redirects", where URL is scheme, host and path
+only (userinfo as `xxxxx`, no query or fragment). The sample-data handlers of
+the Sitoo, API, Visma, Brightpearl, SAP S/4HANA and Business Central
+consumers use it, and each is tested against the same failures
+(`pkg/safeurl/safeurltest`). `RedactURL` also shows nothing for a URL like `http://apikey:1234?secret@host`
+(an "@" in the query with no path before it), since a password with "?" in it
+parses that way; with a path (`/x?email=a@b`) the query is shown.
+
 Used so far:
 
 - The Sitoo consumer and producer ([Sitoo](connectors/sitoo.md#the-base-url)),

@@ -874,8 +874,8 @@ Last updated 2026-10-28.
     `--allow-unbound` flag and the unbound warning, so every archive
     restore accepts is bound to its key. Update `docs/DR.md` and
     `docs/operator/backup.md`. Found in #549. Filed as #722.
-133. **A cloud-storage start the consumer refuses leaves the connection
-    `running`, ingesting nothing.** `StartConnection` in
+133. ~~**A cloud-storage start the consumer refuses leaves the connection
+    `running`, ingesting nothing.**~~ (#724) `StartConnection` in
     `src/pkg/managementapi/handler.go` writes `running` once the
     orchestrator has deployed, and `RestoreRunning` keeps it. The consumer's
     refusals in `startConnection` (`src/cmd/cloud-storage-consumer/service.go`,
@@ -1136,7 +1136,7 @@ Last updated 2026-10-28.
     succeeded on redelivery (as #587 does for remote-agent multi-target
     writes), would fix it. Found in review of #669. Filed as #730.
 
-160. **`safeurl` dial errors show the resolved private address to the tenant.**
+160. ~~**`safeurl` dial errors show the resolved private address to the tenant.**~~ (#717)
     The error text includes the resolved IP and reaches the tenant's activity
     feed, so a tenant can map in-cluster DNS names to pod and service IPs. Keep
     the address in the server log and give the user "target address not
@@ -1223,7 +1223,7 @@ Last updated 2026-10-28.
     keeps returning them holds the poll forever. Cap the pages per poll
     (say 10 000) and log when the cap is hit. Found in review of #680.
 
-172. **Sample-data errors pass `err.Error()` through.** Apart from a dial
+172. ~~**Sample-data errors pass `err.Error()` through.**~~ (#717) Apart from a dial
     refusal, the sample-data endpoints of Sitoo, the API consumer, SAP and
     others return the raw error text, and a DNS failure names the cluster
     resolver (`lookup x on 10.0.0.10:53`). Map transport errors to fixed
@@ -1257,7 +1257,7 @@ Last updated 2026-10-28.
     BC that server paging keeps its place with a non-key `$orderby`, and how
     slow it is on large tables. Found in review of #701. Filed as #733.
 
-176. **`RedactURL` keeps a password that lands in the query.** For
+176. ~~**`RedactURL` keeps a password that lands in the query.**~~ (#717) For
     `http://apikey:1234?secret@host` url.Parse reads host `apikey`, port
     `1234` and query `secret@host`, and `RedactURL` shows it unchanged,
     because the HTTP producer's test pins `?email=a@b` as shown. #700 made
@@ -1265,7 +1265,7 @@ Last updated 2026-10-28.
     `CheckRequestURL` still show it. Decide whether "@" in a query with no
     userinfo should become `[invalid URL]` there too. Found in #700. Filed as #717.
 
-177. **Decide whether permanent errors should be replayable.** Today a 4xx
+177. ~~**Decide whether permanent errors should be replayable.**~~ (#734) Today a 4xx
     from the target (`401`/`403` included), an incomplete node and a payload
     that is not JSON are acked and dropped (`sdk.Permanent`, or a bare `return
     nil` in the Kafka, RabbitMQ, SFTP, cloud-storage, Salesforce and HTTP
@@ -1456,7 +1456,7 @@ Last updated 2026-10-28.
     the lifecycle budget with about twice the save timeout, or make it
     configurable per connector. Found in review of #795. Filed as #808.
 
-199. **A message whose last attempt fails to reach the DLQ is lost.** When
+199. ~~**A message whose last attempt fails to reach the DLQ is lost.**~~ (#811) When
     the DLQ publish fails on the fifth delivery, or the handler panics on
     it, `Subscriber.dispatch` NAKs and logs `will NAK and retry`. But
     nats-server makes no delivery past `MaxDeliver` (`getNextMsg` drops a
@@ -1473,6 +1473,72 @@ Last updated 2026-10-28.
     `os.Getenv(testdb.EnvVar)` directly and fail on `dial tcp [::1]:5432`
     when it is unset, so `go test ./...` on a laptop goes red. Skip through
     the `testdb` helper like the other database tests. Found in #794. Filed as #785.
+
+201. **A way to dead-letter on the first attempt.** Since #734 a node with a
+    setting missing, a template that cannot be rendered or a `401`/`403` is
+    retried and then dead-lettered, so it is kept for a replay. Its five
+    attempts fail the same way, about 2.5 minutes of retries (and slots) for
+    nothing. An `sdk.DeadLetter(err)` kind that the runner hands to
+    `pkg/messaging`'s subscriber to publish to the DLQ at once and ack would
+    cut that out. Needs `pkg/sdk` and `pkg/messaging` (kept out of #734
+    while #810 reworked them). Found in #734. Filed as #825.
+
+202. **Count dropped messages.** A message acked with `sdk.Permanent`
+    (a payload that is not JSON, a `4xx` the target gives about the record)
+    leaves only a Warn log line; `vrsky_dlq_messages_total` does not see it.
+    A `vrsky_messages_dropped_total{worker,connection_id}` counter next to the
+    `IsPermanent` branch in `pkg/sdk/lifecycle.go` would let an alert see
+    drops. The HTTP destination's `4xx` (a per-node nil, for its skip set)
+    would need to report its drop too. Found in #734. Filed as #825.
+
+203. **Evict the config cache on a connection command everywhere.** Only
+    the cloud-storage destination drops a connection's cached config on the
+    start/stop command (#141). The HTTP, Kafka, RabbitMQ, SFTP and Salesforce
+    destinations keep it 5 minutes, so a DLQ retry right after fixing a node
+    can meet the old config and land in the DLQ again (the docs now say to
+    wait). Found in #734. Filed as #826.
+
+204. **`401`/`403` and incomplete nodes in the other six destinations.**
+    Ludvik's rule for #734 (a `401`/`403` is retried and kept in the DLQ) is
+    in the HTTP, Kafka, RabbitMQ, SFTP, cloud-storage and Salesforce
+    destinations. Sitoo, Front Systems, Visma, Brightpearl, Business Central
+    and SAP still mark a `401`/`403` and an incomplete node `sdk.Permanent`.
+    Apply the same split there and update the table in
+    `docs/operator/troubleshooting.md`. Found in #734. Filed as #827.
+
+205. **Start-time checks for the destination fields.** `nodeConfigRules`
+    requires only the `kafka`, `rabbitmq`, `sftp` and `cloud_storage` blocks,
+    not `brokers`/`topic`, `url` and an exchange or queue, `host`/
+    `username`/`remote_dir` and a credential, or `bucket`. A connection with
+    one missing starts and then sends every message to the DLQ (#734).
+    Refusing it at start would catch it before any message. While there:
+    a node of the destination's own type whose config does not parse into
+    the typed struct (`"port":"22"`, `"brokers":"a,b"`) is still skipped as
+    "not ours" and its messages acked, in the HTTP, Kafka, RabbitMQ, SFTP
+    and cloud-storage destinations; keep it as a failing node instead. And
+    `src/pkg/managementapi/nodeconfig.go` (comment at the top) and
+    `nodeconfig_test.go` still quote the HTTP destination's old
+    `|| nodeConfig.HTTP.URL == ""` skip. Found in #734. Filed as #828.
+
+206. **Messages dropped at `MaxDeliver` never reach the DLQ on their own.**
+    Since #811 a failed DLQ copy on the fifth delivery is retried three
+    times and then logged with its stream sequence and counted
+    (`vrsky_dlq_publish_failed_total`), but recovering it is by hand
+    (`docs/operator/troubleshooting.md`). A worker killed during its fifth
+    attempt loses the message the same way, with only the server's
+    `MAX_DELIVERIES` advisory. A listener on
+    `$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.VRSKY_DATA.*` that copies the
+    message from `VRSKY_DATA` by sequence to the DLQ (when no copy with that
+    `Msg-Id` exists) would cover both; the other option is `MaxDeliver` one
+    above the attempts the subscriber counts
+    (`plans/issue-811-last-delivery-dlq.md`). New advisory consumer or
+    consumer config: needs a human decision. Found in #811. Filed as #832.
+
+207. **No alert on `vrsky_dlq_publish_failed_total`.** The counter from #811
+    marks a message that is in neither its durable nor the DLQ. Add a rule
+    to `infrastructure/prometheus-rules.yml` (any increase, platform
+    targets like `DLQGrowing`) with a `promtool test rules` case. Found
+    in #811. Filed as #833.
 
 ## Human
 

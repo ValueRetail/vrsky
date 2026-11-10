@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 
@@ -82,13 +81,13 @@ func (c *bcConsumer) handleSampleData() http.HandlerFunc {
 		tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(c.httpClient)
 		body, err := c.get(r.Context(), tok, cfg.entityURL(""), cfg.PageSize)
 		if err != nil {
-			if errors.Is(err, safeurl.ErrBlockedAddress) {
-				// Which address a name resolved to is internal detail: log
-				// it, do not hand it to the caller.
+			if msg, ok := safeurl.UserMessage(err); ok {
+				// A transport error names resolvers, resolved addresses and
+				// the request URL: log it, hand the caller a fixed text.
 				if c.logger != nil {
-					c.logger.Warn("sample-data target refused at dial", "error", err)
+					c.logger.Warn("sample-data request failed", "error", safeurl.Detail(err))
 				}
-				writeErr("target address not allowed")
+				writeErr(msg)
 				return
 			}
 			writeErr(err.Error())
