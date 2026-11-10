@@ -64,12 +64,17 @@ type httpProducer struct {
 	// mTLS; it is built on first use, so a producer that was not configured
 	// still gets a guarded client and never a plain http.Client.
 	allowPrivate bool
-	// requestTimeout bounds one request end to end (connect, TLS, waiting for
-	// the answer, reading the body). Zero means defaultRequestTimeout; tests
-	// set a short one.
+	// requestTimeout bounds one request with no progress: a buffered request
+	// end to end, a streamed one between body chunks and then for the drain
+	// and the answer (see reqGuard). Zero means defaultRequestTimeout; tests set a short one.
 	requestTimeout time.Duration
-	defaultOnce    sync.Once
-	defaultClient  *http.Client
+	// streamMinRate and streamMaxTime set the overall limit on one streamed
+	// upload (see streamLimit). Zero means minStreamRate and maxStreamTime;
+	// tests set small ones.
+	streamMinRate int64
+	streamMaxTime time.Duration
+	defaultOnce   sync.Once
+	defaultClient *http.Client
 
 	// sent remembers the nodes that took a message whose delivery failed on
 	// another node, so its redelivery skips them (#730, see sentSet). Created
@@ -155,11 +160,199 @@ func (p *httpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 	return nil
 }
 
-// defaultRequestTimeout is how long one request to a target may take. A target
-// that accepts the connection and never answers fails the delivery after this,
-// as an ordinary retriable error (NAK, then the DLQ), so it cannot hold the
-// dispatch goroutine (#763).
+// defaultRequestTimeout is how long a request to a target may go without
+// progress. A target that accepts the connection and never answers fails the
+// delivery after this, as an ordinary retriable error (NAK, then the DLQ), so
+// it cannot hold the dispatch goroutine (#763). A buffered request is held to
+// it end to end; a streamed upload only while it stalls (#774).
 const defaultRequestTimeout = 30 * time.Second
+
+// A streamed upload that keeps moving is not held to defaultRequestTimeout, so
+// it needs an overall limit of its own: the delivery context has no deadline
+// and dispatch is serial, so a target that reads a few KB/s would otherwise
+// hold the producer, and every tenant behind it, for as long as it likes. One
+// attempt may take the request timeout plus the payload size at minStreamRate,
+// and never more than maxStreamTime; when the size is not known it gets
+// maxStreamTime. An attempt that runs over fails like a timeout (retriable,
+// then the DLQ). The cap is reached at about 218 MiB; a larger payload needs a
+// faster target (1 GiB about 1.2 MiB/s).
+const (
+	minStreamRate = 256 << 10 // bytes per second
+	maxStreamTime = 15 * time.Minute
+)
+
+func (p *httpProducer) timeout() time.Duration {
+	if p.requestTimeout > 0 {
+		return p.requestTimeout
+	}
+	return defaultRequestTimeout
+}
+
+// streamLimit is the overall limit on one streamed upload of size bytes.
+func (p *httpProducer) streamLimit(size int64) time.Duration {
+	rate, maxTime := p.streamMinRate, p.streamMaxTime
+	if rate <= 0 {
+		rate = minStreamRate
+	}
+	if maxTime <= 0 {
+		maxTime = maxStreamTime
+	}
+	return streamLimit(p.timeout(), size, rate, maxTime)
+}
+
+func streamLimit(timeout time.Duration, size, rate int64, maxTime time.Duration) time.Duration {
+	if size <= 0 || size/rate >= int64(maxTime/time.Second) {
+		return maxTime
+	}
+	// size < rate*maxTime in seconds here, so this cannot overflow.
+	limit := timeout + time.Duration(size*int64(time.Second)/rate)
+	return min(limit, maxTime)
+}
+
+// reqGuard enforces the request timeout. The http.Client has no Timeout of its
+// own, because that would count the time spent writing the body and cut off a
+// multi-GB upload that is making progress (#774). The guard cancels the
+// request's context when the timer fires. A buffered request never resets it,
+// so it is bounded end to end as before. A streamed one resets it every time
+// the transport takes more body from the source (see progressReader), so a
+// stalled upload fails after d without progress; a streamed request also has
+// an overall limit (streamLimit) that progress does not reset.
+type reqGuard struct {
+	d        time.Duration
+	limit    time.Duration // overall limit, 0 for none
+	streamed bool
+	cancel   context.CancelFunc
+
+	mu        sync.Mutex
+	timer     *time.Timer
+	limiter   *time.Timer
+	timedOut  bool // the progress timer fired
+	overLimit bool // the overall limit fired
+	done      bool
+}
+
+// newReqGuard returns a context that is cancelled when the guard fires or the
+// parent is. limit > 0 adds an overall limit that reset does not move. Call
+// stop when the request, response body included, is finished.
+func newReqGuard(parent context.Context, d, limit time.Duration, streamed bool) (context.Context, *reqGuard) {
+	ctx, cancel := context.WithCancel(parent)
+	g := &reqGuard{d: d, limit: limit, streamed: streamed, cancel: cancel}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.timer = time.AfterFunc(d, func() { g.fire(&g.timedOut) })
+	if limit > 0 {
+		g.limiter = time.AfterFunc(limit, func() { g.fire(&g.overLimit) })
+	}
+	return ctx, g
+}
+
+func (g *reqGuard) fire(flag *bool) {
+	g.mu.Lock()
+	if !g.done && !g.timedOut && !g.overLimit {
+		*flag = true
+	}
+	g.mu.Unlock()
+	g.cancel()
+}
+
+// reset restarts the progress timer at d.
+func (g *reqGuard) reset(d time.Duration) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.done && !g.timedOut && !g.overLimit {
+		g.timer.Reset(d)
+	}
+}
+
+func (g *reqGuard) stop() {
+	g.mu.Lock()
+	g.done = true
+	g.timer.Stop()
+	if g.limiter != nil {
+		g.limiter.Stop()
+	}
+	g.mu.Unlock()
+	g.cancel()
+}
+
+// wrap marks an error from a request that the guard cut off as a deadline, so
+// it stays retriable. err is the already redacted transport error.
+func (g *reqGuard) wrap(err error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch {
+	case err == nil:
+		return nil
+	case g.overLimit:
+		return fmt.Errorf("%v: upload not finished within its %v limit: %w", err, g.limit, context.DeadlineExceeded)
+	case g.timedOut && g.streamed:
+		return fmt.Errorf("%v: timed out after %v without progress: %w", err, g.d, context.DeadlineExceeded)
+	case g.timedOut:
+		return fmt.Errorf("%v: timed out after %v: %w", err, g.d, context.DeadlineExceeded)
+	}
+	return err
+}
+
+// progressReader resets the guard each time the transport takes body bytes
+// from the source. That is progress as the producer can see it: bytes leaving
+// the source, not bytes the target has read. Up to a socket buffer's worth
+// (a few MB) can still be on its way when the source is done, so at EOF the
+// guard is set to twice the timeout: one for that tail to drain, one for the
+// answer.
+//
+// The transport waits for its body write to return before it reports a
+// cancelled request, so a source that blocks in Read (a stalled object-store
+// stream) would hold the delivery open past the timeout. Read therefore runs
+// the source read in its own goroutine, into a private buffer, and gives up
+// when the request context ends. The abandoned read finishes when the source
+// does, which closing the stream or ending the delivery context makes happen.
+type progressReader struct {
+	ctx context.Context
+	r   iolib.Reader
+	g   *reqGuard
+	buf []byte
+	eof bool
+}
+
+type readResult struct {
+	n   int
+	err error
+}
+
+func (pr *progressReader) Read(b []byte) (int, error) {
+	if pr.eof {
+		return 0, iolib.EOF
+	}
+	pr.g.reset(pr.g.d)
+	if len(b) == 0 {
+		return 0, nil
+	}
+	if cap(pr.buf) < len(b) {
+		pr.buf = make([]byte, len(b))
+	}
+	buf := pr.buf[:len(b)]
+	ch := make(chan readResult, 1)
+	go func() {
+		n, err := pr.r.Read(buf)
+		ch <- readResult{n, err}
+	}()
+	select {
+	case res := <-ch:
+		copy(b, buf[:res.n])
+		switch {
+		case res.err == iolib.EOF:
+			pr.eof = true
+			pr.g.reset(2 * pr.g.d)
+		case res.err != nil || res.n > 0:
+			pr.g.reset(pr.g.d)
+		}
+		return res.n, res.err
+	case <-pr.ctx.Done():
+		// buf stays with the goroutine; the next Read, if any, allocates anew.
+		pr.buf = nil
+		return 0, pr.ctx.Err()
+	}
+}
 
 // newClient builds the guarded client every delivery uses. A tenant may point a
 // node at a public API over http or https, so the scheme is not restricted; the
@@ -169,11 +362,8 @@ const defaultRequestTimeout = 30 * time.Second
 // outbound call is a child span of the pipeline trace and carries traceparent
 // (a no-op when tracing is off).
 func (p *httpProducer) newClient(tlsCfg *tls.Config) *http.Client {
-	timeout := p.requestTimeout
-	if timeout <= 0 {
-		timeout = defaultRequestTimeout
-	}
-	c := safeurl.NewClientWith(timeout, safeurl.Options{
+	// No Client.Timeout: each request is bounded by its reqGuard instead.
+	c := safeurl.NewClientWith(0, safeurl.Options{
 		AllowPrivate:      p.allowPrivate,
 		SameHostRedirects: true,
 		TLSConfig:         tlsCfg,
@@ -388,14 +578,47 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	}
 
 	client := p.clientFor(httpCfg)
+	// The guards stay armed until the response has been read, so a target that
+	// sends headers and then stalls is cut off too.
+	var stops []func()
+	defer func() {
+		for _, stop := range stops {
+			stop()
+		}
+	}()
 	// buildAndSend creates a fresh request (re-readable body) per attempt and,
 	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
 	buildAndSend := func(force bool) (*http.Response, error) {
+		// The token comes first so its fetch does not use up the request's
+		// timeout; the guard starts once only the request itself is left.
+		bearer, useBearer := "", false
+		if httpCfg.AuthType == "oauth" && httpCfg.OAuthGrantID == "" {
+			// OAuth selected but no grant (e.g. the grant was revoked, which
+			// clears the selection on the node). Rather than blocking the send
+			// — or calling /oauth/grants//token with an empty id and getting an
+			// opaque 500 — fall back to sending unauthenticated and warn. A
+			// proper "reconnect required" hint in the UI is tracked in #98.
+			p.logger.Warn("OAuth output has no grant selected; sending without authentication (reconnect the grant to authenticate)",
+				"connection_id", connectionID, "url", shownURL)
+		} else if httpCfg.AuthType == "oauth" {
+			tok, terr := p.resolveToken(ctx, env.TenantID, httpCfg.OAuthGrantID, force)
+			if terr != nil {
+				return nil, fmt.Errorf("resolve oauth token: %w", terr)
+			}
+			bearer, useBearer = tok, true
+		}
+
+		var limit time.Duration
+		if body != nil {
+			limit = p.streamLimit(env.PayloadSize)
+		}
+		reqCtx, guard := newReqGuard(ctx, p.timeout(), limit, body != nil)
+		stops = append(stops, guard.stop)
 		var reqBody iolib.Reader = bytes.NewReader(env.Payload)
 		if body != nil {
-			reqBody = body
+			reqBody = &progressReader{ctx: reqCtx, r: body, g: guard}
 		}
-		req, _ := http.NewRequestWithContext(ctx, method, httpCfg.URL, reqBody)
+		req, _ := http.NewRequestWithContext(reqCtx, method, httpCfg.URL, reqBody)
 		if body != nil {
 			// Declare the length so the request goes out with Content-Length
 			// rather than chunked encoding, which some endpoints reject. The
@@ -411,24 +634,12 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		for k, v := range httpCfg.Headers {
 			req.Header.Set(k, v)
 		}
-		if httpCfg.AuthType == "oauth" && httpCfg.OAuthGrantID == "" {
-			// OAuth selected but no grant (e.g. the grant was revoked, which
-			// clears the selection on the node). Rather than blocking the send
-			// — or calling /oauth/grants//token with an empty id and getting an
-			// opaque 500 — fall back to sending unauthenticated and warn. A
-			// proper "reconnect required" hint in the UI is tracked in #98.
-			p.logger.Warn("OAuth output has no grant selected; sending without authentication (reconnect the grant to authenticate)",
-				"connection_id", connectionID, "url", shownURL)
-		} else if httpCfg.AuthType == "oauth" {
-			tok, terr := p.resolveToken(ctx, env.TenantID, httpCfg.OAuthGrantID, force)
-			if terr != nil {
-				return nil, fmt.Errorf("resolve oauth token: %w", terr)
-			}
-			req.Header.Set("Authorization", "Bearer "+tok)
+		if useBearer {
+			req.Header.Set("Authorization", "Bearer "+bearer)
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, redactTransportErr(err, shownURL)
+			return nil, guard.wrap(redactTransportErr(err, shownURL))
 		}
 		return resp, nil
 	}

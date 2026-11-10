@@ -122,12 +122,31 @@ Config reference:
 
 ### Failed deliveries
 
-A request is cut off after 30 seconds, whether the target never accepts the
-connection or accepts it and never answers. That counts as a network error:
-it is retried and dead-lettered like one, and a node that timed out is not
-marked as having taken the message (#763). The 30 seconds is fixed; it is not
-a node setting. The same 30 seconds bounds a very large streamed payload
-today, so an upload that takes longer is cut off and dead-lettered (#774).
+A target that never answers is cut off after 30 seconds, whether it never
+accepts the connection or accepts it and goes quiet. That counts as a network
+error: it is retried and dead-lettered like one, and a node that timed out is
+not marked as having taken the message (#763). The 30 seconds is fixed; it is
+not a node setting.
+
+For a normal (buffered) payload the 30 seconds cover the whole request. A
+large payload streamed from object storage (ADR 0001) is held to three limits
+instead (#774):
+
+- 30 seconds without progress. Progress means body bytes leaving the producer
+  for the network, so a target that stops reading stalls the upload once the
+  socket buffers are full.
+- 60 seconds after the last byte has left the producer, for what is still in
+  the socket buffers to reach the target and for the target to answer.
+- An overall limit per attempt: 30 seconds plus the payload size at
+  256 KiB/s, and never more than 15 minutes (15 minutes when the size is not
+  known). An upload slower than 256 KiB/s on average is cut off here, so a
+  target that reads a few KB/s cannot hold the producer, which sends one
+  message at a time, for hours. A payload over about 218 MiB gets the full
+  15 minutes and needs more than 256 KiB/s to make it: 1 GiB needs about
+  1.2 MiB/s, 10 GiB about 11.8 MiB/s.
+
+Hitting any of them is a timeout like the one above: retried, then
+dead-lettered. None of them is a node setting.
 
 A `5xx`, a `429`, a network error and a failure to get an OAuth token are
 retried on the usual backoff and then dead-lettered with the payload. Any

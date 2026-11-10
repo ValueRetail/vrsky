@@ -1412,11 +1412,19 @@ Last updated 2026-10-28.
     type parameter, together with #727, which makes it survive a restart.
     Found in #730 and #735. Filed as #758.
 
-193. **A large streamed HTTP upload is cut off after 30 s.** `DeliverStream`
+193. ~~**A large streamed HTTP upload is cut off after 30 s.**~~ (#774) `DeliverStream`
     uses the same client, whose 30 s timeout covers the whole request, so an
     upload that takes longer ends in the DLQ. Give the streamed path a
     timeout that scales with the size or bounds idle time instead. Found in
     #773. Filed as #774.
+
+198. **The SDK's 5 s Stop budget is shorter than a worst-case checkpoint
+    save.** `pkg/sdk/lifecycle.go` gives a connector's `Stop` 5 s, but a
+    Business Central poller's save can need two attempts (the first fails on
+    the cancelled context, the second gets `defaultSaveTimeout`, 5 s), so
+    `Stop` can return its deadline error with a save still running. Align
+    the lifecycle budget with about twice the save timeout, or make it
+    configurable per connector. Found in review of #795. Filed as #808.
 
 199. **A message whose last attempt fails to reach the DLQ is lost.** When
     the DLQ publish fails on the fifth delivery, or the handler panics on

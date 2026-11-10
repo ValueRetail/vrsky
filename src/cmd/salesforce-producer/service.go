@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -243,8 +245,10 @@ func (p *salesforceProducer) writeRecords(ctx context.Context, env *envelope.Env
 		op = "insert"
 	}
 	if op == "upsert" && cfg.ExternalIDField == "" {
-		p.logger.Error("Salesforce upsert requires external_id_field; skipping", "object", cfg.Object)
-		return nil
+		// Not nil: an ack would drop the message. A retry, then the DLQ, keeps
+		// it so it can be replayed once the node is fixed.
+		p.logger.Error("Salesforce upsert requires external_id_field", "object", cfg.Object)
+		return fmt.Errorf("salesforce upsert of %s has no external_id_field; set it on the node, then replay from the DLQ", cfg.Object)
 	}
 	key := func(i int) writtenKey {
 		return writtenKey{
@@ -506,6 +510,85 @@ func (p *salesforceProducer) request(ctx context.Context, tenantID, grantID, met
 
 // --- helpers ---
 
+// decodeJSON decodes with numbers kept as json.Number, the digits as they
+// came. float64 would turn 12345678 into 1.2345678e+07 when printed, and
+// lose digits beyond 2^53. Trailing data after the value is an error, as with
+// json.Unmarshal.
+func decodeJSON(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("unexpected data after the JSON value")
+	}
+	return nil
+}
+
+// maxExponent bounds the exponent plainNumber expands. Anything larger is
+// left as sent; Salesforce refuses such a value anyway, and expanding 1e999999
+// would build a million-digit string.
+const maxExponent = 400
+
+// plainNumber writes a number in exponent form (1e+16, -1.5e3) as exact plain
+// decimal digits (10000000000000000, -1500), through math/big and never a
+// float64. A number without e or E is returned untouched, so 0.10 stays 0.10.
+func plainNumber(n json.Number) json.Number {
+	s := string(n)
+	at := strings.IndexAny(s, "eE")
+	if at < 0 {
+		return n
+	}
+	if exp, err := strconv.Atoi(strings.TrimPrefix(s[at+1:], "+")); err != nil || exp > maxExponent || exp < -maxExponent {
+		return n
+	}
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return n
+	}
+	if r.IsInt() {
+		return json.Number(r.Num().String())
+	}
+	// The denominator is 2^a*5^b for a decimal, so max(a, b) digits after
+	// the point are exact.
+	den := new(big.Int).Set(r.Denom())
+	digits := max(factorCount(den, 2), factorCount(den, 5))
+	out := r.FloatString(digits)
+	return json.Number(out)
+}
+
+// factorCount is how many times f divides n; n is consumed.
+func factorCount(n *big.Int, f int64) int {
+	fb, m, c := big.NewInt(f), new(big.Int), 0
+	for {
+		q, rem := new(big.Int).QuoRem(n, fb, m)
+		if rem.Sign() != 0 {
+			return c
+		}
+		n.Set(q)
+		c++
+	}
+}
+
+// plainNumbers rewrites, in place, every number of a decoded record with
+// plainNumber.
+func plainNumbers(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		return plainNumber(t)
+	case map[string]any:
+		for k, x := range t {
+			t[k] = plainNumbers(x)
+		}
+	case []any:
+		for i, x := range t {
+			t[i] = plainNumbers(x)
+		}
+	}
+	return v
+}
+
 func parseRecords(payload []byte) ([]map[string]any, error) {
 	trimmed := bytes.TrimSpace(payload)
 	if len(trimmed) == 0 {
@@ -514,15 +597,19 @@ func parseRecords(payload []byte) ([]map[string]any, error) {
 	switch trimmed[0] {
 	case '[':
 		var rows []map[string]any
-		if err := json.Unmarshal(trimmed, &rows); err != nil {
+		if err := decodeJSON(trimmed, &rows); err != nil {
 			return nil, fmt.Errorf("%w: %v", errBadPayload, err)
+		}
+		for _, r := range rows {
+			plainNumbers(r)
 		}
 		return rows, nil
 	case '{':
 		var one map[string]any
-		if err := json.Unmarshal(trimmed, &one); err != nil {
+		if err := decodeJSON(trimmed, &one); err != nil {
 			return nil, fmt.Errorf("%w: %v", errBadPayload, err)
 		}
+		plainNumbers(one)
 		return []map[string]any{one}, nil
 	default:
 		return nil, errBadPayload
@@ -530,8 +617,8 @@ func parseRecords(payload []byte) ([]map[string]any, error) {
 }
 
 // recordsToCSV renders records to CSV with a header = the sorted union of keys.
-func recordsToCSV(records []map[string]any) ([]byte, error) {
-	header, rows := csvTable(records)
+func recordsToCSV(records []map[string]any, op string) ([]byte, error) {
+	header, rows := csvTable(records, op)
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
 	if err := w.Write(header); err != nil {
@@ -545,7 +632,7 @@ func recordsToCSV(records []map[string]any) ([]byte, error) {
 
 // csvTable is the header (the sorted union of keys) and the rows
 // recordsToCSV writes.
-func csvTable(records []map[string]any) ([]string, [][]string) {
+func csvTable(records []map[string]any, op string) ([]string, [][]string) {
 	keySet := map[string]struct{}{}
 	for _, r := range records {
 		for k := range r {
@@ -562,16 +649,29 @@ func csvTable(records []map[string]any) ([]string, [][]string) {
 	for j, r := range records {
 		row := make([]string, len(keys))
 		for i, k := range keys {
-			row[i] = csvValue(r[k])
+			if v, present := r[k]; present {
+				row[i] = csvValue(v, op)
+			}
 		}
 		rows[j] = row
 	}
 	return keys, rows
 }
 
-func csvValue(v any) string {
+// csvNull is how a Bulk API 2.0 CSV says "set this field to null". An empty
+// field means "leave unchanged" on an update or upsert.
+const csvNull = "#N/A"
+
+// csvValue renders one field. A JSON null is csvNull on an upsert, so it
+// clears the field as the REST path's null does; a field absent from a
+// record is "" (unchanged). On an insert both are "": a new record has
+// nothing to clear, and #N/A is documented for updates only.
+func csvValue(v any, op string) string {
 	switch t := v.(type) {
 	case nil:
+		if op == "upsert" {
+			return csvNull
+		}
 		return ""
 	case string:
 		return t
