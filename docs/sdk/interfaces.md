@@ -67,9 +67,9 @@ thing to clone when starting a new connector. It shows `Configure` (read env),
 | Return | Effect |
 |--------|--------|
 | `nil` | ack — success |
-| `sdk.Retriable(err)` | NAK → redeliver with backoff → DLQ after `MaxDeliveryAttempts` |
+| `sdk.Retriable(err)` | NAK → redelivered after 1 s, 5 s, 30 s, 2 min → DLQ after `MaxDeliveryAttempts` (see [NATS architecture](../NATS_ARCHITECTURE.md#what-a-worker-does-with-a-message)) |
 | `sdk.Permanent(err)` | ack + log — poison message, retrying can't help |
-| `sdk.RateLimited(err, d)` | NAK (retriable); the delay `d` is preserved via `RetryAfter` |
+| `sdk.RateLimited(err, d)` | Like `Retriable`, but each wait is the longer of `d` (kept between 1 s and the largest step, 2 min) and the backoff step; `sdk.Permanent` wins if either wraps the other |
 | `sdk.ConfigUnavailable(err)` | NAK like Retriable, plus an Error log line with the connection id |
 | any other error | Retriable (safe default) |
 

@@ -111,6 +111,11 @@ type gateway struct {
 	// window, not a delivery deadline — the dispatch loop heartbeats a
 	// message for as long as it waits for its agent.
 	outputAckWait time.Duration
+	// outputBackoff is the output durables' redelivery schedule; nil is
+	// messaging.DefaultBackoff (each step raised to outputAckWait). A NAK'd
+	// write waits the step for its attempt (#794); tests shorten it to run
+	// through all five attempts.
+	outputBackoff []time.Duration
 	// membershipRefresh is how often group sessions re-read their members.
 	membershipRefresh time.Duration
 	// stopGrace bounds how long a stop keeps a session's handlers' scope
@@ -518,6 +523,7 @@ func (s *gateway) runStart(ctx context.Context, turn *commandTurn, connID, tenan
 			// its delivery attempts toward the dead-letter queue.
 			MaxAckPending: 1,
 			AckWait:       s.outputAckWait,
+			Backoff:       s.outputBackoff,
 			Logger:        logger,
 		}, s.outputHandler(sess, outputScope{done: sctx.Done()}))
 		if err != nil {

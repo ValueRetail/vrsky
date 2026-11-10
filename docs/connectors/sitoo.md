@@ -56,7 +56,9 @@ paging through all results, and emits each page as a JSON-array message.
 ```
 
 The connector honours Sitoo's rate limit: on HTTP `429` it waits for
-`X-Rate-Limit-Reset` / `Retry-After` and retries.
+`X-Rate-Limit-Reset` / `Retry-After` (5 s when neither is set) and retries.
+The wait is capped at 2 min, and never shorter than the usual retry step
+for that attempt (1 s, 5 s, 30 s, 2 min).
 
 ### Incremental polling
 

@@ -259,6 +259,7 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 			FilterSubject: messaging.DataSubject(sess.tenantID, sess.connID),
 			MaxAckPending: 1, // one held message per member; see startConnection
 			AckWait:       s.outputAckWait,
+			Backoff:       s.outputBackoff,
 			// A member joining a running pipeline starts at "now". Anything
 			// else would hand it every catalogue message of the last 72 h.
 			// An existing durable (a restart) keeps its position regardless.
