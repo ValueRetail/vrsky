@@ -39,7 +39,7 @@ business-central-consumer business-central-producer visma-consumer visma-produce
 brightpearl-consumer brightpearl-producer sap-s4hana-consumer sap-s4hana-producer
 api-consumer webhook-consumer file-consumer db-consumer tenant-consumer
 cloud-storage-consumer sftp-consumer kafka-consumer rabbitmq-consumer
-salesforce-consumer remote-agent
+nats-consumer salesforce-consumer remote-agent
 http-producer db-producer file-producer cloud-storage-producer
 sftp-producer kafka-producer rabbitmq-producer salesforce-producer"
 TOOLS="vrsky-cli"

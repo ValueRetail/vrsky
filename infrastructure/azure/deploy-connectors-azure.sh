@@ -96,6 +96,7 @@ cloud-storage-consumer    consumer 9240
 sftp-consumer             consumer 9210
 kafka-consumer            consumer 9220
 rabbitmq-consumer         consumer 9230
+nats-consumer             consumer 9340
 salesforce-consumer       consumer 9250
 tenant-consumer           consumer -
 remote-agent              consumer 9330
