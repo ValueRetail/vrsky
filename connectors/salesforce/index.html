@@ -1681,6 +1681,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#numbers-and-nulls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Numbers and nulls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-happens-when-a-write-fails" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2483,6 +2494,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#numbers-and-nulls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Numbers and nulls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-happens-when-a-write-fails" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2614,13 +2636,72 @@ field used to match existing records.</p>
   endpoint — use the <strong>Test connection</strong> button to confirm the grant and
   instance are valid before deploying.</li>
 <li><strong>Failed deliveries.</strong> A payload that is not JSON is dropped (logged, not
-  dead-lettered), and so is a message for a node with no <code>object</code>, or an
-  <code>upsert</code> node with no <code>external_id_field</code> (logged, acked). Everything else
+  dead-lettered), and so is a message for a node with no <code>object</code> (logged,
+  acked). An <code>upsert</code> node with no <code>external_id_field</code> fails every delivery
+  with an error that says so, so its messages end in the DLQ and can be
+  replayed once the node is fixed (#765). Everything else
   is retried and, after five attempts, dead-lettered with the error; see
   <a href="#what-happens-when-a-write-fails">What happens when a write fails</a>.</li>
 <li>Field mapping, batch sizing, and other options not listed here are
   configured via the in-app pipeline editor (Property panel).</li>
 </ul>
+<h2 id="numbers-and-nulls">Numbers and nulls<a class="headerlink" href="#numbers-and-nulls" title="Permanent link">&para;</a></h2>
+<p>Both paths send what the payload says (#765).</p>
+<ul>
+<li><strong>Numbers</strong> keep the digits they came with: <code>1000000</code>, <code>12345678</code>,
+  <code>9007199254740993</code> and <code>0.10</code> go to Salesforce as written, in the REST
+  body, in the external-id part of an <code>upsert</code> URL and in a Bulk CSV. They
+  are never turned into <code>1e+06</code> or rounded to a float. A number the payload
+  writes with an exponent (<code>1e+16</code>, <code>-1.5e3</code>, as some Python and JavaScript
+  producers do) is written out as exact plain digits (<code>10000000000000000</code>,
+  <code>-1500</code>), computed without floating point. An exponent beyond 400 is left
+  as sent.</li>
+<li><strong>Null</strong> is a field the payload sets to <code>null</code>; a field the payload does
+  not mention is absent.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>REST (below 200 records)</th>
+<th>Bulk (200 or more)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>insert</code>, <code>null</code></td>
+<td>sent as <code>null</code> (the field is set to null; that a default value does not apply has not been checked against an org yet, see #804)</td>
+<td>written as an empty CSV field (the field is left unset, so a default value applies)</td>
+</tr>
+<tr>
+<td><code>insert</code>, absent</td>
+<td>not sent</td>
+<td>empty CSV field</td>
+</tr>
+<tr>
+<td><code>upsert</code>, <code>null</code></td>
+<td>sent as <code>null</code>: the field is cleared</td>
+<td>written as <code>#N/A</code>: Salesforce sets the field to null</td>
+</tr>
+<tr>
+<td><code>upsert</code>, absent</td>
+<td>not sent: the field is unchanged</td>
+<td>empty CSV field: the field is unchanged</td>
+</tr>
+</tbody>
+</table>
+<p>Bulk API 2.0 reads an empty CSV field as "leave unchanged" on an update or
+upsert and <code>#N/A</code> as "set to null" (Salesforce's <em>Prepare CSV Files</em> page for
+Bulk API 2.0). On an <code>insert</code> a new record has nothing to clear, and
+Salesforce documents <code>#N/A</code> for updates only, so the node writes an empty
+field there. A possible difference left is a field with a default value: REST
+<code>null</code> may override it, Bulk leaves it to the default (not checked against an
+org yet, #804).</p>
+<p>On a Bulk <code>upsert</code>, a record whose external id is absent, <code>null</code> or <code>""</code> is
+refused before the upload, as on REST (<code>record[2]: no value for external id
+field …</code>); the other records still go in.</p>
+<p>A text value that is literally <code>#N/A</code> on a Bulk upsert clears the field too;
+Salesforce gives it no escape.</p>
 <h2 id="what-happens-when-a-write-fails">What happens when a write fails<a class="headerlink" href="#what-happens-when-a-write-fails" title="Permanent link">&para;</a></h2>
 <p>Batches below the bulk threshold (200 records) go out one record at a time
 through the REST API. Larger batches go to one Bulk API 2.0 job per node.
