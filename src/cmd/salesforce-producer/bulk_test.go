@@ -961,10 +961,10 @@ func TestHarness_BulkLongJobOneDelivery(t *testing.T) {
 // guard behind sendable: an empty single-column row would be skipped.
 func TestBulkCSV_ReadBackRowCount(t *testing.T) {
 	recs := []map[string]any{{"Name": "a"}, {"Name": ""}, {"Name": "c\r\nd"}}
-	if _, _, _, err := bulkCSV(recs, []int{0, 1, 2}); err == nil || !strings.Contains(err.Error(), "reads back as 2 rows") {
+	if _, _, _, err := bulkCSV(recs, []int{0, 1, 2}, "insert"); err == nil || !strings.Contains(err.Error(), "reads back as 2 rows") {
 		t.Errorf("bulkCSV with an empty single-column row: err = %v, want a read-back error", err)
 	}
-	_, header, rows, err := bulkCSV(recs, []int{0, 2})
+	_, header, rows, err := bulkCSV(recs, []int{0, 2}, "insert")
 	if err != nil {
 		t.Fatalf("bulkCSV: %v", err)
 	}

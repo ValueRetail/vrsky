@@ -179,15 +179,15 @@ func listRejected(out map[int]string) []string {
 // written as an empty line, which CSV readers (Salesforce's too) skip: the
 // job would end JobComplete without it. With no column at all, no record has
 // anything to send.
-func sendable(records []map[string]any, pending []int) ([]int, map[int]string) {
-	header, rows := csvTable(subset(records, pending))
+func sendable(records []map[string]any, pending []int, op string) ([]int, map[int]string) {
+	header, rows := csvTable(subset(records, pending), op)
 	if len(header) > 1 {
 		return pending, nil
 	}
 	var send []int
 	local := map[int]string{}
 	for j, i := range pending {
-		if len(header) == 0 || rows[j][0] == "" {
+		if len(header) == 0 || rows[j][0] == "" || records[i][header[0]] == nil {
 			local[i] = "nothing to send (no field has a value, and an empty CSV row is skipped)"
 			continue
 		}
@@ -201,8 +201,8 @@ func sendable(records []map[string]any, pending []int) ([]int, map[int]string) {
 // with (a CSV reader turns \r\n inside a quoted field into \n, on both
 // sides). A read-back that does not give one row per record is an error, so
 // a record the CSV lost is never counted as written.
-func bulkCSV(records []map[string]any, idx []int) ([]byte, []string, [][]string, error) {
-	data, err := recordsToCSV(subset(records, idx))
+func bulkCSV(records []map[string]any, idx []int, op string) ([]byte, []string, [][]string, error) {
+	data, err := recordsToCSV(subset(records, idx), op)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build CSV: %w", err)
 	}
@@ -325,7 +325,7 @@ func (p *salesforceProducer) bulkWrite(ctx context.Context, tenantID string, cfg
 	}
 	b := &bulkCall{p: p, tenantID: tenantID, cfg: cfg, op: op, total: len(records),
 		base: fmt.Sprintf("%s/services/data/%s/jobs/ingest", strings.TrimRight(cfg.InstanceURL, "/"), cfg.APIVersion)}
-	pending, b.local = sendable(records, pending)
+	pending, b.local = sendable(records, pending, op)
 	for i, why := range b.local {
 		p.logger.Error("Salesforce Bulk API: record cannot be sent", "record", i, "object", cfg.Object, "op", op, "error", why)
 	}
@@ -361,7 +361,7 @@ func (p *salesforceProducer) bulkJobWrite(ctx context.Context, b *bulkCall, reco
 		p.logger.Info("Salesforce Bulk API: aborted the open job of an earlier attempt", "object", cfg.Object, "op", op, "job_id", job.id)
 	}
 
-	csvData, _, _, err := bulkCSV(records, pending)
+	csvData, _, _, err := bulkCSV(records, pending, op)
 	if err != nil {
 		return err
 	}
@@ -457,7 +457,7 @@ func (b *bulkCall) resolve(ctx context.Context, jk writtenKey, job bulkJob, info
 			outstanding[i] = "not processed"
 		}
 	case info.Failed > 0 || (!done && info.Processed < len(job.submitted)):
-		m, err := newRowMatcher(records, job.submitted)
+		m, err := newRowMatcher(records, job.submitted, b.op)
 		if err != nil {
 			return fmt.Errorf("bulk job %s: %w", job.id, err)
 		}
@@ -556,8 +556,8 @@ type rowMatcher struct {
 	free   map[string][]int // row values → record indexes not yet matched
 }
 
-func newRowMatcher(records []map[string]any, submitted []int) (*rowMatcher, error) {
-	_, header, rows, err := bulkCSV(records, submitted)
+func newRowMatcher(records []map[string]any, submitted []int, op string) (*rowMatcher, error) {
+	_, header, rows, err := bulkCSV(records, submitted, op)
 	if err != nil {
 		return nil, err
 	}

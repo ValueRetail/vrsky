@@ -73,12 +73,42 @@ Config bullets:
   endpoint — use the **Test connection** button to confirm the grant and
   instance are valid before deploying.
 - **Failed deliveries.** A payload that is not JSON is dropped (logged, not
-  dead-lettered), and so is a message for a node with no `object`, or an
-  `upsert` node with no `external_id_field` (logged, acked). Everything else
+  dead-lettered), and so is a message for a node with no `object` (logged,
+  acked). An `upsert` node with no `external_id_field` fails every delivery
+  with an error that says so, so its messages end in the DLQ and can be
+  replayed once the node is fixed (#765). Everything else
   is retried and, after five attempts, dead-lettered with the error; see
   [What happens when a write fails](#what-happens-when-a-write-fails).
 - Field mapping, batch sizing, and other options not listed here are
   configured via the in-app pipeline editor (Property panel).
+
+## Numbers and nulls
+
+Both paths send what the payload says (#765).
+
+- **Numbers** keep the digits they came with: `1000000`, `12345678`,
+  `9007199254740993` and `0.10` go to Salesforce as written, in the REST
+  body, in the external-id part of an `upsert` URL and in a Bulk CSV. They
+  are never turned into `1e+06` or rounded to a float.
+- **Null** is a field the payload sets to `null`; a field the payload does
+  not mention is absent.
+
+| | REST (below 200 records) | Bulk (200 or more) |
+| --- | --- | --- |
+| `insert`, `null` | sent as `null` (the field is set to null, a default value does not apply) | written as an empty CSV field (the field is left unset, so a default value applies) |
+| `insert`, absent | not sent | empty CSV field |
+| `upsert`, `null` | sent as `null`: the field is cleared | written as `#N/A`: Salesforce sets the field to null |
+| `upsert`, absent | not sent: the field is unchanged | empty CSV field: the field is unchanged |
+
+Bulk API 2.0 reads an empty CSV field as "leave unchanged" on an update or
+upsert and `#N/A` as "set to null" (Salesforce's *Prepare CSV Files* page for
+Bulk API 2.0). On an `insert` a new record has nothing to clear, and
+Salesforce documents `#N/A` for updates only, so the node writes an empty
+field there. The one difference left is a field with a default value: REST
+`null` overrides it, Bulk leaves it to the default.
+
+A text value that is literally `#N/A` on a Bulk upsert clears the field too;
+Salesforce gives it no escape.
 
 ## What happens when a write fails
 
