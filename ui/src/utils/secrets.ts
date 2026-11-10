@@ -28,6 +28,8 @@ export const SECRET_FIELDS = new Set([
   'subscription_key',
   'client_secret',
   'staff_token',
+  // NATS source (#814): the .creds file (user JWT + NKey seed).
+  'creds',
 ])
 
 /**

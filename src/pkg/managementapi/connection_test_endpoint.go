@@ -54,6 +54,18 @@ func buildTestTarget(typ, role string, raw map[string]json.RawMessage, tenantID 
 		return testWorkerURL("TEST_URL_KAFKA", "http://kafka-consumer:9220") + "/test-connection/", sub("kafka"), true, ""
 	case "rabbitmq":
 		return testWorkerURL("TEST_URL_RABBITMQ", "http://rabbitmq-consumer:9230") + "/test-connection/", sub("rabbitmq"), true, ""
+	case "nats":
+		// tenant_id from the session lets the worker resolve stored secrets
+		// of a saved node; the worker port has no authentication of its own.
+		var nc map[string]json.RawMessage
+		if json.Unmarshal(sub("nats"), &nc) != nil || nc == nil {
+			nc = map[string]json.RawMessage{}
+		}
+		nc["tenant_id"], _ = json.Marshal(tenantID)
+		b, _ := json.Marshal(nc)
+		// Through WORKER_ADDR_TEMPLATE, so the default reaches the worker in
+		// AKS too, where services carry a vrsky- prefix.
+		return testWorkerURL("TEST_URL_NATS", fmt.Sprintf(workerAddrTemplate(), "nats-consumer", 9340)) + "/test-connection/", b, true, ""
 	case "cloud_storage":
 		return testWorkerURL("TEST_URL_CLOUD", "http://cloud-storage-consumer:9240") + "/test-connection/", sub("cloud_storage"), true, ""
 	case "file":

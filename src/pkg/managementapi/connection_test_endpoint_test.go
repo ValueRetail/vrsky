@@ -32,6 +32,17 @@ func TestBuildTestTarget_Dispatch(t *testing.T) {
 		t.Errorf("salesforce body must carry tenant_id, got %s", body)
 	}
 
+	// NATS goes to nats-consumer with the session's tenant, so the worker can
+	// resolve a saved node's secrets; a tenant_id in the draft is overwritten.
+	raw = map[string]json.RawMessage{"nats": json.RawMessage(`{"servers":["tls://n.example.com"],"stream":"S","tenant_id":"other"}`)}
+	url, body, ok, _ = buildTestTarget("nats", "consumer", raw, "ten-7")
+	if !ok || !strings.HasSuffix(url, "nats-consumer:9340/test-connection/") {
+		t.Errorf("nats url=%q ok=%v", url, ok)
+	}
+	if !strings.Contains(string(body), `"tenant_id":"ten-7"`) || !strings.Contains(string(body), `"stream":"S"`) {
+		t.Errorf("nats body must carry the block and the session tenant, got %s", body)
+	}
+
 	// Inbound webhook + unknown types are not testable.
 	if _, _, ok, hint := buildTestTarget("http", "consumer", nil, "t"); ok || hint == "" {
 		t.Errorf("http (webhook) should be unsupported with a hint")

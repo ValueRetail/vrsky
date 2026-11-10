@@ -64,6 +64,12 @@ func validateConnectorURLs(node *Node, configType string, raw map[string]json.Ra
 			}
 		}
 		err = connectorurl.BusinessCentral(bc, allowPrivate)
+	case "nats":
+		var servers []string
+		if json.Unmarshal(block["servers"], &servers) != nil {
+			return []string{fmt.Sprintf("node %s (nats): nats.servers must be a list of URLs (served by nats-consumer)", node.ID)}
+		}
+		err = connectorurl.NATS(servers, allowPrivate)
 	default:
 		return nil
 	}
