@@ -1628,6 +1628,19 @@ Last updated 2026-10-28.
     Retailhero template asks for user and password instead; a textarea field
     kind would let templates use creds. Found in #816. Filed as #857.
 
+221. **HTTP producer config cache by tenant.** The http producer caches a
+    connection's resolved config (stored bearer and OAuth tokens included) by
+    connection ID only, and reads `connections` by id without `tenant_id`.
+    Secrets are resolved for the envelope's tenant, but a cached config is
+    served to any envelope naming that connection. Key the cache by tenant
+    and connection, and add `AND tenant_id = $2`. Found in the review of #850.
+
+222. **Typed credentials in the canvas's localStorage.** The pipeline
+    builder saves the canvas, node configs included, to localStorage, so a
+    secret typed into a SecretInput but not deployed yet sits there in plain
+    text. Keep secret fields out of the saved canvas. Found in the review of
+    #850.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource

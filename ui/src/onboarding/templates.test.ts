@@ -381,10 +381,20 @@ describe('Bifrost sales → Retailhero (#817)', () => {
   })
 
   it('ships no Authorization header, because a bearer in a header would be stored in plain text', () => {
-    // The intake credential is a tenant-workload bearer token; the HTTP
-    // producer has no stored-secret bearer option (docs/connectors/bifrost-sales-to-retailhero.md).
+    // The intake credential goes through auth_type bearer instead (below).
     const headers = (node('dst').config.http as { headers: Record<string, string> }).headers
     expect(Object.keys(headers).map((k) => k.toLowerCase())).not.toContain('authorization')
+  })
+
+  it('sends the intake credential as a bearer token from a stored secret (#850)', () => {
+    const http = node('dst').config.http as Record<string, unknown>
+    expect(http.auth_type).toBe('bearer')
+    expect(http.token).toBe('')
+    const f = t().fields.find((f) => f.nodeId === 'dst' && f.key === 'token')!
+    expect(f.objectPath).toBe('http')
+    expect(f.secret).toBe(true)
+    // Minted into http.token_secret_id on deploy, which the producer reads.
+    expect(SECRET_FIELDS.has('token')).toBe(true)
   })
 
   it('says it is beta', () => {

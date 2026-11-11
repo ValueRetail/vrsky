@@ -84,3 +84,27 @@ func TestRetailheroTemplate_BatchesReachCatalogueApi(t *testing.T) {
 		}
 	}
 }
+
+// The template passes each batch's recordedAt through as "sequence" (#858). A
+// retried older batch that arrives after a newer one is dropped, so the tills
+// keep the newer price.
+func TestRetailheroTemplate_OlderBatchRetriedLateIsDropped(t *testing.T) {
+	stub := newBifrostStub(t)
+	cfg := nodeJSON(stub.URL(), `"mode":"delta"`)
+	batch := func(recordedAt, price string) []byte {
+		return []byte(`{"sequence":"` + recordedAt + `","items":[{"article_no":"4711","name":"Melk","price_incl_vat":"` + price + `","vat_code":"F","unit":"pcs","alcohol":false,"effective_from":"2026-12-01T00:00:00Z"}]}`)
+	}
+	if err := deliver(t, testProducer(), &envelope.Envelope{ID: "rh-new", Payload: batch("2026-11-11T12:00:01Z", "12.00")}, `[]`, cfg); err != nil {
+		t.Fatalf("newer batch: %v", err)
+	}
+	if err := deliver(t, testProducer(), &envelope.Envelope{ID: "rh-old", Payload: batch("2026-11-11T12:00:00Z", "11.00")}, `[]`, cfg); err != nil {
+		t.Fatalf("older batch returned %v, want it dropped (nil)", err)
+	}
+	if got := livePrice(t, stub); got != "12.00" {
+		t.Errorf("the tills sell 4711 at %s, want 12.00 from the newer batch", got)
+	}
+	b := stub.beginBodies()
+	if len(b) != 2 || b[0].Sequence == nil || *b[0].Sequence != 1794398401000 || b[1].Sequence == nil || *b[1].Sequence != 1794398400000 {
+		t.Errorf("begin sequences = %+v, want the recordedAt times in milliseconds", b)
+	}
+}

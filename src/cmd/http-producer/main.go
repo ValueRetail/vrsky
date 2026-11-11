@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -97,10 +98,21 @@ type HTTPConfig struct {
 	URL            string            `json:"url"`
 	Method         string            `json:"method"`
 	Headers        map[string]string `json:"headers"`
-	AuthType       string            `json:"auth_type"`      // "", "none", or "oauth"
+	AuthType       string            `json:"auth_type"`      // "", "none", "oauth" or "bearer"
 	OAuthGrantID   string            `json:"oauth_grant_id"` // grant id when auth_type=oauth
 	PredecessorID  string
 	PredIsConsumer bool
+
+	// bearerToken is the token of an auth_type=bearer node, resolved from its
+	// stored secret (http.token_secret_id, #850). It goes out as
+	// Authorization: Bearer and nowhere else: never logged, emitted or
+	// returned in an error.
+	bearerToken string
+	// authErr is why the node's bearer token cannot be used: it is written
+	// into the node instead of stored as a secret, or auth_type=bearer has no
+	// token. Nothing is sent to the node; its delivery fails and the message
+	// is retried, then kept in the DLQ, like clientErr.
+	authErr error
 
 	// mTLS (#89): when the node carries a "tls" block with a resolved client
 	// cert/key, client is a pre-built *http.Client presenting that cert to the
@@ -579,6 +591,13 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		return fmt.Errorf("%w; fix the node's certificate, then retry the message from the DLQ", httpCfg.clientErr)
 	}
 
+	// authErr never holds the token: it names the setting, not its value.
+	if httpCfg.authErr != nil {
+		p.logger.Error("HTTP destination's bearer token cannot be used", "error", httpCfg.authErr, "connection_id", connectionID, "node_id", httpCfg.NodeID)
+		p.emitEvent(connectionID, HTTPEvent{Type: "error", Message: httpCfg.authErr.Error(), Time: now()})
+		return fmt.Errorf("%w; fix the node, then retry the message from the DLQ", httpCfg.authErr)
+	}
+
 	// The URL is tenant config and the node's credential goes with the request,
 	// so a literal private address or a non-http(s) scheme is refused here, with
 	// a readable reason. A hostname that resolves to a private address is
@@ -601,8 +620,12 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 			stop()
 		}
 	}()
+	// sentTokens are the bearer tokens the requests carried, masked in the
+	// response preview (see responsePreview).
+	var sentTokens []string
 	// buildAndSend creates a fresh request (re-readable body) per attempt and,
-	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
+	// for auth_type=oauth or bearer, attaches a Bearer token. force=true
+	// refreshes an OAuth token.
 	buildAndSend := func(force bool) (*http.Response, error) {
 		// The token comes first so its fetch does not use up the request's
 		// timeout; the guard starts once only the request itself is left.
@@ -621,6 +644,13 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 				return nil, fmt.Errorf("resolve oauth token: %w", terr)
 			}
 			bearer, useBearer = tok, true
+		} else if httpCfg.AuthType == "bearer" {
+			// getHTTPConfigs set the token or authErr, and authErr stopped
+			// the delivery above.
+			bearer, useBearer = httpCfg.bearerToken, true
+		}
+		if useBearer {
+			sentTokens = append(sentTokens, bearer)
 		}
 
 		var limit time.Duration
@@ -688,8 +718,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := iolib.ReadAll(iolib.LimitReader(resp.Body, 4096))
-	respPreview := string(respBody)
+	respPreview := responsePreview(resp.Body, 4096, sentTokens)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		p.logger.Info("HTTP request sent", "connection_id", connectionID, "status", resp.StatusCode, "size", size)
@@ -717,6 +746,35 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		return fmt.Errorf("upstream %d: check the node's credential, then retry the message from the DLQ", resp.StatusCode)
 	}
 	return nil // any other 4xx: the target refused the message itself, don't retry
+}
+
+// responsePreview reads up to n bytes of a response for the activity feed,
+// with every bearer token in tokens masked. Only a byte-for-byte copy is
+// masked: a target that echoes the token escaped or encoded (JSON "\/",
+// URL or base64 encoding) still shows it. A target that echoes the request
+// headers back (httpbin does) would otherwise put the node's token in the
+// feed, which every user of the tenant can read, while the secret itself is
+// write-only (#850). It reads a token's length past n, so a token that
+// straddles the cut is masked too; the mask is as long as the token, so
+// nothing moves into the first n bytes.
+func responsePreview(r iolib.Reader, n int, tokens []string) string {
+	// Longest first, so a token that contains another is masked whole.
+	tokens = slices.Clone(tokens)
+	slices.SortFunc(tokens, func(a, b string) int { return len(b) - len(a) })
+	extra := 0
+	if len(tokens) > 0 {
+		extra = len(tokens[0])
+	}
+	b, _ := iolib.ReadAll(iolib.LimitReader(r, int64(n+extra)))
+	for _, t := range tokens {
+		if t != "" {
+			b = bytes.ReplaceAll(b, []byte(t), bytes.Repeat([]byte("*"), len(t)))
+		}
+	}
+	if len(b) > n {
+		b = b[:n]
+	}
+	return string(b)
 }
 
 // requestErrText is the text of an http.NewRequest error that is safe to show.
@@ -792,6 +850,9 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		if err := json.Unmarshal(node.Config, &kind); err != nil || kind.Type != "http" {
 			continue
 		}
+		// Before resolving: once resolved, http.token holds the stored
+		// secret's value and a token written into the node looks the same.
+		inlineToken := hasInlineToken(node.Config)
 		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, node.Config)
 		if rerr != nil {
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets for node %s: %w", node.ID, rerr))
@@ -806,6 +867,9 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 				Headers      map[string]string `json:"headers"`
 				AuthType     string            `json:"auth_type"`
 				OAuthGrantID string            `json:"oauth_grant_id"`
+				// Token is http.token_secret_id resolved (#850); one written
+				// into the node is refused (inlineToken).
+				Token string `json:"token"`
 			} `json:"http"`
 			// mTLS material (#89). In the stored config these are *_secret_id
 			// refs; crypto.ResolveSecretsInJSON has already replaced them with
@@ -847,6 +911,16 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 			PredecessorID:  predID,
 			PredIsConsumer: predIsConsumer,
 		}
+		switch {
+		case inlineToken:
+			cfg.authErr = errors.New("the bearer token is written into the node (http.token); it must be stored as a secret (http.token_secret_id)")
+		case cfg.AuthType == "bearer" && strings.TrimSpace(nodeConfig.HTTP.Token) == "":
+			cfg.authErr = errors.New("auth_type is bearer but the node has no token; set http.token_secret_id")
+		case cfg.AuthType == "bearer":
+			// A token pasted with a trailing newline would make every
+			// request fail as an invalid header.
+			cfg.bearerToken = strings.TrimSpace(nodeConfig.HTTP.Token)
+		}
 
 		// mTLS: when the node presents a client cert, pre-build a dedicated
 		// http.Client that presents it (and trusts the configured server CA, if
@@ -882,6 +956,28 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 	p.configCacheMu.Unlock()
 
 	return configs, nil
+}
+
+// hasInlineToken reports a bearer token written into the node's http block
+// (http.token) instead of stored as a secret. Call it on the stored config,
+// before secrets are resolved. The editor mints the token into the secrets
+// vault on deploy (http.token_secret_id); a config written some other way
+// with the value inline is refused rather than used, as the Bifrost catalogue
+// producer and the NATS source do (#850).
+//
+// It decodes into a struct, like the read that uses the token: encoding/json
+// matches keys without regard to case, so "Token" is read as the token too,
+// and a check on the exact key "token" would let it through.
+func hasInlineToken(nodeConfig json.RawMessage) bool {
+	var c struct {
+		HTTP struct {
+			Token string `json:"token"`
+		} `json:"http"`
+	}
+	if json.Unmarshal(nodeConfig, &c) != nil {
+		return false
+	}
+	return strings.TrimSpace(c.HTTP.Token) != ""
 }
 
 // --- Event broadcasting (SSE) ---

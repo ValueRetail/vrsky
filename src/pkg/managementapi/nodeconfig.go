@@ -229,6 +229,7 @@ func validateEdgeNodeConfig(node *Node) []string {
 	}
 	if configType == "http" && node.Type == "producer" {
 		errs = append(errs, validateHTTPProducerURL(node, raw)...)
+		errs = append(errs, validateHTTPProducerBearer(node, raw)...)
 	}
 	return errs
 }
@@ -288,6 +289,37 @@ func validateHTTPProducerURL(node *Node, raw map[string]json.RawMessage) []strin
 		return []string{fmt.Sprintf("node %s (http): %s (served by http-producer)", node.ID, err)}
 	}
 	return nil
+}
+
+// validateHTTPProducerBearer is the start-time form of the producer's own
+// refusal (#850): a bearer token written into the node (http.token) instead of
+// stored as a secret, and auth_type "bearer" without http.token_secret_id. The
+// editor mints http.token into the vault on deploy, so a plaintext token here
+// came in some other way. The error names the setting, never its value.
+//
+// It decodes the node into a struct, as the producer does: encoding/json
+// matches keys without regard to case, so "Token" or "Auth_Type" must be
+// caught here too.
+func validateHTTPProducerBearer(node *Node, _ map[string]json.RawMessage) []string {
+	var c struct {
+		HTTP struct {
+			AuthType      string `json:"auth_type"`
+			Token         string `json:"token"`
+			TokenSecretID string `json:"token_secret_id"`
+		} `json:"http"`
+	}
+	// A type error (a number where a string belongs) still fills the other
+	// fields, so the checks run anyway; the producer reads it the same way.
+	_ = json.Unmarshal(node.Config, &c)
+	var errs []string
+	if strings.TrimSpace(c.HTTP.Token) != "" {
+		errs = append(errs, fmt.Sprintf("node %s (http): http.token is written into the node; store the bearer token as a secret (http.token_secret_id) (served by http-producer)", node.ID))
+	}
+	// auth_type is compared as stored: the producer does not trim it either.
+	if c.HTTP.AuthType == "bearer" && strings.TrimSpace(c.HTTP.TokenSecretID) == "" {
+		errs = append(errs, fmt.Sprintf("node %s (http): auth_type is bearer but http.token_secret_id is missing; store the bearer token as a secret (served by http-producer)", node.ID))
+	}
+	return errs
 }
 
 // validateSitooBaseURL refuses a base_url the Sitoo connectors would not call
