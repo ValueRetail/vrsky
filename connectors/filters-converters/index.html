@@ -2045,6 +2045,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#lookup-and-required-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup and required fields
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2601,6 +2612,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#lookup-and-required-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup and required fields
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2665,6 +2687,9 @@ it based on rules. Use it to route only the records you care about downstream
 <p>Rules are built visually in the in-app pipeline editor (Property panel) using
 rule expressions. The exact rule syntax is defined and validated by the
 editor — author and test rules there rather than hand-writing them.</p>
+<p>The operator <strong>Is One Of</strong> (<code>in</code>) takes a comma-separated list as its value
+and passes a field that equals one entry exactly, with spaces around an entry
+ignored: <code>event_type</code> <code>in</code> <code>basket.sale-recorded,basket.return-recorded</code>.</p>
 <h2 id="converter-node">Converter node<a class="headerlink" href="#converter-node" title="Permanent link">&para;</a></h2>
 <p>A converter node (<code>type: converter</code>) transforms message payloads — renaming
 and remapping fields, reshaping structure, and applying conversion functions
@@ -2728,6 +2753,45 @@ array. Together they wrap a record unchanged inside a larger object, which the
 build a batch around a Basket event. Turn the node's <code>drop_unmapped</code> on with
 them, or the original fields stay beside the wrapper.</p>
 <p><code>to_string</code> writes numbers in plain decimal (<code>1000000</code>, not <code>1e+06</code>).</p>
+<h3 id="lookup-and-required-fields">Lookup and required fields<a class="headerlink" href="#lookup-and-required-fields" title="Permanent link">&para;</a></h3>
+<p>Added for the Bifrost sales template (#851, #852).</p>
+<ul>
+<li>
+<p><strong><code>lookup</code></strong> picks a text by the value of <code>source</code> and fills it in like a
+  <code>template</code> expression (<code>{field}</code> is a top-level field of the record). A
+  value with no entry in <code>values</code> writes nothing:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lookup"</span><span class="p">,</span><span class="w"> </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"event_type"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"operationId"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"values"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"basket.sale-recorded"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bifrost-sale-{event_id}-r1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"basket.return-recorded"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bifrost-return-{event_id}-r1"</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+</li>
+<li>
+<p><strong><code>required: true</code></strong> on a mapping that reads one field (<code>rename</code>, <code>copy</code>,
+  <code>to_string</code>, <code>to_number</code>, <code>lookup</code>; ignored on other types): a record whose source is missing, <code>null</code>
+  or <code>""</code> is not converted, and neither is a <code>lookup</code> value with no entry.
+  Nothing is published for the message. It fails, is retried and then
+  dead-lettered, with the field named in <code>X-Vrsky-Last-Error</code> (for example
+  <code>required field missing: "data.journal_sequence" (mapped to
+  "journalPosition") is missing</code>). A replay from the DLQ sends the same
+  record and fails again, so it helps only after the mapping is changed; a
+  record that really lacks the field has to come again from the source.
+  Inside an <code>each</code> the path is relative to the element, and the error names
+  the element (<code>lines[1]: …</code>). In a pipeline with several branches the
+  message fails before any branch publishes, except for a payload over the
+  rehydrate cap (128 MB), which is checked record by record as it streams:
+  there a sibling branch may already have published, and does again on each
+  retry. The <strong>Test Transform</strong> preview
+  reports the missing field instead of a result. Use it for a field the destination
+  refuses a whole batch without, so the message waits in the DLQ instead of
+  being refused there.</p>
+</li>
+</ul>
+<p>The editor shows <code>values</code> one per line as <code>value = text</code>. The <strong>Required</strong>
+box shows on a <code>lookup</code> row, and on any row where it is set.</p>
 <p>The editor warns about a mapping the converter would skip or write wrongly:
 a missing source or target, a template with no expression, a type the
 converter does not know, a <code>remove</code> with a dotted path (it removes only a
@@ -2743,7 +2807,8 @@ does not split records; it shows the whole result.</p>
   its <code>type</code>.</li>
 <li><strong>Failures.</strong> A payload the node cannot parse (not valid JSON, or not in the
   format the node expects) is not dead-lettered: an <code>error</code> event is shown in
-  the activity feed and the message is acked, so it goes no further. The same
+  the activity feed and the message is acked, so it goes no further. A record
+  without a <code>required</code> field is the exception: retried, then dead-lettered. The same
   goes for an envelope that cannot be read. A failure to fetch an offloaded
   payload, to store a large result or to publish the result is retried and
   then dead-lettered. See the
