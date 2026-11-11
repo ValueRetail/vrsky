@@ -38,6 +38,11 @@ func TestBifrostSalesFilter_OnlyATillSalePasses(t *testing.T) {
 	webSale := fixture("basket-sale-recorded.v1.json")
 	webSale["source"] = map[string]interface{}{"kind": "ecommerce", "instance_id": "web-no", "location_id": "web"}
 
+	noID := fixture("basket-sale-recorded.v1.json")
+	delete(noID, "event_id")
+	emptyID := fixture("basket-sale-recorded.v1.json")
+	emptyID["event_id"] = ""
+
 	cases := []struct {
 		name string
 		obj  map[string]interface{}
@@ -45,6 +50,8 @@ func TestBifrostSalesFilter_OnlyATillSalePasses(t *testing.T) {
 	}{
 		{"sale-recorded from a till", fixture("basket-sale-recorded.v1.json"), true},
 		{"sale-recorded from the web shop", webSale, false},
+		{"sale-recorded without an event_id", noID, false},
+		{"sale-recorded with an empty event_id", emptyID, false},
 		{"completed", fixture("basket-completed.v1.json"), false},
 		{"cancelled", fixture("basket-cancelled.v1.json"), false},
 		{"created", map[string]interface{}{"event_type": "basket.created", "source": map[string]interface{}{"kind": "pos"}}, false},

@@ -342,7 +342,12 @@ describe('Bifrost sales → Retailhero (#817)', () => {
     const rules = (node('flt').config.rules as { field: string; operator: string; value: string }[])
     expect(rules).toContainEqual({ field: 'event_type', operator: 'equals', value: 'basket.sale-recorded' })
     expect(rules).toContainEqual({ field: 'source.kind', operator: 'equals', value: 'pos' })
+    expect(rules).toContainEqual({ field: 'event_id', operator: 'is_not_empty', value: '' })
     expect(node('flt').config.logic).toBe('and')
+  })
+
+  it('reads the whole stream on first start, which the operation ID makes safe', () => {
+    expect((node('src').config.nats as Record<string, unknown>).deliver_policy).toBe('all')
   })
 
   it('derives the operation ID from the Basket event ID and revision 1, with no random part', () => {

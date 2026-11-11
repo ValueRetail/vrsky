@@ -148,3 +148,13 @@ func TestApplyMappings_EachOnAMissingSourceIsStillSkipped(t *testing.T) {
 	got := mapObj(t, `{"a":1}`, cfg)
 	assertJSONEqual(t, "missing source", got, mustJSON(t, `{}`))
 }
+
+// Only copy and each may name the record with "."; rename and to_string with it
+// are skipped like a missing source, and leave the record alone.
+func TestApplyMappings_DotSourceOnOtherTypesIsSkipped(t *testing.T) {
+	for _, typ := range []string{"rename", "to_string", "to_number", ""} {
+		cfg := &ConverterNodeConfig{Mappings: []FieldMapping{{Type: typ, Source: ".", Target: "t"}}}
+		got := mapObj(t, `{"a":1}`, cfg)
+		assertJSONEqual(t, "type "+typ, got, mustJSON(t, `{"a":1}`))
+	}
+}

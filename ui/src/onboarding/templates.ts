@@ -497,6 +497,9 @@ export const TEMPLATES: PipelineTemplate[] = [
           rules: [
             { field: 'event_type', operator: 'equals', value: 'basket.sale-recorded' },
             { field: 'source.kind', operator: 'equals', value: 'pos' },
+            // The operation ID is built from event_id; without one every such
+            // message would share the literal ID and be answered with the first.
+            { field: 'event_id', operator: 'is_not_empty', value: '' },
           ],
         },
       },

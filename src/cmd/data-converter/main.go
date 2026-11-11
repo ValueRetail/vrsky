@@ -547,7 +547,7 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 			}
 		case "copy":
 			// Copy: copy source to target (keep source)
-			if val, ok := getNestedField(obj, m.Source); ok {
+			if val, ok := getSourceField(obj, m.Source); ok {
 				setNestedField(result, m.Target, val)
 				applied++
 			}
@@ -587,7 +587,7 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 			// not objects are kept as they are, like the top-level array path.
 			// A Source that is missing or not an array is left alone. The
 			// Source "." is the record itself, as a one-element array.
-			val, ok := getNestedField(obj, m.Source)
+			val, ok := getSourceField(obj, m.Source)
 			if !ok {
 				continue
 			}
@@ -621,14 +621,20 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 	return result, applied
 }
 
-// getNestedField reads the value at a dotted path. The path "." is the record
-// itself, so a mapping can nest the whole record under another field (the
-// Bifrost sales template wraps each Basket event as the "event" of a batch
-// entry; ui/src/onboarding/testdata/bifrost-sales-to-retailhero.json).
-func getNestedField(obj map[string]interface{}, path string) (interface{}, bool) {
+// getSourceField is getNestedField for the mappings that may name the record
+// itself: the path "." is the record, so a mapping can nest the whole record
+// under another field (the Bifrost sales template wraps each Basket event as
+// the "event" of a batch entry; ui/src/onboarding/testdata/
+// bifrost-sales-to-retailhero.json). Only copy and each use it; any other
+// type with source "." finds nothing and is skipped like a missing source.
+func getSourceField(obj map[string]interface{}, path string) (interface{}, bool) {
 	if path == "." {
 		return obj, true
 	}
+	return getNestedField(obj, path)
+}
+
+func getNestedField(obj map[string]interface{}, path string) (interface{}, bool) {
 	parts := strings.Split(path, ".")
 	current := interface{}(obj)
 	for _, part := range parts {

@@ -94,6 +94,13 @@ today, because no Bifrost event amends or voids a sale. So:
   (C3 contract, idempotency), so a sale is counted once;
 - two different sales never share an ID, because their event IDs differ.
 
+The ID keys on `event_id`. If Bifrost re-emits a corrected sale with a new
+`event_id` and the same `sale_reference`, it gets a new operation ID, so
+Retailhero's `revision-conflict` rule (same business key, different content)
+has to refuse it rather than count it twice. An event with no `event_id` is
+dropped by the filter, because every such message would otherwise share one
+literal operation ID and be answered with the first result.
+
 VRSky's own duplicate suppression (five minutes) is only a first layer. The
 operation ID is what holds after that.
 
@@ -123,8 +130,8 @@ guessed in the template; each one is a place where it will change.
    into `http.headers` is stored in plain text, so the template sends no
    `Authorization` header. Until the producer takes a stored bearer secret, the
    intake rejects every call with `401`, which the producer retries and then
-   dead-letters, so nothing is lost, only held.
-2. **Journal position.** The profile needs a `journalPosition` per entry. Basket
+   dead-letters, so nothing is lost, only held. Whether a `{secret:<id>}` placeholder in a header already does this is being checked in #850.
+2. **Journal position** (#851). The profile needs a `journalPosition` per entry. Basket
    events carry none (Bifrost#248 asks). The template sends none, and the
    profile refuses such a batch (`missing-field`). Candidates: the stream
    sequence of the Basket event, or the intake assigning it.
@@ -144,7 +151,7 @@ guessed in the template; each one is a place where it will change.
 5. **Revisions.** There is no amendment or void event, so every sale is
    revision 1. When Bifrost publishes them (Bifrost#248), the revision in the
    operation ID has to come from the event.
-6. **Returns.** `return.completed` is not published as an event yet, so the
+6. **Returns** (#852). `return.completed` is not published as an event yet, so the
    filter lets none through.
 7. **Fields Bifrost events do not carry**, as the profile lists them (and asks
    Bifrost#248 for): the stock location apart from the store; the currency

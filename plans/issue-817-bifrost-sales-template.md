@@ -8,15 +8,15 @@ guessed in the template.
 1. Auth. Retailhero wants a tenant-workload bearer credential
    (Retailhero#2675). The HTTP producer sends a bearer only from an OAuth
    grant. The template ships without credentials. Needs a stored-bearer option
-   on the producer (backlog 215; secrets handling, human review).
+   on the producer (#850; secrets handling, human review).
 2. Journal position. Required per entry, absent from the events. Not sent
-   (backlog 216).
+   (#851).
 3. Where the operation ID sits in the intake body, and the route. Retailhero
    #2678 is open. Assumed: `entries[].operationId`.
 4. Whether the stream body is the bare Basket event or the VRSky transport
    envelope (Bifrost ADR 0002), and the stream name and subjects.
 5. Revisions: every sale is revision 1 until Bifrost publishes amend/void.
-6. Returns: no `return.completed` event yet (backlog 217).
+6. Returns: no `return.completed` event yet (#852).
 7. The "fields Bifrost events do not carry" list in the Retailhero profile
    (stock location, currency scale, ex-VAT price and rounding, quantity unit,
    sale instant, cancel-after-sale).
