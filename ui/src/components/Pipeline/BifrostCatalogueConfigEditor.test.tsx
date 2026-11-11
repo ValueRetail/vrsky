@@ -47,6 +47,13 @@ describe('BifrostCatalogueConfigEditor', () => {
     expect(last().batch_size).toBeUndefined()
   })
 
+  it.each(['abc', '1.5', '-3', '0', ' '])('leaves the batch size unset for %j', (input) => {
+    const { last } = renderEditor({ batch_size: 500 })
+    fireEvent.change(screen.getByLabelText(/batch size/i), { target: { value: input } })
+    expect(last().batch_size).toBeUndefined()
+    expect(Number.isNaN(last().batch_size)).toBe(false)
+  })
+
   it('keeps the token under a field the deploy step turns into a secret', () => {
     expect(SECRET_FIELDS.has('token')).toBe(true)
     renderEditor({ token_secret_id: '00000000-0000-0000-0000-000000000001' })

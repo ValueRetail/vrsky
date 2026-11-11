@@ -756,3 +756,85 @@ func TestOnlyTokenSecretResolves(t *testing.T) {
 		t.Errorf("begin bodies = %+v, want one delta import", b)
 	}
 }
+
+// A {secret:<id>} placeholder outside token_secret_id is never expanded: the
+// setting it sits in can come back in an error text (mode), go out as a header
+// (tenant_id) or into Bifrost's audit (allow_shrink_reason). The node is
+// refused as a config error that names the setting and not its value, and
+// nothing is sent. The placeholder points at the token's own secret, so an
+// expansion anywhere would put stubToken where the test looks.
+func TestSecretPlaceholderOutsideTokenIsRefused(t *testing.T) {
+	placeholder := "{secret:" + harness.TestSecretID + "}"
+	tests := []struct {
+		name  string
+		extra string
+		field string
+	}{
+		{"mode", fmt.Sprintf(`"mode":%q`, placeholder), "mode"},
+		{"allow_shrink_reason", fmt.Sprintf(`"mode":"full","allow_shrink_reason":%q`, placeholder), "allow_shrink_reason"},
+		{"tenant_id", fmt.Sprintf(`"tenant_id":%q`, placeholder), "tenant_id"},
+		{"inside a longer value", fmt.Sprintf(`"tenant_id":%q`, "t-"+placeholder+"-x"), "tenant_id"},
+		{"unknown nested setting", fmt.Sprintf(`"extra":{"list":[%q]}`, placeholder), "extra.list[0]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := newBifrostStub(t)
+			var logs strings.Builder
+			p := testProducer()
+			p.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = db.Close() }()
+			ct := secretCiphertext(t)
+			expectNodeRead(t, mock, ct, `[]`, nodeJSON(stub.URL(), tt.extra))
+			// Room for the reads an expansion would make, so a regression
+			// shows up as a leak rather than as an unexpected query.
+			for i := 0; i < 3; i++ {
+				mock.ExpectQuery(`FROM secrets`).WithArgs(harness.TestSecretID, "tenant-1").
+					WillReturnRows(sqlmock.NewRows([]string{"ciphertext"}).AddRow(ct))
+			}
+			p.db = db
+
+			env := &envelope.Envelope{ID: "env-1", TenantID: "tenant-1", IntegrationID: "conn-1", Payload: []byte(items(3))}
+			err = p.Deliver(context.Background(), env)
+			msg := fmt.Sprint(err)
+			if err == nil || sdk.IsPermanent(err) {
+				t.Errorf("err = %v, want a retriable config error", err)
+			}
+			if !strings.Contains(msg, tt.field) || !strings.Contains(msg, "placeholder") {
+				t.Errorf("error %q does not name the setting %s", msg, tt.field)
+			}
+			for _, bad := range []string{stubToken, harness.TestSecretID} {
+				if strings.Contains(msg, bad) {
+					t.Errorf("error %q contains %q", msg, bad)
+				}
+			}
+			if strings.Contains(logs.String(), stubToken) {
+				t.Errorf("logs contain the token: %s", logs.String())
+			}
+			if got := stub.kinds(); got != "" {
+				t.Errorf("the stub received %q, want nothing", got)
+			}
+			for _, b := range stub.beginBodies() {
+				if strings.Contains(b.AllowShrink, stubToken) || strings.Contains(b.Kind, stubToken) {
+					t.Errorf("begin body carries the token: %+v", b)
+				}
+			}
+			for _, h := range stub.requestHeaders() {
+				for k, vs := range h {
+					if k == "Authorization" {
+						continue
+					}
+					for _, v := range vs {
+						if strings.Contains(v, stubToken) {
+							t.Errorf("header %s carries the token", k)
+						}
+					}
+				}
+			}
+		})
+	}
+}

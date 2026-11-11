@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -394,15 +395,23 @@ func (p *catalogueProducer) getNodes(ctx context.Context, connectionID, tenantID
 		bn := boundNode{id: n.ID, cfg: cfg, rt: routeTo(n.ID, nodes, edgesJSON)}
 		if len(nc.Bifrost) > 0 && string(nc.Bifrost) != "null" {
 			bn.plainToken = hasPlaintextToken(nc.Bifrost)
-			// Only token_secret_id may resolve. Another *_secret_id would
-			// resolve into a setting whose value can come back in an error
-			// text ("mode %q is not …"), and secrets are write-only.
-			resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, onlyTokenSecret(nc.Bifrost))
-			if rerr != nil {
-				return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
-			}
-			if err := json.Unmarshal(resolved, cfg); err != nil {
-				bn.badBlock = fmt.Errorf("settings cannot be read: %w", err)
+			// Only token_secret_id is resolved, by id, and nothing else in the
+			// block goes near the secrets table. crypto.ResolveSecretsInJSON
+			// would also resolve other *_secret_id keys and expand
+			// {secret:<id>} placeholders in any string, and those settings
+			// can come back in an error text ("mode %q is not …"), a header
+			// (tenant_id) or Bifrost's audit (allow_shrink_reason). Secrets
+			// are write-only.
+			secretID, err := readBlock(nc.Bifrost, cfg)
+			switch {
+			case err != nil:
+				bn.badBlock = err
+			case secretID != "":
+				token, rerr := resolveToken(ctx, reader, tenantID, secretID)
+				if rerr != nil {
+					return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve token_secret_id: %w", rerr))
+				}
+				cfg.Token = token
 			}
 		}
 		out = append(out, bn)
@@ -483,21 +492,80 @@ func hasPlaintextToken(block json.RawMessage) bool {
 	return json.Unmarshal(raw["token"], &s) == nil && s != ""
 }
 
-// onlyTokenSecret drops every *_secret_id key from block except
-// token_secret_id. A block that is not an object is returned as it is.
-func onlyTokenSecret(block json.RawMessage) json.RawMessage {
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(block, &raw) != nil || raw == nil {
-		return block
+// readBlock decodes the node's settings block into cfg as it is stored, with
+// nothing resolved, and returns token_secret_id. A {secret:<id>} placeholder
+// anywhere in the block is refused: only token_secret_id is resolved, so the
+// placeholder would otherwise go to Bifrost as written. The error names the
+// setting, never its value.
+func readBlock(block json.RawMessage, cfg *CatalogueConfig) (string, error) {
+	var generic any
+	if err := json.Unmarshal(block, &generic); err != nil {
+		return "", fmt.Errorf("settings cannot be read: %w", err)
 	}
-	for k := range raw {
-		if strings.HasSuffix(k, "_secret_id") && k != "token_secret_id" {
-			delete(raw, k)
+	if path := placeholderPath(generic, ""); path != "" {
+		return "", fmt.Errorf("setting %s holds a {secret:…} placeholder; this connector resolves only token_secret_id", path)
+	}
+	if err := json.Unmarshal(block, cfg); err != nil {
+		return "", fmt.Errorf("settings cannot be read: %w", err)
+	}
+	var ref struct {
+		TokenSecretID *string `json:"token_secret_id"`
+	}
+	if err := json.Unmarshal(block, &ref); err != nil {
+		return "", errors.New("settings cannot be read: token_secret_id must be a string")
+	}
+	if ref.TokenSecretID == nil {
+		return "", nil
+	}
+	return *ref.TokenSecretID, nil
+}
+
+// placeholderPath returns the path of the first string in v (keys in sorted
+// order) that holds a {secret: placeholder, or "" when there is none.
+func placeholderPath(v any, path string) string {
+	switch t := v.(type) {
+	case string:
+		if strings.Contains(t, "{secret:") {
+			if path == "" {
+				return "(block)"
+			}
+			return path
+		}
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			p := k
+			if path != "" {
+				p = path + "." + k
+			}
+			if found := placeholderPath(t[k], p); found != "" {
+				return found
+			}
+		}
+	case []any:
+		for i, e := range t {
+			if found := placeholderPath(e, fmt.Sprintf("%s[%d]", path, i)); found != "" {
+				return found
+			}
 		}
 	}
-	out, err := json.Marshal(raw)
+	return ""
+}
+
+// resolveToken reads the tenant's secret by id (the reader filters by
+// tenant) and decrypts it.
+func resolveToken(ctx context.Context, reader crypto.SecretReader, tenantID, id string) (string, error) {
+	ct, err := reader.GetCiphertext(ctx, tenantID, id)
 	if err != nil {
-		return block
+		return "", err
 	}
-	return out
+	key, err := crypto.Key()
+	if err != nil {
+		return "", err
+	}
+	return crypto.Decrypt(ct, key)
 }

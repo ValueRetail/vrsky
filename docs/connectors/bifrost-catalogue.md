@@ -54,7 +54,10 @@ first, or use `delta`.
   so it needs a TLS-terminating proxy in front.
 - `token_secret_id` (required) — secret holding the tenant's bearer token. It
   needs the permission `catalogue.import` in Bifrost's credentials. Never put
-  the raw token on the node.
+  the raw token on the node. This is the only setting read from the secrets
+  store: other `*_secret_id` keys are ignored, and a `{secret:<id>}`
+  placeholder in any setting makes the node fail as misconfigured (retried,
+  then the DLQ). The error names the setting, not its value.
 - `tenant_id` — Bifrost's tenant ID (the one in its credentials file), not
   VRSky's, sent as `X-Tenant-Id`. Optional: Bifrost takes the tenant from the
   credential and answers 403 if the header names another one.
@@ -118,14 +121,25 @@ delivered again: a `full` import of the same list replaces the catalogue with
 the same list, and a `delta` upserts the same rows. On its own that ends in the
 same catalogue.
 
-**Ordering is not guaranteed, though.** Bifrost's commit overwrites the
-snapshot, and a retry can arrive late (retries wait up to 2 minutes). If an
-older message is retried after a newer one has committed, the older list
-commits last and wins, delta or full, until the next import changes the
-catalogue. Closing that needs a version check in Bifrost (an import that says
-which source version it is built from); that is being filed there. Until then,
-send full lists from one source at a time and don't rely on a retried message
-being the latest.
+**Ordering is not guaranteed, though.** The connector runs as one pod, and a
+pod delivers one message at a time, so messages that go through on the first
+attempt commit in the order they were published. Two things break that:
+
+- A retry can arrive late (retries wait up to 2 minutes). If an older message
+  is retried after a newer one has committed, the older list commits last and
+  wins, delta or full, until the next import changes the catalogue.
+- A rolling update briefly runs the old and the new pod side by side, and both
+  can be running an import at the same moment.
+
+Closing that needs a version check in Bifrost (an import that says which
+source version it is built from); that is being filed there. Until then, send
+full lists from one source at a time and don't rely on a retried message being
+the latest.
+
+The connector is kept at one replica on purpose. Two pods would run messages
+N and N+1 at the same time, so the older list could commit last even without a
+retry, and would use twice as many of Bifrost's 32 open imports, which every
+client of that Bifrost shares.
 
 Limits worth knowing:
 

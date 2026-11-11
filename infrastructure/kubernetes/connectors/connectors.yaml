@@ -3607,7 +3607,7 @@ metadata:
     tier: connector
     role: producer
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: vrsky-bifrost-catalogue-producer
@@ -3618,18 +3618,6 @@ spec:
         tier: connector
         role: producer
     spec:
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - vrsky-bifrost-catalogue-producer
-              topologyKey: kubernetes.io/hostname
       containers:
       - name: bifrost-catalogue-producer
         image: vrskyprodacr.azurecr.io/vrsky/bifrost-catalogue-producer:latest
@@ -3697,14 +3685,3 @@ spec:
         configMap:
           name: postgres-ca
           optional: true
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: vrsky-bifrost-catalogue-producer
-  namespace: vrsky-platform
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: vrsky-bifrost-catalogue-producer

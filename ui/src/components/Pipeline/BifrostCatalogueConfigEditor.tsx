@@ -9,6 +9,15 @@ import { StyledInput, StyledSelect } from './StyledFields'
 
 const hintStyle: React.CSSProperties = { fontSize: '11px', color: '#6b7280', marginBottom: '12px' }
 
+// batchSize keeps only a positive whole number. Anything else (empty, NaN, a
+// fraction, a negative) leaves batch_size unset so the connector's default
+// applies: NaN would be saved as null and 1.5 cannot be read into the
+// connector's integer setting.
+function batchSize(v: string): number | undefined {
+  const n = Number(v.trim())
+  return v.trim() !== '' && Number.isInteger(n) && n > 0 ? n : undefined
+}
+
 export default function BifrostCatalogueConfigEditor({
   config,
   setConfig,
@@ -63,7 +72,7 @@ export default function BifrostCatalogueConfigEditor({
         type="number"
         placeholder="1000"
         value={c.batch_size ? String(c.batch_size) : ''}
-        onChange={(v) => update({ batch_size: v ? Number(v) : undefined })}
+        onChange={(v) => update({ batch_size: batchSize(v) })}
       />
       <div style={hintStyle}>
         One message is one import: begin, the items in batches, commit. A failure abandons the import, so a retry never

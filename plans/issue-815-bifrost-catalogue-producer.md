@@ -124,6 +124,27 @@ Sources: `docs/catalogue-doors.md`, `crates/catalogue-api/src/routes.rs`,
   proxy can cause them); 422 at items stays permanent.
 - Ordering: a delayed retry of an older message can commit after a newer one
   and win. Needs a version check in Bifrost; documented, not solved here.
+- Secrets: only `token_secret_id` is resolved, by id, with the tenant-scoped
+  `crypto.SecretReader` and `crypto.Decrypt`. The block never goes through
+  `crypto.ResolveSecretsInJSON`, which would also resolve other `*_secret_id`
+  keys and expand `{secret:<id>}` placeholders inside any string (review round
+  3 showed `"mode":"{secret:<id>}"` putting the decrypted token into the
+  Retriable error text; `tenant_id` would go out as a header and
+  `allow_shrink_reason` into Bifrost's audit). Other `*_secret_id` keys are
+  ignored. A `{secret:` anywhere else in the block is a node config error
+  (retried, then the DLQ) that names the setting's path and not its value.
+  Resolving directly rather than through a minimal `{"token_secret_id": id}`
+  document also keeps a token whose own text happens to hold a placeholder
+  from being expanded.
+- One replica, no PDB (orchestrator's call in review round 3).
+  `deploy-connectors-azure.sh` gives every port-less producer 2 replicas and a
+  PDB; `SINGLETON_PRODUCERS` exempts `bifrost-catalogue-producer`. One pod
+  dispatches serially, so a connection's imports commit in stream order
+  except for late retries; two pods could run N and N+1 at once and let the
+  older list win, and would double the use of Bifrost's shared cap of 32 open
+  imports. A rolling update can briefly run two pods; the docs say so.
+- The builder's batch size keeps only a positive whole number; anything else
+  leaves `batch_size` unset (default 1000) instead of saving NaN or a fraction.
 - `ALLOW_PRIVATE_UPSTREAMS` rules apply: a Bifrost on a private address (an
   in-cluster service) is refused like for every other connector. Bifrost has no
   TLS, so production needs a TLS front on a public or allowed address.
@@ -143,13 +164,16 @@ Sources: `docs/catalogue-doors.md`, `crates/catalogue-api/src/routes.rs`,
 package, `make lint-connector`, `make lint-tenant`, `go test ./pkg/managementapi`
 (guard tests, `-count=1`). Mutation runs: no abort, 422 retriable, token
 redaction off, permanent leaking in a mixed join, idempotency key dropped, full
-accepting a bare object; each fails a test.
+accepting a bare object; each fails a test. Round 3: the whole block run
+through `ResolveSecretsInJSON` again, the placeholder check switched off, the
+placeholder scan skipping nested objects, and the UI batch size back to
+`Number(v)`; each fails a test.
 
 ## Registration (done after #814 merged, in this PR)
 
 Every file the new type touched. Differences from the first draft: the
-connector refuses an inline `token` and resolves only `token_secret_id` (as
-nats-consumer does for its credentials); `token` was already in the UI's
+connector refuses an inline `token` and resolves only `token_secret_id`, by
+id, with nothing else in the block resolved (see Decisions); `token` was already in the UI's
 `SECRET_FIELDS`; there is no per-name Prometheus rule, only the scrape target;
 `postgres-tls.sh` expects 33 connectors.
 
@@ -161,7 +185,8 @@ nats-consumer does for its credentials); `token` was already in the UI's
    change.
 3. `infrastructure/kubernetes/connectors/connectors.yaml`: a Deployment and
    Service `vrsky-bifrost-catalogue-producer`, copied from
-   `vrsky-sitoo-producer` (role `producer`, image
+   `vrsky-sitoo-producer` but at 1 replica with no PDB (see Decisions;
+   `SINGLETON_PRODUCERS` in the script) (role `producer`, image
    `vrskyprodacr.azurecr.io/vrsky/bifrost-catalogue-producer:latest`, same
    env: NATS, DATABASE_URL, ENCRYPTION_KEY, MinIO claim-check settings, health
    port 8080; no extra port). Hard limit: `needs-human`.
