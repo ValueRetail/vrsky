@@ -2852,11 +2852,17 @@ operation ID is what holds after that.</p>
 <td>Retailhero intake URL</td>
 <td>the C3 batch route; it must be reachable from VRSky and not a private address (or go through the remote agent)</td>
 </tr>
+<tr>
+<td>Retailhero intake credential</td>
+<td>the bearer credential Retailhero issued for this tenant and the POS intake. It is stored as an encrypted secret and sent as <code>Authorization: Bearer</code> (<a href="../http/#bearer-token">HTTP bearer token</a>, #850)</td>
+</tr>
 </tbody>
 </table>
 <p>Before you start it: the NATS user needs the permissions listed on the
-<a href="../nats/#notes">NATS page</a>, and the tenant must have Retailhero's intake
-credential, which this template cannot send yet.</p>
+<a href="../nats/#notes">NATS page</a>. The connection does not start without the intake
+credential. A wrong or expired credential is answered <code>401</code>, which is retried
+and then dead-lettered, so nothing is lost; replay from the DLQ once the
+credential is fixed.</p>
 <h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
 <p>The template is built against documents, not running systems. These are not
 guessed in the template; each one is a place where it will change.</p>

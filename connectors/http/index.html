@@ -1514,6 +1514,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#bearer-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bearer token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#failed-deliveries" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2669,6 +2680,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#bearer-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bearer token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#failed-deliveries" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2840,14 +2862,16 @@ doesn't match this connection's CA, or has expired).</p>
 <p>A CA that two tenants both use (a public CA, say) lets each reach the other's
 mTLS webhooks; use a CA of your own, or add HMAC signing as well.</p>
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
-<p>A producer node sends each message as an outbound HTTP request. It supports OAuth-authenticated output and client-certificate mutual TLS.</p>
+<p>A producer node sends each message as an outbound HTTP request. It supports a stored bearer token, OAuth-authenticated output and client-certificate mutual TLS.</p>
 <p>Config reference:</p>
 <ul>
 <li><code>type</code> — <code>"http"</code>.</li>
 <li><code>http.url</code> — target URL.</li>
 <li><code>http.method</code> — HTTP method (e.g. <code>POST</code>).</li>
 <li><code>http.headers</code> — object of request headers.</li>
-<li><code>http.auth_type</code> — <code>"none"</code> or <code>"oauth"</code>.</li>
+<li><code>http.auth_type</code> — <code>"none"</code>, <code>"bearer"</code> or <code>"oauth"</code>.</li>
+<li><code>http.token_secret_id</code> — the secret holding a static bearer token (#850),
+  required when <code>auth_type</code> is <code>"bearer"</code>. See <a href="#bearer-token">Bearer token</a>.</li>
 <li><code>http.oauth_grant_id</code> — OAuth grant UUID (#97), required when <code>auth_type</code> is <code>"oauth"</code>.</li>
 <li><code>http.tls</code> — optional client-certificate mTLS:<ul>
 <li><code>cert_secret_id</code> — client certificate.</li>
@@ -2872,6 +2896,51 @@ mTLS webhooks; use a CA of your own, or add HMAC signing as well.</p>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h3 id="bearer-token">Bearer token<a class="headerlink" href="#bearer-token" title="Permanent link">&para;</a></h3>
+<p>For a target that takes a fixed <code>Authorization: Bearer &lt;token&gt;</code>, such as a
+tenant-workload credential, set <code>auth_type</code> to <code>"bearer"</code> and type the token
+into the editor's <strong>Bearer token</strong> field. On deploy it is stored as an
+encrypted tenant secret and the node keeps only <code>http.token_secret_id</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"http"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://retailhero.example/api/v1/pos-reconciliation/batches"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"headers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"Content-Type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"application/json"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"auth_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bearer"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"token_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"3f1c2b9e-0d5a-4c8e-9b7a-3e2f1d4c5b6a"</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>The token is read for the message's tenant only, and sent as
+  <code>Authorization: Bearer &lt;token&gt;</code> on every request. It replaces an
+  <code>Authorization</code> header set in <code>http.headers</code>.</li>
+<li>A token written into the node (<code>http.token</code>) is refused: when the
+  connection starts, and again by the producer, which then sends nothing to
+  that node. So is <code>auth_type</code> <code>"bearer"</code> without a <code>token_secret_id</code>. The
+  error names the setting, never the value. Such a message is retried and
+  then dead-lettered, so it can be replayed after the fix.</li>
+<li>The token is never written to the log, the activity feed or the DLQ copy's
+  <code>X-Vrsky-Last-Error</code>. A target that echoes the request headers back in its
+  answer gets the token masked (<code>*</code>) in the activity feed's response
+  preview.</li>
+<li>A <code>401</code> or <code>403</code> is retried and then dead-lettered, like any credential
+  error (below).</li>
+<li>The worker keeps a connection's config, token included, for 5 minutes. After
+  a new token is deployed, the old one can be sent for up to that long;
+  messages refused meanwhile wait in the DLQ.</li>
+<li>The response preview masks the token only where the target echoes it as
+  sent; an escaped or encoded copy is not recognised. Leading and trailing
+  whitespace is trimmed from the stored token.</li>
+</ul>
+<p>A <code>{secret:&lt;uuid&gt;}</code> placeholder in a header value
+(<code>"Authorization": "Bearer {secret:&lt;uuid&gt;}"</code>) is also expanded, because the
+producer resolves its whole node config (see <code>docs/SECURITY.md</code>). Use
+<code>auth_type</code> <code>"bearer"</code> instead. The editor has no field for a placeholder, a
+plaintext token can't be told apart from a placeholder typed by hand, and an
+expanded value can come back in an error text (#853). The response preview
+masks only a token sent through <code>auth_type</code> <code>"bearer"</code> or OAuth.</p>
 <h3 id="failed-deliveries">Failed deliveries<a class="headerlink" href="#failed-deliveries" title="Permanent link">&para;</a></h3>
 <p>A target that never answers is cut off after 30 seconds, whether it never
 accepts the connection or accepts it and goes quiet. That counts as a network
@@ -2985,7 +3054,7 @@ address on the compose network.</p>
 working.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Secrets.</strong> Credential and key material (signing secret, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with <code>&lt;field&gt;_secret_id</code> references. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
+<li><strong>Secrets.</strong> Credential and key material (signing secret, bearer token, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with <code>&lt;field&gt;_secret_id</code> references. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
 <li><strong>mTLS host.</strong> Connections using <code>tls.client_ca_secret_id</code> take requests on <code>mtls.vrsky.valueretail.no</code> on the hosted service and on the worker's TLS port (<code>9101</code>) locally, not on the ordinary webhook URL. See <a href="#mutual-tls-client-certificates">Mutual TLS</a>. Outbound mTLS (the producer's <code>http.tls</code>) works everywhere.</li>
 <li><strong>Example flow.</strong> A common pattern is webhook (consumer) to HTTP forward (producer): receive a signed webhook, then forward the payload to a downstream service over OAuth or mTLS.</li>
 </ul>
