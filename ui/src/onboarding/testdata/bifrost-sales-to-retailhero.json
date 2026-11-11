@@ -1,0 +1,47 @@
+{
+  "drop_unmapped": true,
+  "mappings": [
+    {
+      "type": "static",
+      "source": "",
+      "target": "profileVersion",
+      "value": "BIFROST-BASKET-v1"
+    },
+    {
+      "type": "static",
+      "source": "",
+      "target": "schemaVersion",
+      "value": "1"
+    },
+    {
+      "type": "copy",
+      "source": "source.instance_id",
+      "target": "sourceInstanceId"
+    },
+    {
+      "type": "static",
+      "source": "",
+      "target": "journalId",
+      "value": ""
+    },
+    {
+      "type": "each",
+      "source": ".",
+      "target": "entries",
+      "drop_unmapped": true,
+      "mappings": [
+        {
+          "type": "template",
+          "source": "",
+          "target": "operationId",
+          "expression": "bifrost-sale-{event_id}-r1"
+        },
+        {
+          "type": "copy",
+          "source": ".",
+          "target": "event"
+        }
+      ]
+    }
+  ]
+}

@@ -1540,6 +1540,19 @@ Last updated 2026-10-28.
     targets like `DLQGrowing`) with a `promtool test rules` case. Found
     in #811. Filed as #833.
 
+208. **A collecting step for sources that emit one message per page.** The
+    Bifrost catalogue producer imports one message at a time (#815), so a
+    `full` import needs the whole list in one message. A paged source (Business
+    Central, Retailhero) has none. An aggregator node that holds the pages of
+    one run and emits a single message when the run ends would feed it; it
+    needs a run boundary the envelope does not carry today. Found in #815.
+    Filed as #841.
+
+209. **`DeliverStream` for the Bifrost catalogue producer.** It reads the whole
+    message into memory (the claim-check cap is 128 MiB). A 200,000-article
+    list is about 60 MB; streaming the array item by item would hold only one
+    batch. Found in #815. Filed as #842.
+
 210. **The connection test cannot reach most workers in AKS.**
     `buildTestTarget` (`src/pkg/managementapi/connection_test_endpoint.go`)
     defaults to compose names such as `http://rabbitmq-consumer:9230`, and
@@ -1576,6 +1589,57 @@ Last updated 2026-10-28.
     directly. A shared token like `FILE_PRODUCER_AUTH_TOKEN`, or a
     NetworkPolicy that admits only the management API. Found in #814.
     Filed as #753.
+
+215. **The HTTP producer cannot send a stored bearer token.** It sets
+    `Authorization` only from an OAuth grant; a header typed into
+    `http.headers` is stored in plain text, and Retailhero's intake takes a
+    tenant-workload bearer credential (ValueRetail/Retailhero#2675). The
+    Bifrost sales template ships without credentials until this exists:
+    `http.bearer_secret_id` (minted from a `bearer` field in `SECRET_FIELDS`)
+    or a static-token grant. Touches secrets handling, so it needs a human
+    review. Found in #817. Filed as #850.
+
+216. **The Bifrost sales template sends no journal position.** Retailhero's
+    BIFROST-BASKET-v1 batch needs one per entry and the Basket events carry
+    none. The NATS source's `nats_stream_seq` (envelope metadata) is the
+    natural value; the converter reads only the payload. Either a mapping
+    that can read envelope metadata, or Retailhero's intake assigns it.
+    Wait for ValueRetail/Retailhero#2678 and Bifrost#248, then settle it.
+    Found in #817. Filed as #851.
+
+217. **Template for returns.** Retailhero's profile maps `return.completed`
+    as a refund; Bifrost publishes no such event yet (the till queues it,
+    `plans/returns-to-bc.md` in Bifrost). Add the event type to the
+    template's filter when Bifrost#248 publishes it. Found in #817. Filed as #852.
+
+218. **Agree the Retailhero message for the Bifrost template.** The template
+    (#816) reads one profile import batch per message (`rows[].importItem`).
+    How Retailhero wraps the profile output in an `rh.evt.v1` event and on
+    which subject is open (Retailhero#2680). Settle it there, then correct the
+    converter paths and the filter help if they differ. Found in #816. Filed as #855.
+
+219. **Full-list variant of the Retailhero template.** The first load and
+    clean-ups of a store need `mode: full` with the whole list in one message
+    (#841) and a named person for `allow_shrink`. Add the variant once #841
+    lands. Found in #816. Filed as #856.
+
+220. **A multi-line secret field in the onboarding wizard.** The wizard's secret
+    field is one line, so a NATS `.creds` file can't be pasted there. The
+    Retailhero template asks for user and password instead; a textarea field
+    kind would let templates use creds. Found in #816. Filed as #857.
+
+221. **HTTP producer config cache by tenant.** The http producer caches a
+    connection's resolved config (stored bearer and OAuth tokens included) by
+    connection ID only, and reads `connections` by id without `tenant_id`.
+    Secrets are resolved for the envelope's tenant, but a cached config is
+    served to any envelope naming that connection. Key the cache by tenant
+    and connection, and add `AND tenant_id = $2`. Found in the review of #850.
+
+222. **Typed credentials in the canvas's localStorage.** The pipeline
+    builder saves the canvas, node configs included, to localStorage, so a
+    secret typed into a SecretInput but not deployed yet sits there in plain
+    text. Keep secret fields out of the saved canvas. Found in the review of
+    #850.
 
 ## Human
 

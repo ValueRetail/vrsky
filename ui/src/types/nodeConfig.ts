@@ -4,7 +4,7 @@
  * these name the keys the UI touches so the code does not cast to `any`.
  */
 export type FileCfg = { path?: string }
-export type HttpCfg = { url?: string; method?: string; auth_type?: string; oauth_grant_id?: string }
+export type HttpCfg = { url?: string; method?: string; auth_type?: string; oauth_grant_id?: string; token?: string; token_secret_id?: string }
 export type DbCfg = { host?: string; port?: number | string; database?: string; table?: string; query?: string }
 
 /**
@@ -37,7 +37,7 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
   // http-producer (src/cmd/http-producer)
   'producer/http': {
     block: 'http',
-    keys: ['url', 'method', 'headers', 'auth_type', 'oauth_grant_id', 'tls'],
+    keys: ['url', 'method', 'headers', 'auth_type', 'oauth_grant_id', 'token', 'tls'],
     required: ['url'],
     numeric: [],
   },
@@ -77,6 +77,25 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     required: ['account_id', 'site_id', 'api_id', 'api_password'],
     numeric: ['account_id', 'site_id'],
   },
+  // nats-consumer (NATSConfig in src/cmd/nats-consumer/config.go). password is
+  // replaced by password_secret_id and creds by creds_secret_id at deploy.
+  'consumer/nats': {
+    block: 'nats',
+    keys: [
+      'servers', 'auth_type', 'username', 'password', 'creds', 'ca_cert', 'stream', 'durable',
+      'filter_subject', 'batch_size', 'deliver_policy', 'opt_start_time',
+    ],
+    required: ['servers', 'stream', 'durable'],
+    numeric: ['batch_size'],
+  },
+  // bifrost-catalogue-producer (CatalogueConfig in src/cmd/bifrost-catalogue-producer/service.go).
+  // token is replaced by token_secret_id at deploy.
+  'producer/bifrost_catalogue': {
+    block: 'bifrost_catalogue',
+    keys: ['base_url', 'token', 'tenant_id', 'mode', 'batch_size', 'allow_shrink_reason'],
+    required: ['base_url', 'token'],
+    numeric: ['batch_size'],
+  },
   // business-central-consumer (BCConfig in src/cmd/business-central-consumer/service.go)
   'consumer/business_central': {
     block: 'business_central',
@@ -96,6 +115,17 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
       'dedupe_fields', 'api_base_url', 'token_url', 'scope',
     ],
     required: ['aad_tenant_id', 'company_id', 'client_id', 'client_secret'],
+    numeric: [],
+  },
+  // data-filter (FilterNodeConfig in src/cmd/data-filter/main.go)
+  filter: {
+    block: '',
+    keys: [
+      'rules', 'logic', 'extract_fields', 'flatten_path', 'flatten_fields', 'flatten_include',
+      'input_format', 'input_csv_delimiter', 'input_csv_no_header', 'input_csv_trim_space',
+      'input_xml_record_path', 'input_xml_attr_prefix', 'input_xml_text_key',
+    ],
+    required: [],
     numeric: [],
   },
   // data-converter (ConverterNodeConfig in src/cmd/data-converter/main.go)

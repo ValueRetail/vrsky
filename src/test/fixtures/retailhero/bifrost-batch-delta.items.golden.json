@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "alcohol": false,
+      "article_no": "B-200",
+      "category": "Mat",
+      "effective_from": "2026-12-15T23:00:00Z",
+      "gtin": "7000000000039",
+      "name": "Vare B",
+      "price_incl_vat": "25.00",
+      "unit": "pcs",
+      "vat_code": "F"
+    }
+  ]
+}

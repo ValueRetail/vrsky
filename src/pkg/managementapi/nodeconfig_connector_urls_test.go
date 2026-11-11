@@ -299,3 +299,33 @@ func TestNATSConsumerStartChecks(t *testing.T) {
 		t.Error("a nats destination was accepted")
 	}
 }
+
+// The Bifrost catalogue destination (#815): the required fields and the same
+// URL rule the connector applies (connectorurl.BifrostCatalogue).
+func TestBifrostCatalogueStartChecks(t *testing.T) {
+	ok := func(base any) map[string]any {
+		return map[string]any{"base_url": base, "token_secret_id": "00000000-0000-0000-0000-000000000001"}
+	}
+	prod := []string{"producer"}
+	runConnectorURLCases(t, "bifrost_catalogue", []connectorURLCase{
+		{name: "public https", block: ok("https://catalogue.example.com"), sides: prod},
+		{name: "http", block: ok("http://catalogue.example.com"), sides: prod, wantErr: "must use https"},
+		{name: "private", block: ok("https://10.0.0.5"), sides: prod, wantErr: "private"},
+		{name: "metadata", block: ok("https://169.254.169.254"), sides: prod, wantErr: "private"},
+		{name: "userinfo", block: ok("https://u:" + urlSecret + "@catalogue.example.com"), sides: prod, wantErr: "user name"},
+		{name: "query", block: ok("https://catalogue.example.com/?k=" + urlSecret), sides: prod, wantErr: "query"},
+		{name: "no base_url", block: map[string]any{"token_secret_id": "x"}, sides: prod, wantErr: "bifrost_catalogue.base_url is required"},
+		{name: "token only inline", block: map[string]any{"base_url": "https://catalogue.example.com", "token": urlSecret}, sides: prod, wantErr: "bifrost_catalogue.token_secret_id is required"},
+	})
+	if err := startOn("producer", `{"type":"bifrost_catalogue"}`); err == nil || !strings.Contains(err.Error(), "bifrost-catalogue-producer") {
+		t.Errorf("a missing block: %v, want an error naming bifrost-catalogue-producer", err)
+	}
+	// There is no Bifrost catalogue source.
+	if err := startOn("consumer", nodeCfg(t, "bifrost_catalogue", ok("https://catalogue.example.com"))); err == nil {
+		t.Error("a bifrost_catalogue source was accepted")
+	}
+	t.Setenv("ALLOW_PRIVATE_UPSTREAMS", "true")
+	if err := startOn("producer", nodeCfg(t, "bifrost_catalogue", ok("http://127.0.0.1:8091"))); err != nil {
+		t.Errorf("the operator's dev flag should allow a local Bifrost: %v", err)
+	}
+}

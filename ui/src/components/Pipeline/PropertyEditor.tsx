@@ -18,6 +18,7 @@ import SecretInput from './SecretInput'
 import SFTPConsumerConfig from './SFTPConsumerConfig'
 import CloudStorageConfigEditor from './CloudStorageConfigEditor'
 import NatsConfigEditor from './NatsConfigEditor'
+import BifrostCatalogueConfigEditor from './BifrostCatalogueConfigEditor'
 import WebhookSignatureConfig from './WebhookSignatureConfig'
 import OAuthGrantSelector from './OAuthGrantSelector'
 import { useAuthStore } from '../../store/authStore'
@@ -3435,6 +3436,7 @@ export default function PropertyEditor({
                 { value: 'visma', label: 'Visma.net (ERP)' },
                 { value: 'brightpearl', label: 'Brightpearl (OMS)' },
                 { value: 'sap_s4hana', label: 'SAP S/4HANA (ERP)' },
+                { value: 'bifrost_catalogue', label: 'Bifrost catalogue (POS)' },
               ]}
             />
 
@@ -3499,13 +3501,45 @@ export default function PropertyEditor({
                   label="Authentication"
                   value={((config.http as HttpCfg)?.auth_type as string) || 'none'}
                   onChange={(value) =>
-                    setConfig({ ...config, http: { ...(config.http as HttpCfg), auth_type: value } })
+                    // Leaving bearer drops its token: a stale token_secret_id
+                    // is still resolved on every read, and a deleted secret
+                    // would then hold the node's messages.
+                    setConfig({
+                      ...config,
+                      http: {
+                        ...(config.http as HttpCfg),
+                        auth_type: value,
+                        ...(value === 'bearer' ? {} : { token: undefined, token_secret_id: undefined }),
+                      },
+                    })
                   }
                   options={[
                     { value: 'none', label: 'None' },
+                    { value: 'bearer', label: 'Bearer token' },
                     { value: 'oauth', label: 'OAuth 2.0' },
                   ]}
                 />
+                {/* A static bearer token (#850). It is minted into the
+                    tenant's secrets on deploy (http.token_secret_id) and sent
+                    as Authorization: Bearer; the producer refuses one kept in
+                    the clear. */}
+                {(config.http as HttpCfg)?.auth_type === 'bearer' && (
+                  <div style={{ marginTop: '4px' }}>
+                    <SecretInput
+                      label="Bearer token"
+                      placeholder="The token the target expects"
+                      field="token"
+                      config={(config.http as Record<string, unknown>) || {}}
+                      defaultSecretName="http-bearer-token"
+                      onChange={(patch) =>
+                        setConfig({ ...config, http: { ...(config.http as HttpCfg), ...patch } })
+                      }
+                    />
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                      Sent as Authorization: Bearer on every request. Stored encrypted; it never shows in logs or errors.
+                    </p>
+                  </div>
+                )}
                 {(config.http as HttpCfg)?.auth_type === 'oauth' && (
                   <div style={{ marginTop: '4px' }}>
                     <OAuthGrantSelector
@@ -3586,6 +3620,9 @@ export default function PropertyEditor({
 
             {config.type === 'cloud_storage' && (
               <CloudStorageConfigEditor config={config} setConfig={setConfig} role="producer" />
+            )}
+            {config.type === 'bifrost_catalogue' && (
+              <BifrostCatalogueConfigEditor config={config} setConfig={setConfig} />
             )}
             {config.type === 'sitoo' && (
               <SitooConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />

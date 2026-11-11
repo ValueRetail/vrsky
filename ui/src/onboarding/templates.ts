@@ -22,7 +22,7 @@
 
 export type TemplateNode = {
   id: string
-  type: 'consumer' | 'converter' | 'producer'
+  type: 'consumer' | 'filter' | 'converter' | 'producer'
   // Pre-filled config. Sources and destinations carry a connector type and its
   // settings block, e.g. { type: 'http', http: { url, method } }; a converter
   // carries its settings flat, e.g. { input_format: 'csv' }. Every key must be
@@ -47,6 +47,9 @@ export type TemplateField = {
   secret?: boolean
   /** Store the value as a number (ports, intervals): the connector reads an int. */
   numeric?: boolean
+  /** Store the value as a one-element list: the connector reads an array (the
+   *  NATS source's `servers`). The field shows and edits that one entry. */
+  asList?: boolean
   placeholder?: string
 }
 
@@ -457,6 +460,242 @@ export const TEMPLATES: PipelineTemplate[] = [
         label: 'Sitoo warehouse stock path',
         help: 'warehouses/<warehouse id>/warehouseitems, with the id of the Sitoo warehouse whose stock is set.',
         placeholder: 'warehouses/1/warehouseitems',
+      },
+    ],
+  },
+  // --- Retail: Bifrost Basket sales → Retailhero POS reconciliation (#817) ---
+  {
+    id: 'bifrost-sales-to-retailhero',
+    name: 'POS sales → Retailhero (Bifrost Basket → Retailhero)',
+    summary:
+      'Beta: against a Proposed Retailhero contract. Sends each Bifrost till sale from the tenant JetStream to Retailhero POS reconciliation, one batch per sale, with an operation ID derived from the Basket event.',
+    icon: '🧾',
+    sourceLabel: 'Bifrost Basket (NATS JetStream)',
+    destLabel: 'Retailhero (HTTP intake)',
+    nodes: [
+      {
+        id: 'src',
+        type: 'consumer',
+        // deliver_policy all: the first start reads what the stream still
+        // holds. Safe here because Retailhero keys every sale on its
+        // operation ID; a repeat is answered with the original result.
+        config: {
+          type: 'nats',
+          nats: { servers: [], auth_type: 'user_password', username: '', password: '', stream: '', durable: '', deliver_policy: 'all' },
+        },
+      },
+      {
+        id: 'flt',
+        type: 'filter',
+        // The Retailhero profile refuses a whole batch on an event type it
+        // does not map (basket.created, basket.priced, ...), and a
+        // sale-recorded from a channel that is not a POS. Only a till sale
+        // is forwarded: basket.completed and basket.cancelled map to no fact
+        // (they come back as "skipped"), so sending them adds nothing.
+        config: {
+          logic: 'and',
+          rules: [
+            { field: 'event_type', operator: 'equals', value: 'basket.sale-recorded' },
+            { field: 'source.kind', operator: 'equals', value: 'pos' },
+            // The operation ID is built from event_id; without one every such
+            // message would share the literal ID and be answered with the first.
+            { field: 'event_id', operator: 'is_not_empty', value: '' },
+          ],
+        },
+      },
+      {
+        id: 'conv',
+        type: 'converter',
+        // Wraps the Basket event, unchanged, as the one entry of a
+        // BIFROST-BASKET-v1 batch. The lines are not mapped here: Retailhero's
+        // profile derives net, tax and gross exactly from unit_price, vat and
+        // quantity, which a converter cannot do without rounding. The wizard
+        // fills mappings.3 (journalId). Field table and open questions:
+        // docs/connectors/bifrost-sales-to-retailhero.md.
+        config: {
+          drop_unmapped: true,
+          mappings: [
+            { type: 'static', source: '', target: 'profileVersion', value: 'BIFROST-BASKET-v1' },
+            { type: 'static', source: '', target: 'schemaVersion', value: '1' },
+            { type: 'copy', source: 'source.instance_id', target: 'sourceInstanceId' },
+            { type: 'static', source: '', target: 'journalId', value: '' },
+            {
+              type: 'each',
+              source: '.',
+              target: 'entries',
+              drop_unmapped: true,
+              mappings: [
+                { type: 'template', source: '', target: 'operationId', expression: 'bifrost-sale-{event_id}-r1' },
+                { type: 'copy', source: '.', target: 'event' },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'dst',
+        type: 'producer',
+        // Retailhero authenticates VRSky as a tenant workload with a bearer
+        // credential (Retailhero ADR-0063, decision 3). The wizard's token is
+        // stored as a secret on deploy (http.token_secret_id, #850).
+        config: {
+          type: 'http',
+          http: { url: '', method: 'POST', headers: { 'Content-Type': 'application/json' }, auth_type: 'bearer', token: '' },
+        },
+      },
+    ],
+    edges: [
+      { source: 'src', target: 'flt' },
+      { source: 'flt', target: 'conv' },
+      { source: 'conv', target: 'dst' },
+    ],
+    fields: [
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'servers', asList: true,
+        label: 'Bifrost NATS server',
+        help: "The tenant JetStream server Bifrost publishes Basket events to, tls://host:4222. It must be reachable from VRSky and not a private address.",
+        placeholder: 'tls://nats.bifrost.example:4222',
+      },
+      { nodeId: 'src', objectPath: 'nats', key: 'username', label: 'NATS user', help: 'The user VRSky reads the stream as. It needs the permissions listed on the NATS connector page.', placeholder: 'vrsky-reader' },
+      { nodeId: 'src', objectPath: 'nats', key: 'password', label: 'NATS password', help: 'Stored encrypted, never saved in plain text.', secret: true, placeholder: 'password' },
+      { nodeId: 'src', objectPath: 'nats', key: 'stream', label: 'Stream', help: 'The JetStream stream that holds the Basket events.', placeholder: 'VRSKY_DATA' },
+      { nodeId: 'src', objectPath: 'nats', key: 'durable', label: 'Durable name', help: 'A name for the consumer VRSky creates on the stream. One per pipeline.', placeholder: 'vrsky-retailhero-sales' },
+      {
+        nodeId: 'conv', objectPath: 'mappings.3', key: 'value',
+        label: 'Retailhero journal ID',
+        help: 'The journal Retailhero registered for this till source. Every batch names it. Ask the Retailhero operator; VRSky does not make one up.',
+        placeholder: 'J-BIFROST-01',
+      },
+      {
+        nodeId: 'dst', objectPath: 'http', key: 'url',
+        label: 'Retailhero intake URL',
+        help: 'The POS reconciliation batch route of Retailhero, reachable from VRSky over the internet (the HTTP producer will not call a private address).',
+        placeholder: 'https://retailhero.example/api/v1/pos-reconciliation/batches',
+      },
+      {
+        nodeId: 'dst', objectPath: 'http', key: 'token',
+        label: 'Retailhero intake credential',
+        help: 'The bearer credential Retailhero issued for this tenant and the POS intake. Sent as Authorization: Bearer. Stored encrypted, never saved in plain text.',
+        secret: true, placeholder: 'bearer token',
+      },
+    ],
+  },
+  // --- Retail: Retailhero (master) → Bifrost tills (#816) ------------------
+  {
+    id: 'retailhero-to-bifrost',
+    name: 'Articles and prices → tills (Retailhero → Bifrost)',
+    summary:
+      'Beta: cannot run end to end yet (needs Bifrost price_incl_vat, and Retailhero does not publish the Bifrost batches yet). Reads Retailhero price and article batches from its NATS partner account and sends them to the Bifrost catalogue-api as a delta. One master per store: switch the Business Central price path off for these stores.',
+    icon: '🏷️',
+    sourceLabel: 'Retailhero (NATS partner account)',
+    destLabel: 'Bifrost (tills)',
+    nodes: [
+      {
+        id: 'src',
+        type: 'consumer',
+        // deliver_policy "new": the default "all" would push the whole stream
+        // through on the first start. The first catalogue load is a full
+        // package Retailhero publishes on purpose.
+        config: {
+          type: 'nats',
+          nats: {
+            servers: [''],
+            auth_type: 'user_password',
+            username: '',
+            stream: '',
+            durable: '',
+            filter_subject: '',
+            deliver_policy: 'new',
+          },
+        },
+      },
+      {
+        id: 'conv',
+        type: 'converter',
+        // One message in is one Bifrost import batch from Retailhero's profile
+        // (rows[].importItem); out comes {"items": [...]} with each importItem
+        // renamed field for field, so prices stay the strings Retailhero
+        // wrote (no to_number: that goes through a float). Mapping table:
+        // docs/connectors/retailhero-to-bifrost.md. Tested against Retailhero's
+        // fixtures in src/cmd/data-converter/retailhero_template_test.go.
+        config: {
+          drop_unmapped: true,
+          mappings: [
+            {
+              type: 'each',
+              source: 'rows',
+              target: 'items',
+              drop_unmapped: true,
+              mappings: [
+                { type: 'rename', source: 'importItem.article_no', target: 'article_no' },
+                { type: 'rename', source: 'importItem.gtin', target: 'gtin' },
+                { type: 'rename', source: 'importItem.name', target: 'name' },
+                { type: 'rename', source: 'importItem.price_incl_vat', target: 'price_incl_vat' },
+                { type: 'rename', source: 'importItem.vat_code', target: 'vat_code' },
+                { type: 'rename', source: 'importItem.unit', target: 'unit' },
+                { type: 'rename', source: 'importItem.category', target: 'category' },
+                { type: 'rename', source: 'importItem.min_age', target: 'min_age' },
+                { type: 'rename', source: 'importItem.alcohol', target: 'alcohol' },
+                { type: 'rename', source: 'importItem.effective_from', target: 'effective_from' },
+              ],
+            },
+            // The event's own time becomes Bifrost's ordering sequence: the
+            // producer sends it on begin in milliseconds, and Bifrost refuses
+            // an older batch that arrives after a newer one (#858).
+            { type: 'rename', source: 'recordedAt', target: 'sequence' },
+          ],
+        },
+      },
+      {
+        id: 'dst',
+        type: 'producer',
+        // delta: upsert. "full" needs the whole catalogue in one message
+        // (#841), and a Retailhero batch is not that.
+        config: { type: 'bifrost_catalogue', bifrost_catalogue: { base_url: '', mode: 'delta' } },
+      },
+    ],
+    edges: [
+      { source: 'src', target: 'conv' },
+      { source: 'conv', target: 'dst' },
+    ],
+    fields: [
+      {
+        nodeId: 'src', objectPath: 'nats.servers', key: '0', label: 'Retailhero NATS server',
+        help: 'The partner-account server Retailhero gives you, as tls://host:4222.',
+        placeholder: 'tls://nats.retailhero.example:4222',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'username', label: 'NATS user',
+        help: 'The user of your per-tenant partner account.',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'password', label: 'NATS password',
+        help: 'Stored encrypted. An account that signs in with a .creds file is set up in the pipeline builder instead, which has a box for the whole file.',
+        secret: true, placeholder: 'password',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'stream', label: 'JetStream stream',
+        help: 'The Retailhero stream that holds the batch event, RH_EVT_V1_<owner>. Retailhero tells you the name.', placeholder: 'RH_EVT_V1_…',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'durable', label: 'Durable consumer name',
+        help: "Retailhero's operator creates it, named vrsky_<event type with dots as hyphens>_<tenant>. Keep it unique per pipeline: two pipelines on one durable split the messages between them.",
+        placeholder: 'vrsky_<event-type>_<tenant>',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'filter_subject', label: 'Subject filter',
+        help: "The one subject of the batch event, rh.evt.v1.<tenant>.<owner>.<event type>. Each Retailhero durable is filtered to exactly one subject. The product and price events Retailhero publishes today are not batches and can't be used here.",
+        placeholder: 'rh.evt.v1.<tenant>.<owner>.<event type>',
+      },
+      {
+        nodeId: 'dst', objectPath: 'bifrost_catalogue', key: 'base_url', label: 'Bifrost catalogue-api address',
+        help: 'The https origin of the catalogue-api (Bifrost itself has no TLS, so it sits behind a proxy).',
+        placeholder: 'https://catalogue.example.com',
+      },
+      {
+        nodeId: 'dst', objectPath: 'bifrost_catalogue', key: 'token', label: 'Bifrost API key',
+        help: 'Stored encrypted. The tenant key needs the permission catalogue.import.',
+        secret: true, placeholder: 'API key',
       },
     ],
   },

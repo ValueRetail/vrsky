@@ -24,7 +24,7 @@
 
 ## Connectors (config reference)
 - [Connectors overview](connectors/index.md): every connector + its `config.type`.
-- [HTTP & webhooks](connectors/http.md), [REST API polling](connectors/api.md), [Databases](connectors/database.md), [Files](connectors/file.md), [SFTP](connectors/sftp.md), [Cloud storage](connectors/cloud-storage.md), [Kafka](connectors/kafka.md), [RabbitMQ](connectors/rabbitmq.md), [NATS JetStream](connectors/nats.md), [Salesforce](connectors/salesforce.md), [Tenant-to-tenant](connectors/tenant.md), [Filters & converters](connectors/filters-converters.md).
+- [HTTP & webhooks](connectors/http.md), [REST API polling](connectors/api.md), [Databases](connectors/database.md), [Files](connectors/file.md), [SFTP](connectors/sftp.md), [Cloud storage](connectors/cloud-storage.md), [Kafka](connectors/kafka.md), [RabbitMQ](connectors/rabbitmq.md), [NATS JetStream](connectors/nats.md), [Salesforce](connectors/salesforce.md), [Bifrost catalogue](connectors/bifrost-catalogue.md), [Tenant-to-tenant](connectors/tenant.md), [Filters & converters](connectors/filters-converters.md).
 
 ## Reference & operations
 - [API reference](reference/api.md): OpenAPI at `/openapi.json`, Swagger UI at `/docs`.

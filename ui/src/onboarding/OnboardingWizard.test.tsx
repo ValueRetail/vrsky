@@ -168,6 +168,26 @@ describe('deploying', () => {
     expect(nodes.find((n) => n.id === 'dst')!.config.database!.port).toBe(5433)
   })
 
+  it('sends a list field as a one-entry list and a filter node with its type', async () => {
+    // The NATS source reads servers as an array: a plain string fails to
+    // unmarshal and the connection stops with an error at start.
+    const { container } = render(<OnboardingWizard />)
+    pick('Bifrost Basket')
+    expect(deployButton()).toBeDisabled()
+    fillEveryField(container)
+    await waitFor(() => expect(deployButton()).toBeEnabled())
+    fireEvent.click(deployButton())
+    await waitFor(() => expect(post).toHaveBeenCalled())
+
+    const nodes = post.mock.calls[0][1].nodes as { id: string; type: string; config: { nats: { servers: unknown[]; password?: unknown; password_secret_id?: unknown }; mappings: { value: unknown }[] } }[]
+    expect(nodes.map((n) => n.type)).toEqual(['consumer', 'filter', 'converter', 'producer'])
+    expect(nodes[0].config.nats.servers).toHaveLength(1)
+    expect(typeof nodes[0].config.nats.servers[0]).toBe('string')
+    expect(nodes[0].config.nats.password).toBeUndefined()
+    expect(nodes[0].config.nats.password_secret_id).toBe('sec-123')
+    expect(nodes[2].config.mappings[3].value).not.toBe('')
+  })
+
   it('keeps deploy disabled while a numeric field holds text', async () => {
     const { container } = render(<OnboardingWizard />)
     pick('CSV → Database')

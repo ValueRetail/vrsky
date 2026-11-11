@@ -68,6 +68,7 @@ scrape_configs:
           - 'file-producer:8080'
           - 'db-producer:8080'
           - 'salesforce-producer:8080'
+          - 'bifrost-catalogue-producer:8080'
           - 'sftp-producer:8080'
           - 'kafka-producer:8080'
           - 'rabbitmq-producer:8080'
