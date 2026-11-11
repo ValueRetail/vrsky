@@ -34,8 +34,11 @@ template.
 1. **Source, `nats`.** A durable pull consumer on the partner account's stream,
    filtered to the subjects that carry the Bifrost batches. `deliver_policy`
    is `new`, so a start does not push the whole stream into the pipeline (see
-   [NATS JetStream](nats.md)). The first load of a store is a full package that
-   Retailhero publishes on purpose.
+   [NATS JetStream](nats.md)). A durable that is new or renamed therefore
+   misses the catalogue as it stands and only gets the batches published
+   after it exists. In `delta` mode a full-kind batch is applied as an
+   upsert and removes nothing, so it does not replace the catalogue either.
+   Loading a store from scratch is the full-list variant (#856).
 2. **Converter.** Takes the `rows` of one batch and returns
    `{"items": [...]}`.
 3. **Destination, `bifrost_catalogue`, mode `delta`.** One batch is one staged
@@ -146,7 +149,7 @@ secret field is one line).
 ## What blocks it
 
 - **Bifrost must accept `price_incl_vat`** (ValueRetail/Bifrost#249, PR #252).
-  Its import takes `price_ex_vat` only today and refuses an item without it.
+  Its import takes `price_ex_vat` only today and refuses the whole batch when `price_ex_vat` is missing (the field is required).
   Whether it also keeps `vat_code` or switches to `vat_rate` next to the
   inclusive price is for that change to settle; if it takes `vat_rate`, the
   converter maps `importItem.vat_code` to `catalogueItem.vat_rate` instead.
@@ -162,7 +165,9 @@ secret field is one line).
   (ValueRetail/Bifrost#247). The campaign price itself flows as an ordinary
   price.
 - **Order.** A retried message can commit after a newer one. See "Retries are
-  safe" in [Bifrost catalogue](bifrost-catalogue.md).
+  safe" in [Bifrost catalogue](bifrost-catalogue.md). Bifrost now has a
+  `sequence` guard on begin (Bifrost#253); the producer doesn't send it yet
+  (#858).
 
 ## Tests
 
