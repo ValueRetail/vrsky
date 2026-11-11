@@ -566,6 +566,7 @@ func TestIncompleteNodeIsRetriableAndSendsNothing(t *testing.T) {
 		{"no token", `{"type":"bifrost_catalogue","bifrost_catalogue":{"base_url":"` + stub.URL() + `"}}`, true, "no token"},
 		{"token stored in plaintext", `{"type":"bifrost_catalogue","bifrost_catalogue":{"base_url":"` + stub.URL() + `","token":"` + stubToken + `"}}`, true, "stored in plaintext"},
 		{"no block", `{"type":"bifrost_catalogue"}`, true, "no token"},
+		{"token_secret_id not a string", `{"type":"bifrost_catalogue","bifrost_catalogue":{"base_url":"` + stub.URL() + `","token_secret_id":5}}`, true, "token_secret_id must be a string"},
 		{"bad mode", nodeJSON(stub.URL(), `"mode":"replace"`), true, `mode "replace"`},
 		{"batch too big", nodeJSON(stub.URL(), `"batch_size":100000`), true, "batch_size"},
 		{"negative batch", nodeJSON(stub.URL(), `"batch_size":-1`), true, "batch_size"},
