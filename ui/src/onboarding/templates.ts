@@ -535,9 +535,12 @@ export const TEMPLATES: PipelineTemplate[] = [
       {
         id: 'dst',
         type: 'producer',
+        // Retailhero authenticates VRSky as a tenant workload with a bearer
+        // credential (Retailhero ADR-0063, decision 3). The wizard's token is
+        // stored as a secret on deploy (http.token_secret_id, #850).
         config: {
           type: 'http',
-          http: { url: '', method: 'POST', headers: { 'Content-Type': 'application/json' } },
+          http: { url: '', method: 'POST', headers: { 'Content-Type': 'application/json' }, auth_type: 'bearer', token: '' },
         },
       },
     ],
@@ -568,6 +571,12 @@ export const TEMPLATES: PipelineTemplate[] = [
         label: 'Retailhero intake URL',
         help: 'The POS reconciliation batch route of Retailhero, reachable from VRSky over the internet (the HTTP producer will not call a private address).',
         placeholder: 'https://retailhero.example/api/v1/pos-reconciliation/batches',
+      },
+      {
+        nodeId: 'dst', objectPath: 'http', key: 'token',
+        label: 'Retailhero intake credential',
+        help: 'The bearer credential Retailhero issued for this tenant and the POS intake. Sent as Authorization: Bearer. Stored encrypted, never saved in plain text.',
+        secret: true, placeholder: 'bearer token',
       },
     ],
   },

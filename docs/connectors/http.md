@@ -134,7 +134,7 @@ mTLS webhooks; use a CA of your own, or add HMAC signing as well.
 
 ## As a destination (producer)
 
-A producer node sends each message as an outbound HTTP request. It supports OAuth-authenticated output and client-certificate mutual TLS.
+A producer node sends each message as an outbound HTTP request. It supports a stored bearer token, OAuth-authenticated output and client-certificate mutual TLS.
 
 Config reference:
 
@@ -142,7 +142,9 @@ Config reference:
 - `http.url` — target URL.
 - `http.method` — HTTP method (e.g. `POST`).
 - `http.headers` — object of request headers.
-- `http.auth_type` — `"none"` or `"oauth"`.
+- `http.auth_type` — `"none"`, `"bearer"` or `"oauth"`.
+- `http.token_secret_id` — the secret holding a static bearer token (#850),
+  required when `auth_type` is `"bearer"`. See [Bearer token](#bearer-token).
 - `http.oauth_grant_id` — OAuth grant UUID (#97), required when `auth_type` is `"oauth"`.
 - `http.tls` — optional client-certificate mTLS:
     - `cert_secret_id` — client certificate.
@@ -166,6 +168,55 @@ Config reference:
   }
 }
 ```
+
+### Bearer token
+
+For a target that takes a fixed `Authorization: Bearer <token>`, such as a
+tenant-workload credential, set `auth_type` to `"bearer"` and type the token
+into the editor's **Bearer token** field. On deploy it is stored as an
+encrypted tenant secret and the node keeps only `http.token_secret_id`:
+
+```json
+{
+  "type": "http",
+  "http": {
+    "url": "https://retailhero.example/api/v1/pos-reconciliation/batches",
+    "method": "POST",
+    "headers": { "Content-Type": "application/json" },
+    "auth_type": "bearer",
+    "token_secret_id": "3f1c2b9e-0d5a-4c8e-9b7a-3e2f1d4c5b6a"
+  }
+}
+```
+
+- The token is read for the message's tenant only, and sent as
+  `Authorization: Bearer <token>` on every request. It replaces an
+  `Authorization` header set in `http.headers`.
+- A token written into the node (`http.token`) is refused: when the
+  connection starts, and again by the producer, which then sends nothing to
+  that node. So is `auth_type` `"bearer"` without a `token_secret_id`. The
+  error names the setting, never the value. Such a message is retried and
+  then dead-lettered, so it can be replayed after the fix.
+- The token is never written to the log, the activity feed or the DLQ copy's
+  `X-Vrsky-Last-Error`. A target that echoes the request headers back in its
+  answer gets the token masked (`*`) in the activity feed's response
+  preview.
+- A `401` or `403` is retried and then dead-lettered, like any credential
+  error (below).
+- The worker keeps a connection's config, token included, for 5 minutes. After
+  a new token is deployed, the old one can be sent for up to that long;
+  messages refused meanwhile wait in the DLQ.
+- The response preview masks the token only where the target echoes it as
+  sent; an escaped or encoded copy is not recognised. Leading and trailing
+  whitespace is trimmed from the stored token.
+
+A `{secret:<uuid>}` placeholder in a header value
+(`"Authorization": "Bearer {secret:<uuid>}"`) is also expanded, because the
+producer resolves its whole node config (see `docs/SECURITY.md`). Use
+`auth_type` `"bearer"` instead. The editor has no field for a placeholder, a
+plaintext token can't be told apart from a placeholder typed by hand, and an
+expanded value can come back in an error text (#853). The response preview
+masks only a token sent through `auth_type` `"bearer"` or OAuth.
 
 ### Failed deliveries
 
@@ -290,6 +341,6 @@ working.
 
 ## Notes
 
-- **Secrets.** Credential and key material (signing secret, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with `<field>_secret_id` references. Stored and example JSON therefore shows only the `_secret_id` form.
+- **Secrets.** Credential and key material (signing secret, bearer token, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with `<field>_secret_id` references. Stored and example JSON therefore shows only the `_secret_id` form.
 - **mTLS host.** Connections using `tls.client_ca_secret_id` take requests on `mtls.vrsky.valueretail.no` on the hosted service and on the worker's TLS port (`9101`) locally, not on the ordinary webhook URL. See [Mutual TLS](#mutual-tls-client-certificates). Outbound mTLS (the producer's `http.tls`) works everywhere.
 - **Example flow.** A common pattern is webhook (consumer) to HTTP forward (producer): receive a signed webhook, then forward the payload to a downstream service over OAuth or mTLS.

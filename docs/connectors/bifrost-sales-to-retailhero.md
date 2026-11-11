@@ -114,10 +114,13 @@ The wizard asks for:
 | Stream, durable name | the stream that holds Basket events, and a name for the consumer VRSky creates |
 | Retailhero journal ID | the journal Retailhero registered for this till source |
 | Retailhero intake URL | the C3 batch route; it must be reachable from VRSky and not a private address (or go through the remote agent) |
+| Retailhero intake credential | the bearer credential Retailhero issued for this tenant and the POS intake. It is stored as an encrypted secret and sent as `Authorization: Bearer` ([HTTP bearer token](http.md#bearer-token), #850) |
 
 Before you start it: the NATS user needs the permissions listed on the
-[NATS page](nats.md#notes), and the tenant must have Retailhero's intake
-credential, which this template cannot send yet.
+[NATS page](nats.md#notes). The connection does not start without the intake
+credential. A wrong or expired credential is answered `401`, which is retried
+and then dead-lettered, so nothing is lost; replay from the DLQ once the
+credential is fixed.
 
 ## Open questions
 

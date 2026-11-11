@@ -4,7 +4,7 @@
  * these name the keys the UI touches so the code does not cast to `any`.
  */
 export type FileCfg = { path?: string }
-export type HttpCfg = { url?: string; method?: string; auth_type?: string; oauth_grant_id?: string }
+export type HttpCfg = { url?: string; method?: string; auth_type?: string; oauth_grant_id?: string; token?: string; token_secret_id?: string }
 export type DbCfg = { host?: string; port?: number | string; database?: string; table?: string; query?: string }
 
 /**
@@ -37,7 +37,7 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
   // http-producer (src/cmd/http-producer)
   'producer/http': {
     block: 'http',
-    keys: ['url', 'method', 'headers', 'auth_type', 'oauth_grant_id', 'tls'],
+    keys: ['url', 'method', 'headers', 'auth_type', 'oauth_grant_id', 'token', 'tls'],
     required: ['url'],
     numeric: [],
   },
