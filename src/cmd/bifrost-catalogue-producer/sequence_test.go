@@ -76,6 +76,8 @@ func TestSequence_IsSentOnBegin(t *testing.T) {
 		{"a list has none", `[{"article_no":"4711","name":"Melk","price_incl_vat":"10.00","vat_code":"F"}]`, ""},
 		// A lone object in delta mode is the item itself; its fields are not read.
 		{"a single item has none", `{"article_no":"4711","name":"Melk","price_incl_vat":"10.00","vat_code":"F","sequence":7}`, ""},
+		// Keys are exact, as for "items".
+		{"a capitalised key is not the sequence", `{"items":[{"article_no":"4711","name":"Melk","price_incl_vat":"10.00","vat_code":"F"}],"Sequence":7}`, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -125,8 +127,9 @@ func TestSequence_OlderDeliveryAfterNewerIsDroppedAndLogged(t *testing.T) {
 		t.Errorf("%d imports left open", n)
 	}
 	out := logs.String()
-	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "dropped the delivery") || !strings.Contains(out, "sequence=10") {
-		t.Errorf("the drop is not logged as a warning with its sequence:\n%s", out)
+	// Delta: the dropped rows may be lost, so it is an error to alert on.
+	if !strings.Contains(out, "level=ERROR") || !strings.Contains(out, "dropped the delivery") || !strings.Contains(out, "sequence=10") {
+		t.Errorf("the dropped delta is not logged as an error with its sequence:\n%s", out)
 	}
 	if strings.Contains(out, stubToken) {
 		t.Error("the log holds the token")
@@ -152,6 +155,10 @@ func TestSequence_SameSequenceTwiceIsAppliedOnce(t *testing.T) {
 			}
 			if !strings.Contains(logs.String(), "dropped the delivery") {
 				t.Errorf("the second delivery is not logged as dropped:\n%s", logs.String())
+			}
+			// A full list that is already newer loses nothing: a warning.
+			if want := map[string]string{"full": "level=WARN", "delta": "level=ERROR"}[mode]; !strings.Contains(logs.String(), want) {
+				t.Errorf("%s mode drop not logged at %s:\n%s", mode, want, logs.String())
 			}
 		})
 	}

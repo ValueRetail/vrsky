@@ -95,8 +95,8 @@ batches to keep that quiet.
 ## Mapping
 
 The converter renames each field of `importItem` into the item, field for
-field, and drops everything else (`sourceItemId`, the rest of the batch header, the
-profile's `catalogueItem` copy). A field the row does not have stays absent; it
+field, and drops everything else (`sourceItemId`, the rest of the batch
+header, the profile's `catalogueItem` copy). A field the row does not have stays absent; it
 does not become `null`.
 
 | Bifrost item field | From | Notes |
@@ -116,9 +116,9 @@ Beside the items, the batch's `recordedAt` (the time every Retailhero event
 carries) is passed through as `sequence`. The producer sends it to Bifrost in
 milliseconds, and Bifrost refuses an older batch that arrives after a newer
 one (see [Sequence](bifrost-catalogue.md#sequence)). It has to grow from one
-batch to the next: two batches with the same `recordedAt` count as one
-delivery, and the second is dropped. A batch without `recordedAt` is sent
-unnumbered.
+batch to the next, in milliseconds: two batches with the same `recordedAt`
+count as one delivery, and the second is dropped with its rows. A batch
+without `recordedAt` is sent unnumbered.
 
 The mapping lives in `ui/src/onboarding/templates.ts` and is the same file the
 Go test reads (`ui/src/onboarding/testdata/retailhero-to-bifrost.json`).
@@ -174,8 +174,14 @@ secret field is one line).
   price.
 - **Order.** The template passes `recordedAt` through as Bifrost's `sequence`
   (#858), so a retried older batch is dropped instead of overwriting a newer
-  one. That holds only if Retailhero's batches carry a `recordedAt` that grows
-  per batch, including the several batches one package is cut into.
+  one. Before go-live, Retailhero has to confirm that every batch carries a
+  `recordedAt` that grows by at least a millisecond per batch, including the
+  several batches one package is cut into, or send a per-batch counter
+  instead. Retailhero's `recordedAt` is today the writing transaction's start
+  time, so batches written in one transaction would share it, and every batch
+  after the first would be dropped. Also, a delta that is retried after a
+  newer one committed is dropped even when the newer one held other articles
+  (see [What the guard costs](bifrost-catalogue.md#retries-are-safe)).
 
 ## Tests
 

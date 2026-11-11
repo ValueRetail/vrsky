@@ -168,7 +168,8 @@ func (p *catalogueProducer) Deliver(ctx context.Context, env *envelope.Envelope)
 	// The sequence is the same for every node: it belongs to the message.
 	seq, serr := parseSequence(env.Payload)
 	if serr != nil {
-		p.logger.Error("dropping: the payload's sequence cannot be used", "envelope_id", env.ID, "error", serr)
+		p.logger.Error("dropping: the payload's sequence cannot be used",
+			"tenant_id", env.TenantID, "connection_id", env.IntegrationID, "envelope_id", env.ID, "error", serr)
 		return sdk.Permanent(serr)
 	}
 
@@ -293,9 +294,18 @@ func (p *catalogueProducer) runImport(ctx context.Context, env *envelope.Envelop
 		return sdk.Permanent(err)
 	}
 	if errors.Is(err, errSuperseded) {
-		// Bifrost has taken the import out already; nothing to abort.
-		c.logger.Warn("Bifrost already has this import or a newer one; dropped the delivery",
-			"mode", mode, "import_id", importID, "sequence", *seq, "items", len(items), "reason", err.Error())
+		// Bifrost has taken the import out already; nothing to abort. In
+		// full mode a newer full list is live, so nothing is lost. In delta
+		// mode this delivery's rows are lost if the newer imports did not
+		// carry the same articles (the guard is per tenant, not per
+		// article), so it is logged as an error to alert on.
+		msg := "Bifrost already has this import or a newer one; dropped the delivery"
+		attrs := []any{"mode", mode, "import_id", importID, "sequence", *seq, "items", len(items), "reason", err.Error()}
+		if mode == modeDelta {
+			c.logger.Error(msg+"; its rows reach the tills only if a later import carries them", attrs...)
+		} else {
+			c.logger.Warn(msg, attrs...)
+		}
 		return nil
 	}
 	if err != nil {
@@ -374,15 +384,14 @@ func parseSequence(payload []byte) (*uint64, error) {
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, nil
 	}
-	var obj struct {
-		Items    json.RawMessage `json:"items"`
-		Sequence json.RawMessage `json:"sequence"`
-	}
+	// Exact keys, as parseItems reads them (a struct would also take
+	// "Sequence" or "ITEMS").
+	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(trimmed, &obj); err != nil {
 		return nil, nil // parseItems reports what is wrong with the payload
 	}
-	raw := bytes.TrimSpace(obj.Sequence)
-	if len(obj.Items) == 0 || len(raw) == 0 || string(raw) == "null" {
+	raw := bytes.TrimSpace(obj["sequence"])
+	if _, hasItems := obj["items"]; !hasItems || len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
 	switch raw[0] {

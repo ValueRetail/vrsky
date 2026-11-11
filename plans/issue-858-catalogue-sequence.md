@@ -71,3 +71,18 @@ Go: build, vet, gofmt, golangci-lint, lint-openapi, lint-tenant,
 lint-connector, `go test -race -count=1 ./...` against a local Postgres 16.
 UI: tsc, lint, build, coverage. Mutation runs on the 409 handling, the begin
 body and the epoch check.
+
+## Review round 1 (fresh reviewer, changes requested)
+
+- A delta refused with 409 loses its own rows when the newer import held other
+  articles (the guard is per tenant). That is Bifrost's design, and the issue
+  asks for the drop. Kept, but the drop in delta mode is now logged as an
+  error, and the docs say what is lost and how to recover. Whether this
+  trade-off is right for the template's delta traffic is for a human (see the
+  PR).
+- DLQ replay of a sequenced message is usually refused: documented.
+- The template's `recordedAt` collision is now a go-live blocker in the doc.
+- Numbers through a converter stay below 2^53; clocks must not step back:
+  documented.
+- `parseSequence` reads exact keys, like `parseItems`. The 409 error text is
+  neutral. The bad-sequence log carries tenant and connection.

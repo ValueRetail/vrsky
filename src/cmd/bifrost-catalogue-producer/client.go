@@ -60,7 +60,7 @@ type beginBody struct {
 // errSuperseded is a commit Bifrost refused with 409: the tenant already has
 // an import with this sequence or a higher one (docs/catalogue-doors.md in
 // Bifrost, "Deliveries that arrive out of order").
-var errSuperseded = errors.New("bifrost commit 409: a newer import is already there")
+var errSuperseded = errors.New("bifrost commit 409")
 
 // commitReport is what commit answers. Fields Bifrost adds later are ignored.
 type commitReport struct {

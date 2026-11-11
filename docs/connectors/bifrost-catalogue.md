@@ -107,8 +107,11 @@ It has to grow from one message to the next for the same Bifrost tenant. Use
 the source's own time or counter, not a VRSky stream sequence: a stream that
 is rebuilt (a DR restore) starts counting again, and Bifrost would then refuse
 every later import. Two messages with the same value are one delivery to
-Bifrost, so the second is dropped. A source that can send two lists in the same
-millisecond needs a counter instead.
+Bifrost, so the second is dropped and its rows are lost. A source that can
+send two lists in the same millisecond needs a counter instead, and so does a
+source whose clock can step backwards. A number that passes through a
+converter is read as a floating-point number, so keep it below 2^53
+(9007199254740992); a timestamp is the safe form.
 
 Without `sequence` (or with `null`) the import is sent unnumbered, as before:
 Bifrost applies it and keeps the highest sequence it already has. A list
@@ -126,7 +129,7 @@ isn't a timestamp) is refused without contacting Bifrost, like a bad payload.
 | 413, or 400 on items | Retried, then the DLQ. Either a proxy in front of Bifrost refuses the request size (ingress-nginx defaults to 1 MiB; lower `batch_size`) or an item isn't valid UTF-8/JSON (fix the source). Then replay from the DLQ. |
 | 404 | Retried: the import expired or Bifrost restarted (imports live in its memory). On the first call it can also mean `base_url` isn't the catalogue-api. |
 | 200 that isn't Bifrost's (an HTML page from a proxy, an items answer without `total_so_far`, or one whose count differs from what was sent) | Retried, then the DLQ. The import is abandoned. |
-| 409 at commit, for a message with a `sequence` | Dropped and logged as a warning, not retried or dead-lettered: Bifrost already has this import or a newer one. The delivery counts as done. |
+| 409 at commit, for a message with a `sequence` | Dropped, not retried or dead-lettered: Bifrost already has this import or a newer one. In `full` mode nothing is lost (a newer whole list is live) and it is logged as a warning. In `delta` mode the message's rows are lost unless a later import carried the same articles, so it is logged as an error (see [Retries are safe](#retries-are-safe)). |
 | Other 4xx (the shrink guard, a file that is mostly bad rows, validation, a 409 for a message without a `sequence`) | Dropped, not retried. The same list would be refused again. Bifrost's reason is in the log and in the error text. |
 | The node's settings are missing or wrong | Retried, then the DLQ, for a replay after the fix. |
 | The payload isn't a list of items, or its `sequence` can't be used | Dropped. |
@@ -168,6 +171,23 @@ drops that delivery and logs it. The same answer covers the redelivery after a
 lost ack: the list is already there. Messages without a sequence keep the old
 behaviour, so a source that has no growing number or time still has the
 retry case open.
+
+**What the guard costs in `delta` mode.** Bifrost keeps one sequence per
+tenant, not one per article. So when delta N fails for a while (a 5xx, a
+timeout, a Bifrost restart) and delta N+1 commits before N's retry, N is
+refused and dropped, even if N+1 held other articles. N's rows then reach the
+tills only when a later import carries them. Without the sequence, N would
+have committed late and overwritten any article N+1 also held with an older
+price. The connector logs such a drop as an error
+(`dropped the delivery; its rows reach the tills only if a later import
+carries them`); alert on it. To recover, send the articles again with a newer
+sequence, or load the whole catalogue in `full` mode (#856).
+
+**Replaying from the DLQ.** A message with a `sequence` that waited in the DLQ
+(a bad token, a missing setting) is usually older than what committed while
+it waited. Replayed, it is refused with 409 and dropped, as above. Send the
+articles again with a newer sequence instead, or replay a copy without
+`sequence`.
 
 The connector is kept at one replica on purpose. Two pods would run messages
 N and N+1 at the same time, so the older list could commit last even without a
