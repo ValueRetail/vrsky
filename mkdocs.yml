@@ -94,6 +94,7 @@ nav:
       - Remote Agent: connectors/remote-agent.md
       - Tenant-to-tenant: connectors/tenant.md
       - Filters & converters: connectors/filters-converters.md
+      - Bifrost sales → Retailhero (template): connectors/bifrost-sales-to-retailhero.md
   - Security:
       - Whitepaper: security/whitepaper.md
       - Security reference: SECURITY.md

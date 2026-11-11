@@ -585,12 +585,18 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 			// Each: map every object of the Source array with the nested
 			// mappings and write the new array to Target. Elements that are
 			// not objects are kept as they are, like the top-level array path.
-			// A Source that is missing or not an array is left alone.
+			// A Source that is missing or not an array is left alone. The
+			// Source "." is the record itself, as a one-element array.
 			val, ok := getNestedField(obj, m.Source)
 			if !ok {
 				continue
 			}
 			arr, ok := val.([]interface{})
+			if m.Source == "." {
+				// The record itself is the one element: a one-entry array
+				// whose entry is built from the whole record.
+				arr, ok = []interface{}{obj}, true
+			}
 			if !ok {
 				continue
 			}
@@ -615,7 +621,14 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 	return result, applied
 }
 
+// getNestedField reads the value at a dotted path. The path "." is the record
+// itself, so a mapping can nest the whole record under another field (the
+// Bifrost sales template wraps each Basket event as the "event" of a batch
+// entry; ui/src/onboarding/testdata/bifrost-sales-to-retailhero.json).
 func getNestedField(obj map[string]interface{}, path string) (interface{}, bool) {
+	if path == "." {
+		return obj, true
+	}
 	parts := strings.Split(path, ".")
 	current := interface{}(obj)
 	for _, part := range parts {

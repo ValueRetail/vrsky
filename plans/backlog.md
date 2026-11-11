@@ -1577,6 +1577,28 @@ Last updated 2026-10-28.
     NetworkPolicy that admits only the management API. Found in #814.
     Filed as #753.
 
+215. **The HTTP producer cannot send a stored bearer token.** It sets
+    `Authorization` only from an OAuth grant; a header typed into
+    `http.headers` is stored in plain text, and Retailhero's intake takes a
+    tenant-workload bearer credential (ValueRetail/Retailhero#2675). The
+    Bifrost sales template ships without credentials until this exists:
+    `http.bearer_secret_id` (minted from a `bearer` field in `SECRET_FIELDS`)
+    or a static-token grant. Touches secrets handling, so it needs a human
+    review. Found in #817.
+
+216. **The Bifrost sales template sends no journal position.** Retailhero's
+    BIFROST-BASKET-v1 batch needs one per entry and the Basket events carry
+    none. The NATS source's `nats_stream_seq` (envelope metadata) is the
+    natural value; the converter reads only the payload. Either a mapping
+    that can read envelope metadata, or Retailhero's intake assigns it.
+    Wait for ValueRetail/Retailhero#2678 and Bifrost#248, then settle it.
+    Found in #817.
+
+217. **Template for returns.** Retailhero's profile maps `return.completed`
+    as a refund; Bifrost publishes no such event yet (the till queues it,
+    `plans/returns-to-bc.md` in Bifrost). Add the event type to the
+    template's filter when Bifrost#248 publishes it. Found in #817.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource
