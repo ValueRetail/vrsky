@@ -87,6 +87,38 @@ refuses commas.
 An empty list, a payload that isn't JSON and an item that isn't an object are
 refused without contacting Bifrost.
 
+### Sequence
+
+The object form can carry a `sequence` beside the items:
+
+```json
+{"items": [ ... ], "sequence": "2026-11-11T12:00:00.123Z"}
+```
+
+It is sent on `begin` as Bifrost's ordering guard (see
+[Retries are safe](#retries-are-safe)). It is either:
+
+- a whole number from 1, sent as it is; or
+- an RFC 3339 timestamp, sent as its Unix time in milliseconds. This is for a
+  source event's own time: a converter can copy a timestamp but can't turn it
+  into a number.
+
+It has to grow from one message to the next for the same Bifrost tenant. Use
+the source's own time or counter, not a VRSky stream sequence: a stream that
+is rebuilt (a DR restore) starts counting again, and Bifrost would then refuse
+every later import. Two messages with the same value are one delivery to
+Bifrost, so the second is dropped and its rows are lost. A source that can
+send two lists in the same millisecond needs a counter instead, and so does a
+source whose clock can step backwards. A number that passes through a
+converter is read as a floating-point number, so keep it below 2^53
+(9007199254740992); a timestamp is the safe form.
+
+Without `sequence` (or with `null`) the import is sent unnumbered, as before:
+Bifrost applies it and keeps the highest sequence it already has. A list
+payload, or a single item in `delta` mode, has no sequence. A `sequence` that
+is neither of the two forms (a fraction, a negative number, `0`, a string that
+isn't a timestamp) is refused without contacting Bifrost, like a bad payload.
+
 ## What happens on failure
 
 | What went wrong | Result |
@@ -94,12 +126,13 @@ refused without contacting Bifrost.
 | Network error, timeout, 5xx, 3xx | Retried (1 s, 5 s, 30 s, 2 min), then the DLQ. The import is abandoned each time and starts over. |
 | 429 (too many imports open) | Retried after `Retry-After`. |
 | 401, 403 | Retried, then the DLQ. The token, its `catalogue.import` permission or `tenant_id` is wrong. Fix the node, then replay the message from the DLQ. |
-| 413, or 400 on items | Retried, then the DLQ. Either a proxy in front of Bifrost refuses the request size (ingress-nginx defaults to 1 MiB; lower `batch_size`) or an item isn't valid UTF-8/JSON (fix the source). Then replay from the DLQ. |
+| 413, or 400 on items | Retried, then the DLQ. Either a proxy in front of Bifrost refuses the request size (ingress-nginx defaults to 1 MiB; lower `batch_size`) or an item isn't valid UTF-8/JSON (fix the source). Then replay from the DLQ (with a `sequence`, see [Replaying from the DLQ](#retries-are-safe)). |
 | 404 | Retried: the import expired or Bifrost restarted (imports live in its memory). On the first call it can also mean `base_url` isn't the catalogue-api. |
 | 200 that isn't Bifrost's (an HTML page from a proxy, an items answer without `total_so_far`, or one whose count differs from what was sent) | Retried, then the DLQ. The import is abandoned. |
-| Other 4xx (the shrink guard, a file that is mostly bad rows, validation) | Dropped, not retried. The same list would be refused again. Bifrost's reason is in the log and in the error text. |
-| The node's settings are missing or wrong | Retried, then the DLQ, for a replay after the fix. |
-| The payload isn't a list of items | Dropped. |
+| 409 at commit, for a message with a `sequence` | Dropped, not retried or dead-lettered: Bifrost already has this import or a newer one. In `full` mode, when the tenant gets only full lists, nothing is lost (a newer whole list is live) and it is logged as a warning. In `delta` mode the message's rows are lost unless a later import carried the same articles, so it is logged as an error (see [Retries are safe](#retries-are-safe)). |
+| Other 4xx (the shrink guard, a file that is mostly bad rows, validation, a 409 for a message without a `sequence`) | Dropped, not retried. The same list would be refused again. Bifrost's reason is in the log and in the error text. |
+| The node's settings are missing or wrong | Retried, then the DLQ, for a replay after the fix (with a `sequence`, see [Replaying from the DLQ](#retries-are-safe)). |
+| The payload isn't a list of items, or its `sequence` can't be used | Dropped. |
 
 Error texts carry Bifrost's own reason (its `{"error": "..."}` body, cut at 300
 characters) and never the token or a network address.
@@ -121,20 +154,40 @@ delivered again: a `full` import of the same list replaces the catalogue with
 the same list, and a `delta` upserts the same rows. On its own that ends in the
 same catalogue.
 
-**Ordering is not guaranteed, though.** The connector runs as one pod, and a
-pod delivers one message at a time, so messages that go through on the first
+**Ordering needs a sequence.** The connector runs as one pod, and a pod
+delivers one message at a time, so messages that go through on the first
 attempt commit in the order they were published. Two things break that:
 
 - A retry can arrive late (retries wait up to 2 minutes). If an older message
-  is retried after a newer one has committed, the older list commits last and
-  wins, delta or full, until the next import changes the catalogue.
+  is retried after a newer one has committed, the older list would commit last
+  and win, delta or full.
 - A rolling update briefly runs the old and the new pod side by side, and both
   can be running an import at the same moment.
 
-Closing that needs a version check in Bifrost (an import that says which
-source version it is built from); that is being filed there. Until then, send
-full lists from one source at a time and don't rely on a retried message being
-the latest.
+A message with a [`sequence`](#sequence) closes both. Bifrost refuses the
+commit with 409 when the tenant already has an import with that sequence or a
+higher one (Bifrost#253, `docs/catalogue-doors.md` there), and the connector
+drops that delivery and logs it. The same answer covers the redelivery after a
+lost ack: the list is already there. Messages without a sequence keep the old
+behaviour, so a source that has no growing number or time still has the
+retry case open.
+
+**What the guard costs in `delta` mode.** Bifrost keeps one sequence per
+tenant, not one per article. So when delta N fails for a while (a 5xx, a
+timeout, a Bifrost restart) and delta N+1 commits before N's retry, N is
+refused and dropped, even if N+1 held other articles. N's rows then reach the
+tills only when a later import carries them. Without the sequence, N would
+have committed late and overwritten any article N+1 also held with an older
+price. The connector logs such a drop as an error
+(`dropped the delivery; its rows reach the tills only if a later import
+carries them`); alert on it. To recover, send the articles again with a newer
+sequence, or load the whole catalogue in `full` mode (#856).
+
+**Replaying from the DLQ.** A message with a `sequence` that waited in the DLQ
+(a bad token, a missing setting) is usually older than what committed while
+it waited. Replayed, it is refused with 409 and dropped, as above. Send the
+articles again with a newer sequence instead, or replay a copy without
+`sequence`.
 
 The connector is kept at one replica on purpose. Two pods would run messages
 N and N+1 at the same time, so the older list could commit last even without a

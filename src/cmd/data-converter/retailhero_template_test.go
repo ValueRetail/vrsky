@@ -71,3 +71,15 @@ func TestTemplate_RetailheroToBifrost_OnlyImportItemFieldsPass(t *testing.T) {
 		t.Errorf("absent fields became null: %s", got[0].Payload)
 	}
 }
+
+// The event's recordedAt goes to the producer as "sequence", unchanged; the
+// producer turns it into milliseconds for Bifrost's ordering guard (#858). A
+// batch without one comes out without a sequence.
+func TestTemplate_RetailheroToBifrost_RecordedAtBecomesSequence(t *testing.T) {
+	cfg := loadTemplateConfig(t, "retailhero-to-bifrost.json")
+	in := `{"kind":"delta","effectiveFrom":"2026-12-01T00:00:00Z","recordedAt":"2026-11-11T12:00:00.123456Z","rows":[
+	  {"sourceItemId":"S-1","importItem":{"article_no":"D-400","name":"Vare D","price_incl_vat":"15.00","vat_code":"N","unit":"pcs","alcohol":false,"effective_from":"2026-12-01T00:00:00Z"}}]}`
+	got := throughJetStream(t, cfg, inputEnvelope([]byte(in), 1), 1)
+	want := mustJSON(t, `{"sequence":"2026-11-11T12:00:00.123456Z","items":[{"article_no":"D-400","name":"Vare D","price_incl_vat":"15.00","vat_code":"N","unit":"pcs","alcohol":false,"effective_from":"2026-12-01T00:00:00Z"}]}`)
+	assertJSONEqual(t, "batch", decodeJSON(t, got[0].Payload), want)
+}
