@@ -28,7 +28,7 @@ split:
 | Group | Images | Rolled out by |
 |---|---|---|
 | core | `management-api`, `ui`, `data-filter`, `data-converter`, `alert-responder` | `deploy-core-azure.sh`, by digest |
-| connectors | `sitoo`, `front-systems`, `business-central`, `visma`, `brightpearl` and `sap-s4hana`, each as `-consumer` and `-producer`; `api-consumer`, `webhook-consumer`, `file-consumer`, `db-consumer`, `tenant-consumer`, `cloud-storage-consumer`, `sftp-consumer`, `kafka-consumer`, `rabbitmq-consumer`, `nats-consumer`, `salesforce-consumer`, `remote-agent`; `http-producer`, `db-producer`, `file-producer`, `cloud-storage-producer`, `sftp-producer`, `kafka-producer`, `rabbitmq-producer`, `salesforce-producer` | `deploy-connectors-azure.sh`, or a restart of the deployment |
+| connectors | `sitoo`, `front-systems`, `business-central`, `visma`, `brightpearl` and `sap-s4hana`, each as `-consumer` and `-producer`; `api-consumer`, `webhook-consumer`, `file-consumer`, `db-consumer`, `tenant-consumer`, `cloud-storage-consumer`, `sftp-consumer`, `kafka-consumer`, `rabbitmq-consumer`, `nats-consumer`, `salesforce-consumer`, `remote-agent`; `http-producer`, `db-producer`, `file-producer`, `cloud-storage-producer`, `sftp-producer`, `kafka-producer`, `rabbitmq-producer`, `salesforce-producer`, `bifrost-catalogue-producer` | `deploy-connectors-azure.sh`, or a restart of the deployment |
 
 The UI is built from `ui/Dockerfile`, every other image from
 `src/cmd/<name>/Dockerfile`. The UI runs in namespace `vrsky-ui`; the other

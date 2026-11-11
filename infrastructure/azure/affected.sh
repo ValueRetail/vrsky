@@ -41,7 +41,8 @@ api-consumer webhook-consumer file-consumer db-consumer tenant-consumer
 cloud-storage-consumer sftp-consumer kafka-consumer rabbitmq-consumer
 nats-consumer salesforce-consumer remote-agent
 http-producer db-producer file-producer cloud-storage-producer
-sftp-producer kafka-producer rabbitmq-producer salesforce-producer"
+sftp-producer kafka-producer rabbitmq-producer salesforce-producer
+bifrost-catalogue-producer"
 TOOLS="vrsky-cli"
 
 # has <list> <name>. The lists span lines, so newlines count as spaces: before

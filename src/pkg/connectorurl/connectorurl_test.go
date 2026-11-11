@@ -102,6 +102,29 @@ func TestFrontSystems(t *testing.T) {
 	}
 }
 
+func TestBifrostCatalogue(t *testing.T) {
+	tests := []struct {
+		name, base   string
+		allowPrivate bool
+		wantErr      string
+	}{
+		{"public", "https://catalogue.example.com", false, ""},
+		{"with a path", "https://example.com/bifrost/", false, ""},
+		{"empty", "", false, "base_url is required"},
+		{"http", "http://catalogue.example.com", false, "must use https"},
+		{"private", "https://10.0.0.5", false, "private"},
+		{"userinfo", "https://u:" + secret + "@catalogue.example.com", false, "user name"},
+		{"query", "https://catalogue.example.com/?k=" + secret, false, "query"},
+		{"dev flag: local http", "http://127.0.0.1:8091", true, ""},
+		{"dev flag still requires it", "", true, "base_url is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			check(t, BifrostCatalogue(tt.base, tt.allowPrivate), tt.wantErr)
+		})
+	}
+}
+
 func TestSAP(t *testing.T) {
 	const host = "my347623.s4hana.ondemand.com"
 	basic := func(c SAPConfig) SAPConfig {

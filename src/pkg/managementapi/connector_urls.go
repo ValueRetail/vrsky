@@ -64,6 +64,8 @@ func validateConnectorURLs(node *Node, configType string, raw map[string]json.Ra
 			}
 		}
 		err = connectorurl.BusinessCentral(bc, allowPrivate)
+	case "bifrost_catalogue":
+		err = connectorurl.BifrostCatalogue(rawString(block, "base_url"), allowPrivate)
 	case "nats":
 		var servers []string
 		if json.Unmarshal(block["servers"], &servers) != nil {

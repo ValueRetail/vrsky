@@ -1540,6 +1540,19 @@ Last updated 2026-10-28.
     targets like `DLQGrowing`) with a `promtool test rules` case. Found
     in #811. Filed as #833.
 
+208. **A collecting step for sources that emit one message per page.** The
+    Bifrost catalogue producer imports one message at a time (#815), so a
+    `full` import needs the whole list in one message. A paged source (Business
+    Central, Retailhero) has none. An aggregator node that holds the pages of
+    one run and emits a single message when the run ends would feed it; it
+    needs a run boundary the envelope does not carry today. Found in #815.
+    Filed as #841.
+
+209. **`DeliverStream` for the Bifrost catalogue producer.** It reads the whole
+    message into memory (the claim-check cap is 128 MiB). A 200,000-article
+    list is about 60 MB; streaming the array item by item would hold only one
+    batch. Found in #815. Filed as #842.
+
 210. **The connection test cannot reach most workers in AKS.**
     `buildTestTarget` (`src/pkg/managementapi/connection_test_endpoint.go`)
     defaults to compose names such as `http://rabbitmq-consumer:9230`, and
