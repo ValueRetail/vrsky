@@ -83,6 +83,7 @@ nav:
       - Cloud storage: connectors/cloud-storage.md
       - Apache Kafka: connectors/kafka.md
       - RabbitMQ: connectors/rabbitmq.md
+      - NATS JetStream (external): connectors/nats.md
       - Salesforce: connectors/salesforce.md
       - Sitoo (POS): connectors/sitoo.md
       - Front Systems (POS): connectors/front-systems.md

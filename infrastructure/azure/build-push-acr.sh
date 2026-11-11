@@ -77,7 +77,7 @@ build_connectors() {
   local generic=(
     api-consumer webhook-consumer file-consumer db-consumer tenant-consumer
     cloud-storage-consumer sftp-consumer kafka-consumer rabbitmq-consumer
-    salesforce-consumer remote-agent
+    nats-consumer salesforce-consumer remote-agent
     http-producer db-producer file-producer cloud-storage-producer
     sftp-producer kafka-producer rabbitmq-producer salesforce-producer
   )

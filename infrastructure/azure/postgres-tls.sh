@@ -69,9 +69,9 @@ write_gate() {
 }
 
 # The connector Deployments (label tier=connector) in vrsky-platform; the
-# generated manifest has 31. Fewer means a half-listed fleet, and a step that
+# generated manifest has 32. Fewer means a half-listed fleet, and a step that
 # trusts it would switch or restart only part of it.
-EXPECTED_CONNECTORS="${EXPECTED_CONNECTORS:-31}"
+EXPECTED_CONNECTORS="${EXPECTED_CONNECTORS:-32}"
 CONNECTORS=""
 
 # load_connectors — fills CONNECTORS or dies. Call it directly, never inside

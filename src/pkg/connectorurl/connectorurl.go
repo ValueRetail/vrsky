@@ -1,6 +1,6 @@
 // Package connectorurl holds the URL checks for connectors whose target comes
 // from tenant config and receives a credential: Brightpearl, Front Systems,
-// SAP S/4HANA and Business Central. Each connector calls its function at start
+// SAP S/4HANA, Business Central and the NATS consumer's servers. Each connector calls its function at start
 // and before it sends anything, and the management API calls the same one when
 // a connection starts, so the two cannot drift (#708). Visma has its own
 // package, pkg/vismaurl.
@@ -15,6 +15,8 @@ package connectorurl
 import (
 	"errors"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -181,4 +183,65 @@ func shown(field, value string) string {
 		return field
 	}
 	return fmt.Sprintf("%s %q", field, value)
+}
+
+// MaxNATSServers bounds the server list of one NATS source.
+const MaxNATSServers = 16
+
+// NATS checks the server URLs of a NATS source (#814). Each must be
+// nats://host[:port] or tls://host[:port]: no user name or password (those
+// come from stored secrets), no path, query or fragment, and not a literal
+// private, loopback or link-local address. The scheme does not decide TLS:
+// the consumer requires it unless allowPrivate is set, since a nats:// server
+// upgrades to TLS when asked. The consumer's dialer (safeurl.NewDialer) checks
+// where a host name resolves.
+func NATS(servers []string, allowPrivate bool) error {
+	if len(servers) == 0 {
+		return errors.New("servers: at least one server URL is required (tls://host:4222)")
+	}
+	if len(servers) > MaxNATSServers {
+		return fmt.Errorf("servers: at most %d server URLs", MaxNATSServers)
+	}
+	for _, raw := range servers {
+		if err := natsServer(strings.TrimSpace(raw), allowPrivate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func natsServer(raw string, allowPrivate bool) error {
+	const field = "servers"
+	// nats.go splits a server string on commas: one entry must stay one
+	// server, or a second one would slip past this check.
+	if strings.ContainsAny(raw, ", \t\r\n") {
+		return fmt.Errorf("%s: one URL per entry, without commas or spaces", field)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return fmt.Errorf("%s is not an absolute URL (tls://host:4222)", shown(field, raw))
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "nats", "tls":
+	default:
+		return fmt.Errorf("%s must use nats:// or tls://", shown(field, raw))
+	}
+	if u.User != nil || strings.Contains(raw, "@") {
+		return fmt.Errorf("%s must not carry a user name or password; use the stored credentials", field)
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
+		return fmt.Errorf("%s must not carry a query string or fragment", field)
+	}
+	if u.Path != "" && u.Path != "/" {
+		return fmt.Errorf("%s must not carry a path", shown(field, raw))
+	}
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("%s has an invalid port", shown(field, raw))
+		}
+	}
+	if addr, perr := netip.ParseAddr(u.Hostname()); perr == nil && !allowPrivate && safeurl.BlockedAddr(addr) {
+		return fmt.Errorf("%s points at a private, loopback or link-local address", shown(field, raw))
+	}
+	return nil
 }

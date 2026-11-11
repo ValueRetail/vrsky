@@ -1,0 +1,279 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"testing"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
+)
+
+func TestValidate(t *testing.T) {
+	ok := func() NATSConfig {
+		return NATSConfig{Servers: []string{"tls://nats.example.com:4222"}, Stream: tStream, Durable: tDur}
+	}
+	tests := []struct {
+		name         string
+		mut          func(*NATSConfig)
+		allowPrivate bool
+		want         string // "" = valid
+	}{
+		{"minimal", nil, false, ""},
+		{"user and password", func(c *NATSConfig) { c.AuthType, c.Username, c.Password = authUserPassword, "rh", "pw" }, false, ""},
+		{"loopback with the dev flag", func(c *NATSConfig) { c.Servers = []string{"nats://127.0.0.1:4222"} }, true, ""},
+
+		{"no servers", func(c *NATSConfig) { c.Servers = nil }, false, "at least one"},
+		{"loopback", func(c *NATSConfig) { c.Servers = []string{"tls://127.0.0.1:4222"} }, false, "private"},
+		{"userinfo in the URL", func(c *NATSConfig) { c.Servers = []string{"tls://rh:" + tPassword + "@nats.example.com"} }, false, "user name"},
+		{"http URL", func(c *NATSConfig) { c.Servers = []string{"https://nats.example.com"} }, false, "nats:// or tls://"},
+		{"no stream", func(c *NATSConfig) { c.Stream = "" }, false, "stream is required"},
+		{"no durable", func(c *NATSConfig) { c.Durable = "" }, false, "durable is required"},
+		{"stream with a dot", func(c *NATSConfig) { c.Stream = "A.B" }, false, "not a valid JetStream name"},
+		{"durable with a wildcard", func(c *NATSConfig) { c.Durable = "x>" }, false, "not a valid JetStream name"},
+		{"filter with a space", func(c *NATSConfig) { c.FilterSubject = "a b" }, false, "spaces"},
+		{"batch too big", func(c *NATSConfig) { c.BatchSize = maxBatchSize + 1 }, false, "batch_size"},
+		{"unknown auth type", func(c *NATSConfig) { c.AuthType = "token" }, false, "auth_type"},
+		{"user without password", func(c *NATSConfig) { c.AuthType, c.Username = authUserPassword, "rh" }, false, "stored password"},
+		{"creds missing", func(c *NATSConfig) { c.AuthType = authCreds }, false, "stored credentials file"},
+		{"creds not a creds file", func(c *NATSConfig) { c.AuthType, c.Creds = authCreds, "secret-"+tPassword }, false, "not a NATS .creds file"},
+		{"creds with the JWT block only", func(c *NATSConfig) {
+			c.AuthType, c.Creds = authCreds, "-----BEGIN NATS USER JWT-----\neyJ0\n------END NATS USER JWT------\n"
+		}, false, "not a NATS .creds file"},
+		{"ca_cert not PEM", func(c *NATSConfig) { c.CACert = "nope" }, false, "ca_cert"},
+		{"deliver new", func(c *NATSConfig) { c.DeliverPolicy = deliverNew }, false, ""},
+		{"deliver by start time", func(c *NATSConfig) { c.DeliverPolicy, c.OptStartTime = deliverByStartTime, "2026-11-01T00:00:00Z" }, false, ""},
+		{"by start time without a time", func(c *NATSConfig) { c.DeliverPolicy = deliverByStartTime }, false, "opt_start_time"},
+		{"by start time, bad time", func(c *NATSConfig) { c.DeliverPolicy, c.OptStartTime = deliverByStartTime, "yesterday" }, false, "RFC 3339"},
+		{"start time without the policy", func(c *NATSConfig) { c.OptStartTime = "2026-11-01T00:00:00Z" }, false, "only used with"},
+		{"unknown deliver policy", func(c *NATSConfig) { c.DeliverPolicy = "last" }, false, "deliver_policy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := ok()
+			if tt.mut != nil {
+				tt.mut(&cfg)
+			}
+			cfg.normalise()
+			err := cfg.validate(tt.allowPrivate)
+			switch {
+			case tt.want == "" && err != nil:
+				t.Fatalf("refused: %v", err)
+			case tt.want != "" && err == nil:
+				t.Fatalf("allowed, want an error containing %q", tt.want)
+			case tt.want != "" && !strings.Contains(err.Error(), tt.want):
+				t.Fatalf("error %q does not contain %q", err, tt.want)
+			}
+			if err != nil && strings.Contains(err.Error(), tPassword) {
+				t.Fatalf("error %q quotes a credential", err)
+			}
+		})
+	}
+}
+
+func TestNormalise(t *testing.T) {
+	cfg := NATSConfig{Servers: []string{" tls://a.example.com ", "", "tls://b.example.com"}, Stream: " S ", Durable: "d\n"}
+	cfg.normalise()
+	if len(cfg.Servers) != 2 || cfg.Servers[0] != "tls://a.example.com" || cfg.Stream != "S" || cfg.Durable != "d" {
+		t.Errorf("normalised = %+v", cfg)
+	}
+	if cfg.AuthType != authNone || cfg.BatchSize != defaultBatchSize {
+		t.Errorf("defaults: auth %q batch %d", cfg.AuthType, cfg.BatchSize)
+	}
+}
+
+// TLS is required unless the operator's dev switch is on; with it, a CA or a
+// tls:// server still asks for TLS.
+func TestTLSConfig(t *testing.T) {
+	tests := []struct {
+		name         string
+		servers      []string
+		allowPrivate bool
+		want         bool
+	}{
+		{"production, nats://", []string{"nats://nats.example.com"}, false, true},
+		{"dev, nats://", []string{"nats://127.0.0.1:4222"}, true, false},
+		{"dev, tls://", []string{"tls://127.0.0.1:4222"}, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NATSConfig{Servers: tt.servers}
+			got, err := cfg.tlsConfig(tt.allowPrivate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (got != nil) != tt.want {
+				t.Errorf("TLS config set = %v, want %v", got != nil, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlaintextCredentials(t *testing.T) {
+	tests := []struct {
+		block string
+		want  string
+	}{
+		{`{"password_secret_id":"0b1c","creds_secret_id":"9f2e"}`, ""},
+		{`{"password":""}`, ""},
+		{`{"password":"` + tPassword + `"}`, "password is stored in plaintext"},
+		{`{"creds":"-----BEGIN NATS USER JWT-----"}`, "creds is stored in plaintext"},
+	}
+	for _, tt := range tests {
+		err := plaintextCredentials([]byte(tt.block))
+		if tt.want == "" {
+			if err != nil {
+				t.Errorf("%s: refused: %v", tt.block, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: error %v, want %q", tt.block, err, tt.want)
+		}
+		if err != nil && strings.Contains(err.Error(), tPassword) {
+			t.Errorf("error quotes the value: %v", err)
+		}
+	}
+}
+
+// A config logged by accident does not print its credentials.
+func TestConfigLogValue(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	cfg := &NATSConfig{Servers: []string{"tls://a.example.com"}, Password: tPassword, Creds: "SUAseed" + tPassword, Stream: tStream}
+	logger.Info("x", "nats", cfg)
+	logger.Info("y", "nats", *cfg)
+	if strings.Contains(buf.String(), tPassword) {
+		t.Fatalf("log line holds a credential: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), tStream) {
+		t.Fatalf("log line lost the stream: %s", buf.String())
+	}
+}
+
+// The envelope id is stable for one source key on one connection, and
+// differs across keys and across connections.
+func TestEnvelopeID(t *testing.T) {
+	a := envelopeID(tConn, "evt-1")
+	if a != envelopeID(tConn, "evt-1") {
+		t.Error("same key, different id")
+	}
+	if a == envelopeID(tConn, "evt-2") {
+		t.Error("different keys, same id")
+	}
+	if a == envelopeID("other-connection", "evt-1") {
+		t.Error("two connections share an id for the same event")
+	}
+	if envelopeID("a", "b\x00c") == envelopeID("a\x00b", "c") {
+		t.Error("the separator does not keep connection and key apart")
+	}
+}
+
+func TestDurableFits(t *testing.T) {
+	cfg := &NATSConfig{Durable: tDur, FilterSubject: tSubj}
+	tests := []struct {
+		name string
+		c    jetstream.ConsumerConfig
+		want string
+	}{
+		{"fits", jetstream.ConsumerConfig{AckPolicy: jetstream.AckExplicitPolicy, FilterSubject: tSubj}, ""},
+		{"fits with filter_subjects", jetstream.ConsumerConfig{AckPolicy: jetstream.AckExplicitPolicy, FilterSubjects: []string{tSubj}}, ""},
+		{"push", jetstream.ConsumerConfig{AckPolicy: jetstream.AckExplicitPolicy, DeliverSubject: "x"}, "push consumer"},
+		{"ack all", jetstream.ConsumerConfig{AckPolicy: jetstream.AckAllPolicy, FilterSubject: tSubj}, "explicit ack"},
+		{"no filter", jetstream.ConsumerConfig{AckPolicy: jetstream.AckExplicitPolicy}, `filters on "none"`},
+		{"two filters", jetstream.ConsumerConfig{AckPolicy: jetstream.AckExplicitPolicy, FilterSubjects: []string{"a", "b"}}, `"a, b"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := durableFits(&jetstream.ConsumerInfo{Config: tt.c}, cfg)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("refused: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error %v, want %q", err, tt.want)
+			}
+		})
+	}
+	// Without a configured filter any pull, explicit-ack durable fits.
+	if err := durableFits(&jetstream.ConsumerInfo{Config: jetstream.ConsumerConfig{AckPolicy: jetstream.AckExplicitPolicy, FilterSubject: "x.>"}}, &NATSConfig{Durable: tDur}); err != nil {
+		t.Errorf("no configured filter: %v", err)
+	}
+}
+
+func TestClassifyConnect(t *testing.T) {
+	tests := []struct {
+		err       error
+		permanent bool
+	}{
+		{nats.ErrAuthorization, true},
+		{nats.ErrAuthExpired, true},
+		{nats.ErrAuthRevoked, true},
+		{fmt.Errorf("dial: %w", safeurl.ErrBlockedAddress), true},
+		{nats.ErrSecureConnWanted, true},
+		{nats.ErrSecureConnRequired, true},
+		{nats.ErrNoServers, false},
+		{errors.New("dial tcp: connection refused"), false},
+	}
+	for _, tt := range tests {
+		if got := sdk.IsPermanent(classifyConnect(tt.err)); got != tt.permanent {
+			t.Errorf("%v: permanent = %v, want %v", tt.err, got, tt.permanent)
+		}
+	}
+}
+
+func TestClassifyJS(t *testing.T) {
+	none := &asyncErrs{}
+	violated := &asyncErrs{}
+	violated.handler(nil, nil, fmt.Errorf("%w: publish to $JS.API", nats.ErrPermissionViolation))
+	tests := []struct {
+		name      string
+		err       error
+		async     *asyncErrs
+		permanent bool
+	}{
+		{"timeout", nats.ErrTimeout, none, false},
+		{"timeout after a permission violation", nats.ErrTimeout, violated, true},
+		{"jetstream off", jetstream.ErrJetStreamNotEnabled, none, true},
+		{"consumer deleted", jetstream.ErrConsumerDeleted, none, false},
+		{"bad request", &jetstream.APIError{Code: 400, ErrorCode: 10084, Description: "bad"}, none, true},
+		{"unavailable", &jetstream.APIError{Code: 503, Description: "unavailable"}, none, false},
+		{"already permanent", sdk.Permanent(errors.New("x")), none, true},
+	}
+	for _, tt := range tests {
+		if got := sdk.IsPermanent(classifyJS(tt.err, tt.async, "step")); got != tt.permanent {
+			t.Errorf("%s: permanent = %v, want %v", tt.name, got, tt.permanent)
+		}
+	}
+}
+
+// Only the two credential references are resolved; any other *_secret_id is
+// dropped before resolving, so a secret cannot come back in a validation error.
+func TestOnlyCredentialSecrets(t *testing.T) {
+	in := []byte(`{"stream":"S","password_secret_id":"a","creds_secret_id":"b","auth_type_secret_id":"c","stream_secret_id":"d"}`)
+	var out map[string]any
+	if err := json.Unmarshal(onlyCredentialSecrets(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["password_secret_id"] != "a" || out["creds_secret_id"] != "b" || out["stream"] != "S" {
+		t.Errorf("kept = %v", out)
+	}
+	if _, ok := out["auth_type_secret_id"]; ok {
+		t.Errorf("auth_type_secret_id survived: %v", out)
+	}
+	if _, ok := out["stream_secret_id"]; ok {
+		t.Errorf("stream_secret_id survived: %v", out)
+	}
+	if got := onlyCredentialSecrets([]byte(`"x"`)); string(got) != `"x"` {
+		t.Errorf("a non-object changed: %s", got)
+	}
+}

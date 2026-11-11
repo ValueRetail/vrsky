@@ -329,6 +329,14 @@ func dialControl(allowPrivate bool) func(network, address string, c syscall.RawC
 	}
 }
 
+// NewDialer returns a TCP dialer that refuses blocked destinations, for a
+// client that is not HTTP (the NATS consumer's connection to an external
+// server, say). The check runs on each address after name resolution, the
+// same one NewClient's transport uses; the error wraps ErrBlockedAddress.
+func NewDialer(timeout time.Duration, allowPrivate bool) *net.Dialer {
+	return &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second, Control: dialControl(allowPrivate)}
+}
+
 // NewClient returns an HTTP client that refuses blocked destinations at dial
 // time. It ignores proxy environment variables (a proxy would turn the check
 // into one on the proxy) and does not follow redirects, so a credential is

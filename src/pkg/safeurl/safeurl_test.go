@@ -2,6 +2,7 @@ package safeurl
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -218,4 +219,36 @@ func TestAllowPrivateFromEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+// NewDialer is the dial check for clients that are not HTTP. A hostname that
+// resolves to loopback is refused after the lookup; the dev flag lets it through.
+func TestNewDialer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+
+	for _, host := range []string{"127.0.0.1", "localhost"} {
+		_, err := NewDialer(2*time.Second, false).Dial("tcp", net.JoinHostPort(host, port))
+		if !errors.Is(err, ErrBlockedAddress) {
+			t.Errorf("dial %s: error %v does not wrap ErrBlockedAddress", host, err)
+		}
+	}
+	c, err := NewDialer(2*time.Second, true).Dial("tcp", net.JoinHostPort("127.0.0.1", port))
+	if err != nil {
+		t.Fatalf("dev flag: dial refused: %v", err)
+	}
+	_ = c.Close()
 }

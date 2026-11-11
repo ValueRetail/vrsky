@@ -1077,6 +1077,35 @@ services:
     networks:
       - vrsky-network
 
+  # NATS Consumer (#814) - reads an external JetStream through a durable pull
+  # consumer and publishes into the pipeline, acking the source only after the
+  # publish. The external server is a partner's (Retailhero), not this NATS.
+  nats-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/nats-consumer/Dockerfile
+    container_name: vrsky-nats-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # password or .creds file (*_secret_id) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Lets a local NATS server (private address, no TLS) be the source.
+      ALLOW_PRIVATE_UPSTREAMS: "${ALLOW_PRIVATE_UPSTREAMS:-true}"
+      # Aux HTTP port serving /test-connection for the UI's connection-test (#82).
+      WORKER_HTTP_PORT: "9340"
+    ports:
+      - "127.0.0.1:9340:9340"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
   # RabbitMQ Producer (#78) - publishes each pipeline message to an exchange/
   # queue as a persistent message (delivery_mode=2).
   rabbitmq-producer:

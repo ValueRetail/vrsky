@@ -14,6 +14,7 @@ set by `config.type` on the node. Sources are **consumers**, destinations are
 | [Cloud storage](cloud-storage.md) | ✓ | ✓ | `cloud_storage` |
 | [Apache Kafka](kafka.md) | ✓ | ✓ | `kafka` |
 | [RabbitMQ](rabbitmq.md) | ✓ | ✓ | `rabbitmq` |
+| [NATS JetStream (external)](nats.md) | ✓ | — | `nats` |
 | [Salesforce](salesforce.md) | ✓ | ✓ | `salesforce` |
 | [Sitoo (POS)](sitoo.md) | ✓ (poll + webhook) | ✓ | `sitoo` |
 | [Front Systems (POS)](front-systems.md) | ✓ (webhook) | ✓ | `front_systems` |

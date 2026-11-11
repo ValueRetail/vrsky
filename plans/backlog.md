@@ -1546,11 +1546,49 @@ Last updated 2026-10-28.
     Central, Retailhero) has none. An aggregator node that holds the pages of
     one run and emits a single message when the run ends would feed it; it
     needs a run boundary the envelope does not carry today. Found in #815.
+    Filed as #841.
 
 209. **`DeliverStream` for the Bifrost catalogue producer.** It reads the whole
     message into memory (the claim-check cap is 128 MiB). A 200,000-article
     list is about 60 MB; streaming the array item by item would hold only one
-    batch. Found in #815.
+    batch. Found in #815. Filed as #842.
+
+210. **The connection test cannot reach most workers in AKS.**
+    `buildTestTarget` (`src/pkg/managementapi/connection_test_endpoint.go`)
+    defaults to compose names such as `http://rabbitmq-consumer:9230`, and
+    no `TEST_URL_*` variable is set in the manifests, while the AKS services
+    are `vrsky-<name>` in vrsky-platform. Build the defaults from
+    `workerAddrTemplate()` the way schema discovery does (the NATS case
+    already does). Check with the Test button on a deployed Kafka or SFTP
+    node first. Found in #814. Filed as #753.
+
+211. **Durable dedup for the NATS source.** `nats-consumer` relies on
+    VRSKY_DATA's five-minute duplicate window. A crash between VRSky's
+    publish ack and the source ack, followed by more than five minutes of
+    downtime, publishes the message again. A per-connection store of seen
+    `Nats-Msg-Id`s (like `pkg/idempotency` for webhooks) would close it.
+    Found in #814. Filed as #845.
+
+212. **Schema preview for the NATS source.** The builder's "Discover fields"
+    has no `nats` entry; it needs a `/sample-data/` endpoint that peeks the
+    last message on the filter without acking (an ordered consumer) and a
+    row in `schemaSources` and `schemaDiscovery.ts`. Until then the preview
+    works once data has flowed (last_payload). Found in #814. Filed as #846.
+
+213. **The Kafka brokers box eats the comma.** `KafkaConfigEditor`
+    (`ui/src/components/Pipeline/PropertyEditor.tsx`) rebuilds the text from
+    the parsed list on every keystroke, so typing `a,` leaves `a` and a second
+    broker can only be pasted. Keep the typed text in local state, as the
+    NATS editor does. Found in #814. Filed as #847.
+
+214. **Worker test and sample endpoints take any tenant.** The aux ports of
+    the NATS, SFTP, cloud-storage and similar workers resolve stored secrets
+    for the `tenant_id` in the body, and anything in the cluster can reach
+    them (the Services are ClusterIP without a NetworkPolicy). The management
+    API sets the tenant from the session, but a pod can call the worker
+    directly. A shared token like `FILE_PRODUCER_AUTH_TOKEN`, or a
+    NetworkPolicy that admits only the management API. Found in #814.
+    Filed as #753.
 
 ## Human
 
