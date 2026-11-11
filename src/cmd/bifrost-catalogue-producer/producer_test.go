@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,9 +15,11 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
 func testProducer() *catalogueProducer {
@@ -30,11 +34,46 @@ func testProducer() *catalogueProducer {
 // node builds a node's config JSON; extra is merged into the bifrost_catalogue
 // block, e.g. `"mode":"full"`.
 func nodeJSON(baseURL, extra string) string {
-	block := fmt.Sprintf(`"base_url":%q,"token":%q`, baseURL, stubToken)
+	block := fmt.Sprintf(`"base_url":%q,"token_secret_id":%q`, baseURL, harness.TestSecretID)
 	if extra != "" {
 		block += "," + extra
 	}
 	return `{"type":"bifrost_catalogue","bifrost_catalogue":{` + block + `}}`
+}
+
+// secretCiphertext sets the encryption key for the test and returns stubToken
+// encrypted with it, as the secrets table would hold it.
+func secretCiphertext(t *testing.T) string {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	keyHex := hex.EncodeToString(key)
+	t.Setenv(crypto.KeyEnvVar, keyHex)
+	ct, err := crypto.Encrypt(stubToken, keyHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ct
+}
+
+// expectNodeRead expects one read of the connection holding the given producer
+// node configs, and one secret read for every config that references one.
+func expectNodeRead(t *testing.T, mock sqlmock.Sqlmock, ct, edges string, configs ...string) {
+	t.Helper()
+	parts := make([]string, len(configs))
+	for i, c := range configs {
+		parts[i] = fmt.Sprintf(`{"id":"n%d","type":"producer","config":%s}`, i+1, c)
+	}
+	mock.ExpectQuery("SELECT nodes, edges FROM connections").WithArgs("conn-1", "tenant-1").
+		WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).AddRow([]byte("["+strings.Join(parts, ",")+"]"), []byte(edges)))
+	for _, c := range configs {
+		if strings.Contains(c, "token_secret_id") {
+			mock.ExpectQuery(`FROM secrets`).WithArgs(harness.TestSecretID, "tenant-1").
+				WillReturnRows(sqlmock.NewRows([]string{"ciphertext"}).AddRow(ct))
+		}
+	}
 }
 
 // deliver runs Deliver once against a connection holding the given producer
@@ -46,12 +85,7 @@ func deliver(t *testing.T, p *catalogueProducer, env *envelope.Envelope, edges s
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	parts := make([]string, len(configs))
-	for i, c := range configs {
-		parts[i] = fmt.Sprintf(`{"id":"n%d","type":"producer","config":%s}`, i+1, c)
-	}
-	mock.ExpectQuery("SELECT nodes, edges FROM connections").WithArgs("conn-1", "tenant-1").
-		WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).AddRow([]byte("["+strings.Join(parts, ",")+"]"), []byte(edges)))
+	expectNodeRead(t, mock, secretCiphertext(t), edges, configs...)
 	p.db = db
 	if env.TenantID == "" {
 		env.TenantID = "tenant-1"
@@ -459,8 +493,7 @@ func TestAbortSurvivesCancelledContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	mock.ExpectQuery("SELECT nodes, edges FROM connections").
-		WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).AddRow([]byte(`[{"id":"n1","type":"producer","config":`+nodeJSON(stub.URL(), `"mode":"delta","batch_size":100`)+`}]`), []byte(`[]`)))
+	expectNodeRead(t, mock, secretCiphertext(t), `[]`, nodeJSON(stub.URL(), `"mode":"delta","batch_size":100`))
 	p.db = db
 
 	err = p.Deliver(ctx, &envelope.Envelope{ID: "env-1", TenantID: "tenant-1", IntegrationID: "conn-1", Payload: []byte(items(500))})
@@ -529,9 +562,10 @@ func TestIncompleteNodeIsRetriableAndSendsNothing(t *testing.T) {
 		allow  bool
 		want   string
 	}{
-		{"no base_url", `{"type":"bifrost_catalogue","bifrost_catalogue":{"token":"t"}}`, true, "no base_url"},
+		{"no base_url", `{"type":"bifrost_catalogue","bifrost_catalogue":{"token_secret_id":"` + harness.TestSecretID + `"}}`, true, "base_url is required"},
 		{"no token", `{"type":"bifrost_catalogue","bifrost_catalogue":{"base_url":"` + stub.URL() + `"}}`, true, "no token"},
-		{"no block", `{"type":"bifrost_catalogue"}`, true, "no base_url"},
+		{"token stored in plaintext", `{"type":"bifrost_catalogue","bifrost_catalogue":{"base_url":"` + stub.URL() + `","token":"` + stubToken + `"}}`, true, "stored in plaintext"},
+		{"no block", `{"type":"bifrost_catalogue"}`, true, "no token"},
 		{"bad mode", nodeJSON(stub.URL(), `"mode":"replace"`), true, `mode "replace"`},
 		{"batch too big", nodeJSON(stub.URL(), `"batch_size":100000`), true, "batch_size"},
 		{"negative batch", nodeJSON(stub.URL(), `"batch_size":-1`), true, "batch_size"},
@@ -664,8 +698,7 @@ func TestServesConnection(t *testing.T) {
 	p := testProducer()
 	p.db = db
 
-	mock.ExpectQuery("FROM connections").WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).
-		AddRow([]byte(`[{"id":"n1","type":"producer","config":`+nodeJSON("https://x.example", "")+`}]`), []byte(`[]`)))
+	expectNodeRead(t, mock, secretCiphertext(t), `[]`, nodeJSON("https://x.example", ""))
 	if !p.ServesConnection(context.Background(), "tenant-1", "conn-1") {
 		t.Error("false for a connection with a Bifrost node")
 	}
@@ -707,5 +740,19 @@ func TestCommitReportReadability(t *testing.T) {
 				t.Errorf("error is Permanent: %v", err)
 			}
 		})
+	}
+}
+
+// Secrets are write-only: only token_secret_id may resolve. Another
+// *_secret_id would resolve into a setting that can come back in an error text
+// ("mode %q is not …"). Here mode_secret_id would make the mode the token.
+func TestOnlyTokenSecretResolves(t *testing.T) {
+	stub := newBifrostStub(t)
+	cfg := nodeJSON(stub.URL(), fmt.Sprintf(`"mode_secret_id":%q`, harness.TestSecretID))
+	if err := deliver(t, testProducer(), &envelope.Envelope{Payload: []byte(items(2))}, `[]`, cfg); err != nil {
+		t.Fatalf("Deliver: %v (mode_secret_id must be ignored, leaving the default mode)", err)
+	}
+	if b := stub.beginBodies(); len(b) != 1 || b[0].Kind != "delta" {
+		t.Errorf("begin bodies = %+v, want one delta import", b)
 	}
 }

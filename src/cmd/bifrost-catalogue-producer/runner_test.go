@@ -77,9 +77,12 @@ func runThroughRunner(t *testing.T, stub *bifrostStub, extra, payload string) (*
 	t.Cleanup(func() { _ = db.Close() })
 	mock.MatchExpectationsInOrder(false)
 	nodes := `[{"id":"p1","type":"producer","config":` + nodeJSON(stub.URL(), extra) + `}]`
+	ct := secretCiphertext(t)
 	for i := 0; i < 20; i++ { // ServesConnection and Deliver read, five attempts
 		mock.ExpectQuery("FROM connections WHERE id").
 			WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).AddRow([]byte(nodes), []byte(`[]`)))
+		mock.ExpectQuery(`FROM secrets`).WithArgs(harness.TestSecretID, "tenant-x").
+			WillReturnRows(sqlmock.NewRows([]string{"ciphertext"}).AddRow(ct))
 	}
 	p := testProducer()
 	p.logger = slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -108,6 +108,7 @@ sftp-producer             producer -
 kafka-producer            producer -
 rabbitmq-producer         producer -
 salesforce-producer       producer -
+bifrost-catalogue-producer producer -
 "
 
 # extra_env <name> — connector-specific env beyond the shared block.

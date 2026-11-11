@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
@@ -76,11 +77,6 @@ type CatalogueConfig struct {
 	AllowShrinkReason string `json:"allow_shrink_reason"`
 }
 
-type nodeConfig struct {
-	Type    string           `json:"type"`
-	Bifrost *CatalogueConfig `json:"bifrost_catalogue"`
-}
-
 type node struct {
 	ID     string          `json:"id"`
 	Type   string          `json:"type"`
@@ -92,6 +88,10 @@ type boundNode struct {
 	id  string
 	cfg *CatalogueConfig
 	rt  route
+	// plainToken: the node holds the token in the clear (token, not
+	// token_secret_id). badBlock: the settings block does not parse.
+	plainToken bool
+	badBlock   error
 }
 
 // Configure wires dependencies. Called once before Deliver.
@@ -150,7 +150,15 @@ func (p *catalogueProducer) Deliver(ctx context.Context, env *envelope.Envelope)
 	// A node with a setting missing is node config, not a bad message: it is
 	// retried and kept in the DLQ for a replay once fixed (#734).
 	for _, n := range eligible {
-		if err := p.validate(n.cfg); err != nil {
+		err := n.badBlock
+		switch {
+		case err != nil:
+		case n.plainToken:
+			err = errors.New("token is stored in plaintext on the node; store it as a secret (token_secret_id)")
+		default:
+			err = p.validate(n.cfg)
+		}
+		if err != nil {
 			return sdk.Retriable(fmt.Errorf("bifrost catalogue node %s of connection %s: %w", n.id, env.IntegrationID, err))
 		}
 	}
@@ -189,14 +197,12 @@ func (p *catalogueProducer) Deliver(ctx context.Context, env *envelope.Envelope)
 
 // validate checks the node's settings.
 func (p *catalogueProducer) validate(c *CatalogueConfig) error {
-	if strings.TrimSpace(c.BaseURL) == "" {
-		return errors.New("no base_url")
-	}
 	if strings.TrimSpace(c.Token) == "" {
 		return errors.New("no token")
 	}
-	if err := safeurl.CheckBaseURL(c.BaseURL, p.allowPrivate); err != nil {
-		return fmt.Errorf("base_url refused: %w", err)
+	// The management API runs the same check when the connection starts.
+	if err := connectorurl.BifrostCatalogue(c.BaseURL, p.allowPrivate); err != nil {
+		return err
 	}
 	switch m := strings.ToLower(strings.TrimSpace(c.Mode)); m {
 	case "", modeFull, modeDelta:
@@ -377,24 +383,29 @@ func (p *catalogueProducer) getNodes(ctx context.Context, connectionID, tenantID
 		}
 		// Find our nodes before resolving secrets: an unreadable secret on
 		// another connector's node is not a reason to hold this message.
-		var nc nodeConfig
+		var nc struct {
+			Type    string          `json:"type"`
+			Bifrost json.RawMessage `json:"bifrost_catalogue"`
+		}
 		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "bifrost_catalogue" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
+		cfg := &CatalogueConfig{}
+		bn := boundNode{id: n.ID, cfg: cfg, rt: routeTo(n.ID, nodes, edgesJSON)}
+		if len(nc.Bifrost) > 0 && string(nc.Bifrost) != "null" {
+			bn.plainToken = hasPlaintextToken(nc.Bifrost)
+			// Only token_secret_id may resolve. Another *_secret_id would
+			// resolve into a setting whose value can come back in an error
+			// text ("mode %q is not …"), and secrets are write-only.
+			resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, onlyTokenSecret(nc.Bifrost))
+			if rerr != nil {
+				return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
+			}
+			if err := json.Unmarshal(resolved, cfg); err != nil {
+				bn.badBlock = fmt.Errorf("settings cannot be read: %w", err)
+			}
 		}
-		nc = nodeConfig{}
-		if err := json.Unmarshal(resolved, &nc); err != nil {
-			continue
-		}
-		cfg := nc.Bifrost
-		if cfg == nil {
-			// Still ours; validate reports the missing settings.
-			cfg = &CatalogueConfig{}
-		}
-		out = append(out, boundNode{id: n.ID, cfg: cfg, rt: routeTo(n.ID, nodes, edgesJSON)})
+		out = append(out, bn)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no bifrost catalogue producer node found")
@@ -457,4 +468,36 @@ func routeTo(nodeID string, nodes []node, edgesJSON []byte) route {
 		return r
 	}
 	return route{}
+}
+
+// hasPlaintextToken reports a token stored in the clear in the node's block,
+// before secrets are resolved. The builder mints it into the secrets vault on
+// deploy (token_secret_id); a config written some other way with the value
+// inline is refused rather than used.
+func hasPlaintextToken(block json.RawMessage) bool {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(block, &raw) != nil {
+		return false
+	}
+	var s string
+	return json.Unmarshal(raw["token"], &s) == nil && s != ""
+}
+
+// onlyTokenSecret drops every *_secret_id key from block except
+// token_secret_id. A block that is not an object is returned as it is.
+func onlyTokenSecret(block json.RawMessage) json.RawMessage {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(block, &raw) != nil || raw == nil {
+		return block
+	}
+	for k := range raw {
+		if strings.HasSuffix(k, "_secret_id") && k != "token_secret_id" {
+			delete(raw, k)
+		}
+	}
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return block
+	}
+	return out
 }

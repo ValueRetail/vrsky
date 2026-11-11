@@ -80,6 +80,7 @@ build_connectors() {
     nats-consumer salesforce-consumer remote-agent
     http-producer db-producer file-producer cloud-storage-producer
     sftp-producer kafka-producer rabbitmq-producer salesforce-producer
+    bifrost-catalogue-producer
   )
   for c in "${generic[@]}"; do
     build "vrsky/${c}:latest" "src/cmd/${c}/Dockerfile"

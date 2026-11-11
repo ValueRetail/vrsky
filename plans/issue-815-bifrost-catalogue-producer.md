@@ -145,9 +145,13 @@ package, `make lint-connector`, `make lint-tenant`, `go test ./pkg/managementapi
 redaction off, permanent leaking in a mixed join, idempotency key dropped, full
 accepting a bare object; each fails a test.
 
-## Registration (follows once #814 has merged; not in this PR)
+## Registration (done after #814 merged, in this PR)
 
-Every file a new connector type touches, with the exact change:
+Every file the new type touched. Differences from the first draft: the
+connector refuses an inline `token` and resolves only `token_secret_id` (as
+nats-consumer does for its credentials); `token` was already in the UI's
+`SECRET_FIELDS`; there is no per-name Prometheus rule, only the scrape target;
+`postgres-tls.sh` expects 33 connectors.
 
 1. `infrastructure/azure/deploy-connectors-azure.sh`: in the `RETAIL` table add
    `bifrost-catalogue-producer producer -` (after `sitoo-producer producer -`).
