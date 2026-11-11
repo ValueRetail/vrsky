@@ -16,7 +16,7 @@
         <link rel="prev" href="../tenant/">
       
       
-        <link rel="next" href="../../security/whitepaper/">
+        <link rel="next" href="../bifrost-sales-to-retailhero/">
       
       
         
@@ -2053,6 +2053,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bifrost-sales-to-retailhero/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bifrost sales → Retailhero (template)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2664,6 +2692,13 @@ parent when it ends up empty: <code>order.id</code> → <code>orderId</code> on 
 gives <code>{"order":{},"orderId":1}</code>. Add a <code>remove</code> of <code>order</code> if the
 destination should not see it. <code>remove</code> itself still deletes only a top-level
 field with exactly the name given.</p>
+<p>The source <code>.</code> is the record itself. <code>copy</code> with source <code>.</code> puts the whole
+record under the target, and <code>each</code> with source <code>.</code> runs its item mappings on
+the record as if it were the only element of an array and writes a one-entry
+array. Together they wrap a record unchanged inside a larger object, which the
+<a href="../bifrost-sales-to-retailhero/">Bifrost sales → Retailhero template</a> uses to
+build a batch around a Basket event. Turn the node's <code>drop_unmapped</code> on with
+them, or the original fields stay beside the wrapper.</p>
 <p><code>to_string</code> writes numbers in plain decimal (<code>1000000</code>, not <code>1e+06</code>).</p>
 <p>The editor warns about a mapping the converter would skip or write wrongly:
 a missing source or target, a template with no expression, a type the
