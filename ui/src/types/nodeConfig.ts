@@ -117,6 +117,17 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     required: ['aad_tenant_id', 'company_id', 'client_id', 'client_secret'],
     numeric: [],
   },
+  // data-filter (FilterNodeConfig in src/cmd/data-filter/main.go)
+  filter: {
+    block: '',
+    keys: [
+      'rules', 'logic', 'extract_fields', 'flatten_path', 'flatten_fields', 'flatten_include',
+      'input_format', 'input_csv_delimiter', 'input_csv_no_header', 'input_csv_trim_space',
+      'input_xml_record_path', 'input_xml_attr_prefix', 'input_xml_text_key',
+    ],
+    required: [],
+    numeric: [],
+  },
   // data-converter (ConverterNodeConfig in src/cmd/data-converter/main.go)
   converter: {
     block: '',

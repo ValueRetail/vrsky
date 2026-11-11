@@ -1,0 +1,20 @@
+{
+  "logic": "and",
+  "rules": [
+    {
+      "field": "event_type",
+      "operator": "equals",
+      "value": "basket.sale-recorded"
+    },
+    {
+      "field": "source.kind",
+      "operator": "equals",
+      "value": "pos"
+    },
+    {
+      "field": "event_id",
+      "operator": "is_not_empty",
+      "value": ""
+    }
+  ]
+}

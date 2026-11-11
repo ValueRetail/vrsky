@@ -101,8 +101,9 @@ export default function OnboardingWizard() {
     setConfigs((prev) => {
       const next = JSON.parse(JSON.stringify(prev)) as Record<string, Record<string, unknown>>
       const n = Number(value)
-      getObj(next[f.nodeId], f.objectPath)[f.key] =
-        f.numeric && value.trim() !== '' && Number.isFinite(n) ? n : value
+      getObj(next[f.nodeId], f.objectPath)[f.key] = f.asList
+        ? value.trim() === '' ? [] : [value.trim()]
+        : f.numeric && value.trim() !== '' && Number.isFinite(n) ? n : value
       return next
     })
   }
@@ -123,9 +124,11 @@ export default function OnboardingWizard() {
     return template.fields.filter((f) => {
       const obj = readObj(configs[f.nodeId] || {}, f.objectPath)
       const v = obj[f.key]
-      const filled = f.numeric
-        ? typeof v === 'number' && Number.isFinite(v)
-        : typeof v === 'string' && v.trim() !== ''
+      const filled = f.asList
+        ? Array.isArray(v) && v.some((x) => typeof x === 'string' && x.trim() !== '')
+        : f.numeric
+          ? typeof v === 'number' && Number.isFinite(v)
+          : typeof v === 'string' && v.trim() !== ''
       if (f.secret) {
         const bound = obj[`${f.key}_secret_id`]
         return !filled && !(typeof bound === 'string' && bound !== '')
@@ -268,7 +271,11 @@ export default function OnboardingWizard() {
                     <label style={label}>{f.label}</label>
                     <input
                       style={input}
-                      value={obj[f.key] === undefined || obj[f.key] === null ? '' : String(obj[f.key])}
+                      value={
+                        Array.isArray(obj[f.key])
+                          ? String((obj[f.key] as unknown[])[0] ?? '')
+                          : obj[f.key] === undefined || obj[f.key] === null ? '' : String(obj[f.key])
+                      }
                       inputMode={f.numeric ? 'numeric' : undefined}
                       placeholder={f.placeholder}
                       onChange={(e) => setFieldValue(f, e.target.value)}

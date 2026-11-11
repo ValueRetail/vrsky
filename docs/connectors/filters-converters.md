@@ -90,6 +90,14 @@ gives `{"order":{},"orderId":1}`. Add a `remove` of `order` if the
 destination should not see it. `remove` itself still deletes only a top-level
 field with exactly the name given.
 
+The source `.` is the record itself. `copy` with source `.` puts the whole
+record under the target, and `each` with source `.` runs its item mappings on
+the record as if it were the only element of an array and writes a one-entry
+array. Together they wrap a record unchanged inside a larger object, which the
+[Bifrost sales → Retailhero template](bifrost-sales-to-retailhero.md) uses to
+build a batch around a Basket event. Turn the node's `drop_unmapped` on with
+them, or the original fields stay beside the wrapper.
+
 `to_string` writes numbers in plain decimal (`1000000`, not `1e+06`).
 
 The editor warns about a mapping the converter would skip or write wrongly:

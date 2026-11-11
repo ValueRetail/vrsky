@@ -1,0 +1,66 @@
+{
+  "profileVersion": "BIFROST-BASKET-v1",
+  "schemaVersion": "1",
+  "sourceInstanceId": "till-07",
+  "journalId": "J-TEST-01",
+  "entries": [
+    {
+      "operationId": "bifrost-sale-4f6b2d1e-8a3c-5b7d-9e0f-1a2b3c4d5e6f-r1",
+      "event": {
+        "event_id": "4f6b2d1e-8a3c-5b7d-9e0f-1a2b3c4d5e6f",
+        "event_type": "basket.sale-recorded",
+        "schema_version": 1,
+        "tenant_id": "demo",
+        "source": {
+          "kind": "pos",
+          "provider": "bifrost-till",
+          "instance_id": "till-07",
+          "location_id": "store-01"
+        },
+        "basket_id": "basket-01",
+        "basket_version": 10,
+        "occurred_at": "2026-09-22T12:06:05Z",
+        "correlation_id": "checkout-01",
+        "causation_id": "019a0000-0000-7000-8000-000000000001",
+        "actor": {
+          "kind": "service",
+          "id": "basket-sales-01"
+        },
+        "data": {
+          "sale_reference": {
+            "namespace": "bifrost-till.receipt",
+            "value": "T07-000042"
+          },
+          "inbound_event_id": "019a0000-0000-7000-8000-000000000001",
+          "previous_status": "checkout_pending",
+          "lines": [
+            {
+              "line_id": "6f1c2b9e-0d5a-5c8e-9b7a-3e2f1d4c5b6a",
+              "product": {
+                "gtin": "07038010009457",
+                "external_ids": [
+                  {
+                    "namespace": "bifrost-till.article",
+                    "value": "07038010009457"
+                  }
+                ]
+              },
+              "quantity": "1",
+              "store_id": "store-01",
+              "legal_entity_id": "entity-01",
+              "at": "2026-09-22T12:06:00Z",
+              "unit_price": {
+                "amount": "900.00",
+                "currency": "NOK"
+              },
+              "vat": "0.25"
+            }
+          ],
+          "removed_line_ids": [
+            "a2d4e6f8-1b3c-5d7e-9f0a-2b4c6d8e0f1a"
+          ]
+        }
+      }
+    }
+  ]
+}
