@@ -576,7 +576,7 @@ export const TEMPLATES: PipelineTemplate[] = [
     id: 'retailhero-to-bifrost',
     name: 'Articles and prices → tills (Retailhero → Bifrost)',
     summary:
-      'Beta: cannot run end to end yet (needs Bifrost price_incl_vat and an agreed Retailhero message). Reads Retailhero price and article batches from its NATS partner account and sends them to the Bifrost catalogue-api as a delta. One master per store: switch the Business Central price path off for these stores.',
+      'Beta: cannot run end to end yet (needs Bifrost price_incl_vat, and Retailhero does not publish the Bifrost batches yet). Reads Retailhero price and article batches from its NATS partner account and sends them to the Bifrost catalogue-api as a delta. One master per store: switch the Business Central price path off for these stores.',
     icon: '🏷️',
     sourceLabel: 'Retailhero (NATS partner account)',
     destLabel: 'Bifrost (tills)',
@@ -666,17 +666,17 @@ export const TEMPLATES: PipelineTemplate[] = [
       },
       {
         nodeId: 'src', objectPath: 'nats', key: 'stream', label: 'JetStream stream',
-        help: 'The stream the partner account exports. Retailhero tells you the name.', placeholder: 'RH_EVENTS',
+        help: 'The Retailhero stream that holds the batch event, RH_EVT_V1_<owner>. Retailhero tells you the name.', placeholder: 'RH_EVT_V1_…',
       },
       {
         nodeId: 'src', objectPath: 'nats', key: 'durable', label: 'Durable consumer name',
-        help: 'Keep it unique per pipeline: two pipelines on one durable split the messages between them.',
-        placeholder: 'vrsky-bifrost-prices',
+        help: "Retailhero's operator creates it, named vrsky_<event type with dots as hyphens>_<tenant>. Keep it unique per pipeline: two pipelines on one durable split the messages between them.",
+        placeholder: 'vrsky_<event-type>_<tenant>',
       },
       {
         nodeId: 'src', objectPath: 'nats', key: 'filter_subject', label: 'Subject filter',
-        help: 'Only the subjects that carry the Bifrost article and price batches, e.g. rh.evt.v1.<your tenant>.… Retailhero lists them.',
-        placeholder: 'rh.evt.v1.acme.>',
+        help: "The one subject of the batch event, rh.evt.v1.<tenant>.<owner>.<event type>. Each Retailhero durable is filtered to exactly one subject. The product and price events Retailhero publishes today are not batches and can't be used here.",
+        placeholder: 'rh.evt.v1.<tenant>.<owner>.<event type>',
       },
       {
         nodeId: 'dst', objectPath: 'bifrost_catalogue', key: 'base_url', label: 'Bifrost catalogue-api address',
