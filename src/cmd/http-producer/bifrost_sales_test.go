@@ -143,3 +143,36 @@ func TestBifrostSales_ARedeliveredSaleCarriesTheSameOperationID(t *testing.T) {
 		t.Fatalf("two deliveries of one sale gave %d distinct operation IDs: %v", len(stub.ops), stub.ops)
 	}
 }
+
+// A return batch (#852) goes out the same way, unchanged, with the return's
+// operation ID and the till's journal position.
+func TestBifrostSales_AReturnBatchReachesTheIntakeUnchanged(t *testing.T) {
+	stub := &retailheroIntake{ops: map[string]int{}}
+	srv := httptest.NewServer(stub)
+	defer srv.Close()
+	h := startBifrostProducer(t, srv.URL)
+
+	golden, err := os.ReadFile(filepath.Join("..", "..", "test", "fixtures", "bifrost", "intake-return-batch.json"))
+	if err != nil {
+		t.Fatalf("read golden return batch: %v", err)
+	}
+	h.Publish(t, batchEnvelope("bifrost-env-r1", golden))
+
+	harness.Eventually(t, 5*time.Second, "intake received the return", func() bool { return stub.requests() == 1 })
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if string(stub.bodies[0]) != string(golden) {
+		t.Errorf("body changed on the way:\n got: %s\nwant: %s", stub.bodies[0], golden)
+	}
+	if n := stub.ops["bifrost-return-4cd196df-f270-5c29-b5ed-506059330c21-r1"]; n != 1 {
+		t.Errorf("return operation seen %d times, want 1 (%v)", n, stub.ops)
+	}
+	var batch struct {
+		Entries []struct {
+			JournalPosition string `json:"journalPosition"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(stub.bodies[0], &batch); err != nil || len(batch.Entries) != 1 || batch.Entries[0].JournalPosition != "43" {
+		t.Errorf("journalPosition = %+v (%v), want \"43\"", batch.Entries, err)
+	}
+}

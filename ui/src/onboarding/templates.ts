@@ -468,7 +468,7 @@ export const TEMPLATES: PipelineTemplate[] = [
     id: 'bifrost-sales-to-retailhero',
     name: 'POS sales → Retailhero (Bifrost Basket → Retailhero)',
     summary:
-      'Beta: against a Proposed Retailhero contract. Sends each Bifrost till sale from the tenant JetStream to Retailhero POS reconciliation, one batch per sale, with an operation ID derived from the Basket event.',
+      'Beta: against a Proposed Retailhero contract. Sends each Bifrost till sale and return from the tenant JetStream to Retailhero POS reconciliation, one batch per event, with an operation ID derived from the Basket event and the till journal position.',
     icon: '🧾',
     sourceLabel: 'Bifrost Basket (NATS JetStream)',
     destLabel: 'Retailhero (HTTP intake)',
@@ -489,13 +489,13 @@ export const TEMPLATES: PipelineTemplate[] = [
         type: 'filter',
         // The Retailhero profile refuses a whole batch on an event type it
         // does not map (basket.created, basket.priced, ...), and a
-        // sale-recorded from a channel that is not a POS. Only a till sale
-        // is forwarded: basket.completed and basket.cancelled map to no fact
-        // (they come back as "skipped"), so sending them adds nothing.
+        // sale-recorded from a channel that is not a POS. Only a till sale or
+        // return is forwarded: basket.completed and basket.cancelled map to
+        // no fact (they come back as "skipped"), so sending them adds nothing.
         config: {
           logic: 'and',
           rules: [
-            { field: 'event_type', operator: 'equals', value: 'basket.sale-recorded' },
+            { field: 'event_type', operator: 'in', value: 'basket.sale-recorded,basket.return-recorded' },
             { field: 'source.kind', operator: 'equals', value: 'pos' },
             // The operation ID is built from event_id; without one every such
             // message would share the literal ID and be answered with the first.
@@ -508,9 +508,11 @@ export const TEMPLATES: PipelineTemplate[] = [
         type: 'converter',
         // Wraps the Basket event, unchanged, as the one entry of a
         // BIFROST-BASKET-v1 batch. The lines are not mapped here: Retailhero's
-        // profile derives net, tax and gross exactly from unit_price, vat and
-        // quantity, which a converter cannot do without rounding. The wizard
-        // fills mappings.3 (journalId). Field table and open questions:
+        // profile reads the money from the event itself. The operation ID
+        // depends on the event type (sale or return), and journalPosition is
+        // the till's journal_sequence; an event without either is
+        // dead-lettered with the field named (required). The wizard fills
+        // mappings.3 (journalId). Field table and open questions:
         // docs/connectors/bifrost-sales-to-retailhero.md.
         config: {
           drop_unmapped: true,
@@ -525,7 +527,17 @@ export const TEMPLATES: PipelineTemplate[] = [
               target: 'entries',
               drop_unmapped: true,
               mappings: [
-                { type: 'template', source: '', target: 'operationId', expression: 'bifrost-sale-{event_id}-r1' },
+                {
+                  type: 'lookup',
+                  source: 'event_type',
+                  target: 'operationId',
+                  required: true,
+                  values: {
+                    'basket.sale-recorded': 'bifrost-sale-{event_id}-r1',
+                    'basket.return-recorded': 'bifrost-return-{event_id}-r1',
+                  },
+                },
+                { type: 'to_string', source: 'data.journal_sequence', target: 'journalPosition', required: true },
                 { type: 'copy', source: '.', target: 'event' },
               ],
             },

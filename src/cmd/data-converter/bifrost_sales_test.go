@@ -8,6 +8,7 @@ package main
 // Retailhero intake, so the two halves of the template meet in one golden.
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -56,8 +57,8 @@ func TestTemplate_BifrostSale_WrapsTheEventAsOneBatchEntry(t *testing.T) {
 	assertJSONEqual(t, "batch", decodeJSON(t, got[0].Payload), decodeJSON(t, bifrostFixture(t, "intake-sale-batch.json")))
 }
 
-// The lines are not touched here: Retailhero derives net, tax and gross from
-// unit_price, vat and quantity, exactly. A converter that rounded or renamed
+// The lines are not touched here: Retailhero reads the money from the event
+// (line_ex_vat, line_vat, line_inc_vat). A converter that rounded or renamed
 // them would change what Retailhero reconciles.
 func TestTemplate_BifrostSale_LeavesTheLinesAsBifrostSentThem(t *testing.T) {
 	event := bifrostFixture(t, "basket-sale-recorded.v1.json")
@@ -81,7 +82,7 @@ func TestTemplate_BifrostSale_LeavesTheLinesAsBifrostSentThem(t *testing.T) {
 	}
 	for k := range entries[0].(map[string]interface{}) {
 		switch k {
-		case "operationId", "event":
+		case "operationId", "journalPosition", "event":
 		default:
 			t.Errorf("unexpected entry member %q", k)
 		}
@@ -156,5 +157,132 @@ func TestApplyMappings_DotSourceOnOtherTypesIsSkipped(t *testing.T) {
 		cfg := &ConverterNodeConfig{Mappings: []FieldMapping{{Type: typ, Source: ".", Target: "t"}}}
 		got := mapObj(t, `{"a":1}`, cfg)
 		assertJSONEqual(t, "type "+typ, got, mustJSON(t, `{"a":1}`))
+	}
+}
+
+// A Basket return (#852) goes out the same way as a sale, with the return's
+// operation ID: bifrost-return-<event_id>-r1.
+func TestTemplate_BifrostReturn_WrapsTheEventAsOneBatchEntry(t *testing.T) {
+	event := bifrostFixture(t, "basket-return-recorded.v1.json")
+	got := throughJetStream(t, bifrostConfig(t), inputEnvelope(event, 1), 1)
+	if len(got) != 1 {
+		t.Fatalf("want one batch for one return, got %d", len(got))
+	}
+	assertJSONEqual(t, "batch", decodeJSON(t, got[0].Payload), decodeJSON(t, bifrostFixture(t, "intake-return-batch.json")))
+}
+
+// journalPosition is the till's journal_sequence as a decimal string (#851),
+// for a sale and a return alike; sales and returns share one series per till.
+func TestTemplate_Bifrost_JournalPositionIsTheJournalSequenceAsText(t *testing.T) {
+	for name, want := range map[string]string{"basket-sale-recorded.v1.json": "42", "basket-return-recorded.v1.json": "43"} {
+		got := throughJetStream(t, bifrostConfig(t), inputEnvelope(bifrostFixture(t, name), 1), 1)
+		entry := decodeJSON(t, got[0].Payload).(map[string]interface{})["entries"].([]interface{})[0].(map[string]interface{})
+		if jp, ok := entry["journalPosition"].(string); !ok || jp != want {
+			t.Errorf("%s: journalPosition = %#v, want the string %q", name, entry["journalPosition"], want)
+		}
+	}
+}
+
+// An event Retailhero would refuse is not sent: one without a journal position
+// (#851), or of a type the operation ID has no form for. The converter
+// publishes nothing and fails the message with the field named, so it is
+// retried and then dead-lettered with that reason in X-Vrsky-Last-Error.
+func TestTemplate_Bifrost_AnEventRetailheroWouldRefuseIsNotSent(t *testing.T) {
+	cases := []struct {
+		name    string
+		fixture string
+		edit    func(ev map[string]interface{})
+		want    string
+	}{
+		{"sale without journal_sequence", "basket-sale-recorded.v1.json",
+			func(ev map[string]interface{}) { delete(ev["data"].(map[string]interface{}), "journal_sequence") }, `"data.journal_sequence"`},
+		{"sale with a null journal_sequence", "basket-sale-recorded.v1.json",
+			func(ev map[string]interface{}) { ev["data"].(map[string]interface{})["journal_sequence"] = nil }, `"data.journal_sequence"`},
+		{"return without journal_sequence", "basket-return-recorded.v1.json",
+			func(ev map[string]interface{}) { delete(ev["data"].(map[string]interface{}), "journal_sequence") }, `"data.journal_sequence"`},
+		{"event without data", "basket-sale-recorded.v1.json",
+			func(ev map[string]interface{}) { delete(ev, "data") }, `"data.journal_sequence"`},
+		{"an event type with no operation ID", "basket-sale-recorded.v1.json",
+			func(ev map[string]interface{}) { ev["event_type"] = "basket.completed" }, `"event_type" is "basket.completed"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var ev map[string]interface{}
+			if err := json.Unmarshal(bifrostFixture(t, c.fixture), &ev); err != nil {
+				t.Fatal(err)
+			}
+			c.edit(ev)
+			payload, _ := json.Marshal(ev)
+			out, err := throughHandler(t, bifrostConfig(t), inputEnvelope(payload, 1))
+			if err == nil {
+				t.Fatal("the message was acked; it must fail so it is retried and dead-lettered")
+			}
+			if !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "required field missing") {
+				t.Errorf("error %q does not name %s as a missing required field", err, c.want)
+			}
+			if len(out) != 0 {
+				t.Errorf("a batch was published for an event Retailhero would refuse: %s", out[0].Payload)
+			}
+		})
+	}
+}
+
+// lookup picks a text by the source's value and fills it in like a template.
+// A value with no entry writes nothing unless the mapping is required.
+func TestApplyMappings_Lookup(t *testing.T) {
+	cfg := &ConverterNodeConfig{DropUnmapped: true, Mappings: []FieldMapping{
+		{Type: "lookup", Source: "kind", Target: "op", Values: map[string]string{"a": "op-a-{id}", "7": "seven"}},
+	}}
+	assertJSONEqual(t, "match", mapObj(t, `{"kind":"a","id":"x1"}`, cfg), mustJSON(t, `{"op":"op-a-x1"}`))
+	assertJSONEqual(t, "number key", mapObj(t, `{"kind":7}`, cfg), mustJSON(t, `{"op":"seven"}`))
+	assertJSONEqual(t, "no entry", mapObj(t, `{"kind":"b","id":"x1"}`, cfg), mustJSON(t, `{}`))
+	assertJSONEqual(t, "missing", mapObj(t, `{"id":"x1"}`, cfg), mustJSON(t, `{}`))
+	assertJSONEqual(t, "null", mapObj(t, `{"kind":null}`, cfg), mustJSON(t, `{}`))
+}
+
+// checkRequired names the first required source a record lacks, inside each
+// arrays with the element's index, and passes a record that has them all.
+func TestCheckRequired(t *testing.T) {
+	maps := []FieldMapping{
+		{Type: "to_string", Source: "n", Target: "pos", Required: true},
+		{Type: "rename", Source: "opt", Target: "o"},
+		{Type: "each", Source: "lines", Target: "l", Mappings: []FieldMapping{{Type: "copy", Source: "sku", Target: "s", Required: true}}},
+		{Type: "lookup", Source: "k", Target: "op", Required: true, Values: map[string]string{"x": "y"}},
+	}
+	cases := []struct{ in, want string }{
+		{`{"n":1,"k":"x","lines":[{"sku":"a"}]}`, ""},
+		{`{"n":0,"k":"x"}`, ""}, // 0 is a value; Retailhero judges it
+		{`{"k":"x"}`, `"n" (mapped to "pos") is missing`},
+		{`{"n":"","k":"x"}`, `"n" (mapped to "pos") is missing`},
+		{`{"n":1,"k":"x","lines":[{"sku":"a"},{"qty":1}]}`, `lines[1]: required field missing: "sku"`},
+		{`{"n":1,"k":"z"}`, `"k" is "z", which has no entry`},
+		{`{"n":1}`, `"k" (mapped to "op") is missing`},
+	}
+	for _, c := range cases {
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(c.in), &obj); err != nil {
+			t.Fatal(err)
+		}
+		err := checkRequired(obj, maps)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: unexpected %v", c.in, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: error %v, want one with %q", c.in, err, c.want)
+		}
+	}
+}
+
+// The streamed path (payload over the rehydrate cap) refuses a record without
+// a required field the same way: the message fails, nothing is published.
+func TestConverter_StreamedRecordWithoutRequiredFieldFails(t *testing.T) {
+	store := newMemStore()
+	cfg := &ConverterNodeConfig{DropUnmapped: true, Mappings: []FieldMapping{{Type: "to_string", Source: "n", Target: "pos", Required: true}}}
+	s := newTestConverterService(store, &ConverterEntry{NodeID: "cv1", Config: cfg, PredIsConsumer: true})
+	s.rehydrateMax = 10 // below the payload: the streaming path
+	msg := refEnvelopeMsg(t, store, []byte(`[{"n":1},{"other":2}]`))
+	err := s.handleMessage(context.Background(), msg)
+	if err == nil || !strings.Contains(err.Error(), `"n" (mapped to "pos") is missing`) {
+		t.Fatalf("handleMessage = %v, want the missing required field", err)
 	}
 }

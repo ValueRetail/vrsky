@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -38,7 +39,7 @@ type Config struct {
 type FieldMapping struct {
 	Source     string      `json:"source"`               // source field path (e.g. "name")
 	Target     string      `json:"target"`               // target field name (e.g. "full_name")
-	Type       string      `json:"type,omitempty"`       // "rename", "copy", "static", "remove", "template", "to_string", "to_number", "each"
+	Type       string      `json:"type,omitempty"`       // "rename", "copy", "static", "remove", "template", "to_string", "to_number", "each", "lookup"
 	Value      interface{} `json:"value,omitempty"`      // for static type
 	Expression string      `json:"expression,omitempty"` // for template type
 
@@ -49,6 +50,19 @@ type FieldMapping struct {
 	// salesInvoiceLines); see plans/issue-435-sitoo-bc-mapping.md.
 	Mappings     []FieldMapping `json:"mappings,omitempty"`
 	DropUnmapped bool           `json:"drop_unmapped,omitempty"`
+
+	// For "lookup": the text to write for each value of Source (formatted as
+	// to_string would). The chosen text is filled in like a "template"
+	// expression, so "bifrost-sale-{event_id}-r1" works. A value with no
+	// entry writes nothing.
+	Values map[string]string `json:"values,omitempty"`
+
+	// Required: a record whose Source is missing, null or "" (or, for
+	// "lookup", has no entry in Values) is not converted. The message fails,
+	// is retried and then dead-lettered with the field named, so it can be
+	// replayed once the source is fixed (#851). Inside "each" the path is
+	// relative to the element.
+	Required bool `json:"required,omitempty"`
 }
 
 // ConverterNodeConfig is what the UI stores in the node config
@@ -338,6 +352,38 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 	return err
 }
 
+// requiredPresent checks every record of data against the node's "required"
+// mappings. A record that fails is not converted: the error goes back as the
+// message's failure, so it is retried and dead-lettered with the field named
+// in X-Vrsky-Last-Error (#851). Nothing is published for the message.
+func (s *ConverterService) requiredPresent(connectionID string, env *envelope.Envelope, entry *ConverterEntry, data interface{}) error {
+	check := func(obj map[string]interface{}) error {
+		return checkRequired(obj, entry.Config.Mappings)
+	}
+	var err error
+	switch d := data.(type) {
+	case []interface{}:
+		for i, item := range d {
+			if obj, ok := item.(map[string]interface{}); ok {
+				if err = check(obj); err != nil {
+					err = fmt.Errorf("record %d: %w", i+1, err)
+					break
+				}
+			}
+		}
+	case map[string]interface{}:
+		err = check(d)
+	}
+	if err == nil {
+		return nil
+	}
+	err = fmt.Errorf("converter node %s: %w", entry.NodeID, err)
+	s.logger.Warn("Record lacks a required field; not converted, the message will be retried and dead-lettered",
+		"connection_id", connectionID, "envelope_id", env.ID, "node_id", entry.NodeID, "error", err)
+	s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: err.Error(), Time: now()})
+	return err
+}
+
 // processEntry applies one converter node and republishes the result. It
 // returns an error only for infrastructure failures (offload, publish) — the
 // caller NAKs those; transform-logic failures emit a UI event and ack, exactly
@@ -384,6 +430,9 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	var transformed interface{} = data
 	var fieldCount int
 	if hasMapping {
+		if err := s.requiredPresent(connectionID, origEnv, entry, data); err != nil {
+			return err
+		}
 		switch d := data.(type) {
 		case []interface{}:
 			result := make([]interface{}, 0, len(d))
@@ -562,12 +611,17 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 		case "template":
 			// Template: simple string interpolation using {field} syntax
 			if m.Expression != "" {
-				value := m.Expression
-				for k, v := range obj {
-					value = strings.ReplaceAll(value, "{"+k+"}", fmt.Sprintf("%v", v))
-				}
-				setNestedField(result, m.Target, value)
+				setNestedField(result, m.Target, interpolate(m.Expression, obj))
 				applied++
+			}
+		case "lookup":
+			// Lookup: pick a text by the source's value, then fill it in
+			// like a template. No entry for the value: nothing is written.
+			if val, ok := getNestedField(obj, m.Source); ok && val != nil {
+				if text, found := m.Values[toString(val)]; found {
+					setNestedField(result, m.Target, interpolate(text, obj))
+					applied++
+				}
 			}
 		case "to_string":
 			if val, ok := getNestedField(obj, m.Source); ok {
@@ -619,6 +673,65 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 	}
 
 	return result, applied
+}
+
+// interpolate replaces each {field} in expr with the record's top-level field,
+// as the "template" mapping does.
+func interpolate(expr string, obj map[string]interface{}) string {
+	for k, v := range obj {
+		expr = strings.ReplaceAll(expr, "{"+k+"}", fmt.Sprintf("%v", v))
+	}
+	return expr
+}
+
+// errRequiredMissing marks a record that lacks a field a "required" mapping
+// reads.
+var errRequiredMissing = errors.New("required field missing")
+
+// checkRequired returns an error naming the first "required" mapping whose
+// source the record lacks (missing, null or ""), walking into "each" the way
+// applyMappings does. A "lookup" also fails when Values has no entry for the
+// value. Nil when every required source is there.
+func checkRequired(obj map[string]interface{}, mappings []FieldMapping) error {
+	for _, m := range mappings {
+		if m.Type == "each" {
+			val, ok := getSourceField(obj, m.Source)
+			if !ok {
+				continue
+			}
+			arr, isArr := val.([]interface{})
+			if m.Source == "." {
+				arr, isArr = []interface{}{obj}, true
+			}
+			if !isArr {
+				continue
+			}
+			for i, el := range arr {
+				if eo, isObj := el.(map[string]interface{}); isObj {
+					if err := checkRequired(eo, m.Mappings); err != nil {
+						if m.Source == "." {
+							return err
+						}
+						return fmt.Errorf("%s[%d]: %w", m.Source, i, err)
+					}
+				}
+			}
+			continue
+		}
+		if !m.Required {
+			continue
+		}
+		val, ok := getSourceField(obj, m.Source)
+		if !ok || val == nil || val == "" {
+			return fmt.Errorf("%w: %q (mapped to %q) is missing", errRequiredMissing, m.Source, m.Target)
+		}
+		if m.Type == "lookup" {
+			if _, found := m.Values[toString(val)]; !found {
+				return fmt.Errorf("%w: %q is %q, which has no entry (mapped to %q)", errRequiredMissing, m.Source, toString(val), m.Target)
+			}
+		}
+	}
+	return nil
 }
 
 // getSourceField is getNestedField for the mappings that may name the record

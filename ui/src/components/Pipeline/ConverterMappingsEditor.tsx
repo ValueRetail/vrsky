@@ -41,6 +41,28 @@ function mappingRowLabel(rowName: string, mapping: ConverterMapping): string {
 }
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
+// The types whose Required flag the converter honours: they read one source
+// field (checkRequired in src/cmd/data-converter/main.go). The checkbox shows
+// on a lookup row, and on any other such row once the flag is set (a template
+// sets it), so it can be seen and cleared. Plain rows stay as they were.
+const READS_ONE_FIELD = new Set(['rename', 'copy', 'to_string', 'to_number', 'lookup'])
+
+// A lookup's values as editable text, one "value = text" per line, and back.
+// Only the first " = " splits a line, so the text may hold "=".
+function lookupText(values: Record<string, string> | undefined): string {
+  return Object.entries(values ?? {}).map(([k, v]) => `${k} = ${v}`).join('\n')
+}
+function parseLookup(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of text.split('\n')) {
+    const at = line.indexOf('=')
+    if (at < 0) continue
+    const key = line.slice(0, at).trim()
+    if (key) out[key] = line.slice(at + 1).trim()
+  }
+  return out
+}
+
 function MappingRow({
   mapping,
   onChange,
@@ -136,6 +158,30 @@ function MappingRow({
           onChange={(v) => onChange({ expression: v })}
           describedBy={describedBy}
         />
+      )}
+      {type === 'lookup' && (
+        <label style={{ display: 'block', fontSize: '12px', color: '#374151', marginTop: '6px' }}>
+          Values (one per line: source value = text; the text takes {'{field}'} like a template)
+          <textarea
+            aria-label={`Values of ${rowLabel}`}
+            aria-describedby={describedBy}
+            value={lookupText(mapping.values)}
+            onChange={(e) => onChange({ values: parseLookup(e.target.value) })}
+            placeholder={'basket.sale-recorded = bifrost-sale-{event_id}-r1'}
+            style={{ width: '100%', minHeight: '56px', fontSize: '12px', fontFamily: 'monospace', boxSizing: 'border-box' }}
+          />
+        </label>
+      )}
+      {READS_ONE_FIELD.has(type) && (type === 'lookup' || mapping.required) && (
+        <label style={checkboxLabelStyle}>
+          <input
+            type="checkbox"
+            checked={mapping.required ?? false}
+            onChange={(e) => onChange({ required: e.target.checked })}
+            aria-describedby={describedBy}
+          />
+          Required: a record without it is dead-lettered, not converted
+        </label>
       )}
       </>)}
       {type === 'each' && (

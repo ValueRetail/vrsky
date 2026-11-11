@@ -768,3 +768,46 @@ describe('row names and warning links (#542)', () => {
     })
   })
 })
+
+describe('lookup rows and the required flag (#851)', () => {
+  const config = (): Config => ({
+    drop_unmapped: true,
+    mappings: [
+      { type: 'lookup', source: 'event_type', target: 'operationId', required: true,
+        values: { 'basket.sale-recorded': 'bifrost-sale-{event_id}-r1' } },
+      { type: 'to_string', source: 'data.journal_sequence', target: 'journalPosition', required: true },
+      { type: 'rename', source: 'a', target: 'b' },
+    ],
+  })
+
+  it('shows a lookup as Lookup with its values, one per line', () => {
+    renderEditor(config())
+    expect(selectedText(typeSelects()[0])).toBe('Lookup (text by value)')
+    const values = screen.getByLabelText(/^Values of mapping 1/) as HTMLTextAreaElement
+    expect(values.value).toBe('basket.sale-recorded = bifrost-sale-{event_id}-r1')
+  })
+
+  it('edits the values, keeping an "=" inside the text', () => {
+    const { last } = renderEditor(config())
+    fireEvent.change(screen.getByLabelText(/^Values of mapping 1/), {
+      target: { value: 'basket.sale-recorded = sale-{event_id}\nbasket.return-recorded = a=b\nno separator\n = no key' },
+    })
+    expect(mappingsOf(last())[0].values).toEqual({ 'basket.sale-recorded': 'sale-{event_id}', 'basket.return-recorded': 'a=b' })
+    expect(mappingsOf(last())[0].required).toBe(true)
+  })
+
+  it('warns about a lookup without values', () => {
+    renderEditor({ mappings: [{ type: 'lookup', source: 'x', target: 'y' }] })
+    expect(screen.getByText(/Values are required/)).toBeTruthy()
+  })
+
+  it('shows the required flag where it is set and clears it', () => {
+    const { last } = renderEditor(config())
+    const boxes = screen.getAllByRole('checkbox', { name: /^Required/ }) as HTMLInputElement[]
+    expect(boxes).toHaveLength(2) // the lookup and the to_string; not the plain rename
+    expect(boxes.every((b) => b.checked)).toBe(true)
+    fireEvent.click(boxes[1])
+    expect(mappingsOf(last())[1].required).toBe(false)
+    expect(mappingsOf(last())[1].source).toBe('data.journal_sequence')
+  })
+})

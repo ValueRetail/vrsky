@@ -132,6 +132,12 @@ func (s *ConverterService) streamEntry(ctx context.Context, connectionID string,
 
 		obj, isMap := rec.(map[string]interface{})
 		if hasMapping && isMap {
+			// Buffered parity: a record without a required field fails the
+			// message (retried, then the DLQ), as requiredPresent does.
+			if rerr := checkRequired(obj, cfg.Mappings); rerr != nil {
+				spool.Abort(s.logger)
+				return fmt.Errorf("converter node %s: %w", entry.NodeID, rerr)
+			}
 			// Buffered parity: map records are mapped, non-maps pass through.
 			obj, fieldCount = applyMappings(obj, cfg)
 			rec = obj

@@ -341,9 +341,9 @@ describe('Bifrost sales → Retailhero (#817)', () => {
     expect(node('dst').config).toMatchObject({ type: 'http', http: { method: 'POST', headers: { 'Content-Type': 'application/json' } } })
   })
 
-  it('forwards only till sales, because Retailhero refuses a batch on any other event type', () => {
+  it('forwards only till sales and returns, because Retailhero refuses a batch on any other event type', () => {
     const rules = (node('flt').config.rules as { field: string; operator: string; value: string }[])
-    expect(rules).toContainEqual({ field: 'event_type', operator: 'equals', value: 'basket.sale-recorded' })
+    expect(rules).toContainEqual({ field: 'event_type', operator: 'in', value: 'basket.sale-recorded,basket.return-recorded' })
     expect(rules).toContainEqual({ field: 'source.kind', operator: 'equals', value: 'pos' })
     expect(rules).toContainEqual({ field: 'event_id', operator: 'is_not_empty', value: '' })
     expect(node('flt').config.logic).toBe('and')
@@ -353,10 +353,23 @@ describe('Bifrost sales → Retailhero (#817)', () => {
     expect((node('src').config.nats as Record<string, unknown>).deliver_policy).toBe('all')
   })
 
-  it('derives the operation ID from the Basket event ID and revision 1, with no random part', () => {
+  it('derives the operation ID from the event type, the Basket event ID and revision 1, with no random part', () => {
     const entries = (node('conv').config.mappings as Mapping[]).find((m) => m.type === 'each')!
-    const op = (entries.mappings as { target?: string; expression?: string }[]).find((m) => m.target === 'operationId')!
-    expect(op.expression).toBe('bifrost-sale-{event_id}-r1')
+    const op = (entries.mappings as { target?: string; type?: string; required?: boolean; values?: Record<string, string> }[])
+      .find((m) => m.target === 'operationId')!
+    expect(op.type).toBe('lookup')
+    expect(op.required).toBe(true)
+    expect(op.values).toEqual({
+      'basket.sale-recorded': 'bifrost-sale-{event_id}-r1',
+      'basket.return-recorded': 'bifrost-return-{event_id}-r1',
+    })
+  })
+
+  it('sends the till journal_sequence as journalPosition, and requires it (#851)', () => {
+    const entries = (node('conv').config.mappings as Mapping[]).find((m) => m.type === 'each')!
+    const jp = (entries.mappings as { target?: string; type?: string; source?: string; required?: boolean }[])
+      .find((m) => m.target === 'journalPosition')!
+    expect(jp).toEqual({ type: 'to_string', source: 'data.journal_sequence', target: 'journalPosition', required: true })
   })
 
   it('asks for the journal ID on the static journalId mapping, never ships one', () => {

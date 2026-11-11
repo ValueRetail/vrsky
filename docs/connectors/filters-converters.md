@@ -28,6 +28,10 @@ Rules are built visually in the in-app pipeline editor (Property panel) using
 rule expressions. The exact rule syntax is defined and validated by the
 editor — author and test rules there rather than hand-writing them.
 
+The operator **Is One Of** (`in`) takes a comma-separated list as its value
+and passes a field that equals one entry exactly, with spaces around an entry
+ignored: `event_type` `in` `basket.sale-recorded,basket.return-recorded`.
+
 ## Converter node
 
 A converter node (`type: converter`) transforms message payloads — renaming
@@ -100,6 +104,39 @@ them, or the original fields stay beside the wrapper.
 
 `to_string` writes numbers in plain decimal (`1000000`, not `1e+06`).
 
+### Lookup and required fields
+
+Added for the Bifrost sales template (#851, #852).
+
+- **`lookup`** picks a text by the value of `source` and fills it in like a
+  `template` expression (`{field}` is a top-level field of the record). A
+  value with no entry in `values` writes nothing:
+
+    ```json
+    {
+      "type": "lookup", "source": "event_type", "target": "operationId",
+      "values": {
+        "basket.sale-recorded": "bifrost-sale-{event_id}-r1",
+        "basket.return-recorded": "bifrost-return-{event_id}-r1"
+      }
+    }
+    ```
+
+- **`required: true`** on a mapping that reads one field (`rename`, `copy`,
+  `to_string`, `to_number`, `lookup`): a record whose source is missing, `null`
+  or `""` is not converted, and neither is a `lookup` value with no entry.
+  Nothing is published for the message. It fails, is retried and then
+  dead-lettered, with the field named in `X-Vrsky-Last-Error` (for example
+  `required field missing: "data.journal_sequence" (mapped to
+  "journalPosition") is missing`). Fix the source, then replay it from the
+  DLQ. Inside an `each` the path is relative to the element, and the error
+  names the element (`lines[1]: …`). Use it for a field the destination
+  refuses a whole batch without, so the message waits in the DLQ instead of
+  being refused there.
+
+The editor shows `values` one per line as `value = text`. The **Required**
+box shows on a `lookup` row, and on other rows once a template has set it.
+
 The editor warns about a mapping the converter would skip or write wrongly:
 a missing source or target, a template with no expression, a type the
 converter does not know, a `remove` with a dotted path (it removes only a
@@ -116,7 +153,8 @@ does not split records; it shows the whole result.
   its `type`.
 - **Failures.** A payload the node cannot parse (not valid JSON, or not in the
   format the node expects) is not dead-lettered: an `error` event is shown in
-  the activity feed and the message is acked, so it goes no further. The same
+  the activity feed and the message is acked, so it goes no further. A record
+  without a `required` field is the exception: retried, then dead-lettered. The same
   goes for an envelope that cannot be read. A failure to fetch an offloaded
   payload, to store a large result or to publish the result is retried and
   then dead-lettered. See the

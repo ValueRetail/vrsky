@@ -51,7 +51,7 @@ type Config struct {
 
 type FilterRule struct {
 	Field    string `json:"field"`
-	Operator string `json:"operator"` // "equals", "not_equals", "contains", "not_contains", "gt", "lt", "gte", "lte", "is_empty", "is_not_empty", "regex"
+	Operator string `json:"operator"` // "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "in" (comma-separated list), "gt", "lt", "gte", "lte", "is_empty", "is_not_empty"
 	Value    string `json:"value"`
 }
 
@@ -725,6 +725,19 @@ func evaluateRule(obj map[string]interface{}, rule FilterRule) bool {
 		return exists && strings.HasPrefix(fmt.Sprintf("%v", val), rule.Value)
 	case "ends_with":
 		return exists && strings.HasSuffix(fmt.Sprintf("%v", val), rule.Value)
+	case "in":
+		// Value is a comma-separated list; the field must equal one entry
+		// exactly (spaces around an entry are ignored).
+		if !exists || val == nil {
+			return false
+		}
+		got := fmt.Sprintf("%v", val)
+		for _, want := range strings.Split(rule.Value, ",") {
+			if w := strings.TrimSpace(want); w != "" && got == w {
+				return true
+			}
+		}
+		return false
 	default:
 		return true
 	}

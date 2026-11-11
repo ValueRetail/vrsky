@@ -273,7 +273,8 @@ Which kind an error gets differs per destination:
 Filters and converters do not use these rules. A payload they cannot parse is
 acked with an `error` event in the activity feed. Fetching an offloaded
 payload, storing a large result or publishing the result is retried and then
-dead-lettered. So is a failed read of the connection's config. The remote
+dead-lettered, and so is a record that lacks a field a converter mapping marks
+`required`. So is a failed read of the connection's config. The remote
 agent destination is described on its [own page](../connectors/remote-agent.md).
 
 Four things apply to every destination in the table:

@@ -149,7 +149,7 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
  * object of an array field with its own nested `mappings`.
  */
 export const CONVERTER_MAPPING_TYPES: readonly string[] = [
-  'rename', 'copy', 'static', 'remove', 'template', 'to_string', 'to_number', 'each',
+  'rename', 'copy', 'static', 'remove', 'template', 'to_string', 'to_number', 'each', 'lookup',
 ]
 
 /** What the converter editor's type select shows for each mapping type. */
@@ -162,6 +162,7 @@ export const CONVERTER_MAPPING_LABELS: Record<string, string> = {
   to_string: 'To String',
   to_number: 'To Number',
   each: 'Each (map array items)',
+  lookup: 'Lookup (text by value)',
 }
 
 /**
@@ -178,6 +179,10 @@ export type ConverterMapping = {
   expression?: string
   mappings?: ConverterMapping[]
   drop_unmapped?: boolean
+  // lookup: the text per source value, filled in like a template.
+  values?: Record<string, string>
+  // A record without the source is dead-lettered, not converted.
+  required?: boolean
 }
 
 /**
@@ -212,6 +217,9 @@ export function converterMappingWarnings(m: ConverterMapping): string[] {
   }
   if (type === 'template' && !m.expression) {
     out.push('Template is required: without it the converter skips this mapping.')
+  }
+  if (type === 'lookup' && Object.keys(m.values ?? {}).length === 0) {
+    out.push('Values are required: without them the lookup never writes anything.')
   }
   if (type === 'each' && m.drop_unmapped && (m.mappings?.length ?? 0) === 0) {
     out.push('Each item becomes an empty object: "Drop unmapped item fields" is on and there are no item mappings.')
