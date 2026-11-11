@@ -3501,7 +3501,17 @@ export default function PropertyEditor({
                   label="Authentication"
                   value={((config.http as HttpCfg)?.auth_type as string) || 'none'}
                   onChange={(value) =>
-                    setConfig({ ...config, http: { ...(config.http as HttpCfg), auth_type: value } })
+                    // Leaving bearer drops its token: a stale token_secret_id
+                    // is still resolved on every read, and a deleted secret
+                    // would then hold the node's messages.
+                    setConfig({
+                      ...config,
+                      http: {
+                        ...(config.http as HttpCfg),
+                        auth_type: value,
+                        ...(value === 'bearer' ? {} : { token: undefined, token_secret_id: undefined }),
+                      },
+                    })
                   }
                   options={[
                     { value: 'none', label: 'None' },

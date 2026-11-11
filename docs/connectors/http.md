@@ -184,7 +184,7 @@ encrypted tenant secret and the node keeps only `http.token_secret_id`:
     "method": "POST",
     "headers": { "Content-Type": "application/json" },
     "auth_type": "bearer",
-    "token_secret_id": "sec_bearer_01"
+    "token_secret_id": "3f1c2b9e-0d5a-4c8e-9b7a-3e2f1d4c5b6a"
   }
 }
 ```
@@ -203,6 +203,12 @@ encrypted tenant secret and the node keeps only `http.token_secret_id`:
   preview.
 - A `401` or `403` is retried and then dead-lettered, like any credential
   error (below).
+- The worker keeps a connection's config, token included, for 5 minutes. After
+  a new token is deployed, the old one can be sent for up to that long;
+  messages refused meanwhile wait in the DLQ.
+- The response preview masks the token only where the target echoes it as
+  sent; an escaped or encoded copy is not recognised. Leading and trailing
+  whitespace is trimmed from the stored token.
 
 A `{secret:<uuid>}` placeholder in a header value
 (`"Authorization": "Bearer {secret:<uuid>}"`) is also expanded, because the

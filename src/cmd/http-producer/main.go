@@ -749,7 +749,9 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 }
 
 // responsePreview reads up to n bytes of a response for the activity feed,
-// with every bearer token in tokens masked. A target that echoes the request
+// with every bearer token in tokens masked. Only a byte-for-byte copy is
+// masked: a target that echoes the token escaped or encoded (JSON "\/",
+// URL or base64 encoding) still shows it. A target that echoes the request
 // headers back (httpbin does) would otherwise put the node's token in the
 // feed, which every user of the tenant can read, while the secret itself is
 // write-only (#850). It reads a token's length past n, so a token that
@@ -912,10 +914,12 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		switch {
 		case inlineToken:
 			cfg.authErr = errors.New("the bearer token is written into the node (http.token); it must be stored as a secret (http.token_secret_id)")
-		case cfg.AuthType == "bearer" && nodeConfig.HTTP.Token == "":
+		case cfg.AuthType == "bearer" && strings.TrimSpace(nodeConfig.HTTP.Token) == "":
 			cfg.authErr = errors.New("auth_type is bearer but the node has no token; set http.token_secret_id")
 		case cfg.AuthType == "bearer":
-			cfg.bearerToken = nodeConfig.HTTP.Token
+			// A token pasted with a trailing newline would make every
+			// request fail as an invalid header.
+			cfg.bearerToken = strings.TrimSpace(nodeConfig.HTTP.Token)
 		}
 
 		// mTLS: when the node presents a client cert, pre-build a dedicated
@@ -960,15 +964,20 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 // vault on deploy (http.token_secret_id); a config written some other way
 // with the value inline is refused rather than used, as the Bifrost catalogue
 // producer and the NATS source do (#850).
+//
+// It decodes into a struct, like the read that uses the token: encoding/json
+// matches keys without regard to case, so "Token" is read as the token too,
+// and a check on the exact key "token" would let it through.
 func hasInlineToken(nodeConfig json.RawMessage) bool {
 	var c struct {
-		HTTP map[string]json.RawMessage `json:"http"`
+		HTTP struct {
+			Token string `json:"token"`
+		} `json:"http"`
 	}
 	if json.Unmarshal(nodeConfig, &c) != nil {
 		return false
 	}
-	var s string
-	return json.Unmarshal(c.HTTP["token"], &s) == nil && s != ""
+	return strings.TrimSpace(c.HTTP.Token) != ""
 }
 
 // --- Event broadcasting (SSE) ---

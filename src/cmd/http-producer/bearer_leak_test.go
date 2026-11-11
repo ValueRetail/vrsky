@@ -199,6 +199,7 @@ func TestBearer_TokenWrittenIntoTheNodeIsRefused(t *testing.T) {
 		{name: "inline token beside a stored one", block: `"auth_type":"bearer","token":%q,"token_secret_id":"` + bearerSecretID + `"`, want: "http.token_secret_id"},
 		{name: "inline token, auth_type none", block: `"auth_type":"none","token":%q`, want: "http.token_secret_id"},
 		{name: "inline token as a placeholder", block: `"auth_type":"bearer","token":"{secret:` + bearerSecretID + `}"`, want: "http.token_secret_id"},
+		{name: "inline token, mixed-case keys", block: `"Auth_Type":"bearer","Token":%q`, want: "it must be stored as a secret (http.token_secret_id)"},
 		{name: "bearer without a token", block: `"auth_type":"bearer"`, want: "has no token; set http.token_secret_id"},
 		{name: "bearer with an empty token", block: `"auth_type":"bearer","token":""`, want: "has no token"},
 	}

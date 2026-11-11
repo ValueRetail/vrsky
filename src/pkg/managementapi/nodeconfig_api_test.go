@@ -141,6 +141,9 @@ func TestValidateNodeConfigs_HTTPProducerBearer(t *testing.T) {
 		{"inline token without auth_type", `"token":"` + tok + `"`, "http.token is written into the node"},
 		{"bearer without a stored token", `"auth_type":"bearer"`, "http.token_secret_id is missing"},
 		{"bearer with an empty stored token", `"auth_type":"bearer","token_secret_id":""`, "http.token_secret_id is missing"},
+		// The producer decodes keys without regard to case, so the check does too.
+		{"inline token, mixed-case key", `"Auth_Type":"bearer","Token":"` + tok + `"`, "http.token is written into the node"},
+		{"bearer, mixed-case auth_type, no stored token", `"AUTH_TYPE":"bearer"`, "http.token_secret_id is missing"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -214,3 +214,21 @@ func TestBearer_AnotherTenantsSecretIsNotResolved(t *testing.T) {
 	}
 	assertNoToken(t, "another tenant's secret", p, connID, &logs, err)
 }
+
+// A token stored with a trailing newline (pasted) is sent trimmed, not as an
+// invalid header that fails every request.
+func TestBearer_StoredTokenIsTrimmed(t *testing.T) {
+	pg := newBearerPG(t)
+	tenant := pg.tenant(t)
+	secretID := pg.secret(t, tenant, fakeToken+"\n")
+	target := newAuthRecorder(t, http.StatusOK, nil)
+	connID := pg.connection(t, tenant, `{"url":"`+target.srv.URL+`","auth_type":"bearer","token_secret_id":"`+secretID+`"}`)
+
+	p := newBearerProducer(pg.db, io.Discard)
+	if err := p.Deliver(context.Background(), bearerEnv(tenant, connID)); err != nil {
+		t.Fatalf("Deliver = %v, want nil", err)
+	}
+	if got := target.seen(); len(got) != 1 || got[0] != "Bearer "+fakeToken {
+		t.Fatalf("target saw Authorization %q, want the token without the newline", got)
+	}
+}

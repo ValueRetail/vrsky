@@ -296,16 +296,26 @@ func validateHTTPProducerURL(node *Node, raw map[string]json.RawMessage) []strin
 // stored as a secret, and auth_type "bearer" without http.token_secret_id. The
 // editor mints http.token into the vault on deploy, so a plaintext token here
 // came in some other way. The error names the setting, never its value.
-func validateHTTPProducerBearer(node *Node, raw map[string]json.RawMessage) []string {
-	var block map[string]json.RawMessage
-	if json.Unmarshal(raw["http"], &block) != nil {
+//
+// It decodes the node into a struct, as the producer does: encoding/json
+// matches keys without regard to case, so "Token" or "Auth_Type" must be
+// caught here too.
+func validateHTTPProducerBearer(node *Node, _ map[string]json.RawMessage) []string {
+	var c struct {
+		HTTP struct {
+			AuthType      string `json:"auth_type"`
+			Token         string `json:"token"`
+			TokenSecretID string `json:"token_secret_id"`
+		} `json:"http"`
+	}
+	if json.Unmarshal(node.Config, &c) != nil {
 		return nil
 	}
 	var errs []string
-	if stringField(block, "token") != "" {
+	if strings.TrimSpace(c.HTTP.Token) != "" {
 		errs = append(errs, fmt.Sprintf("node %s (http): http.token is written into the node; store the bearer token as a secret (http.token_secret_id) (served by http-producer)", node.ID))
 	}
-	if stringField(block, "auth_type") == "bearer" && stringField(block, "token_secret_id") == "" {
+	if strings.TrimSpace(c.HTTP.AuthType) == "bearer" && strings.TrimSpace(c.HTTP.TokenSecretID) == "" {
 		errs = append(errs, fmt.Sprintf("node %s (http): auth_type is bearer but http.token_secret_id is missing; store the bearer token as a secret (served by http-producer)", node.ID))
 	}
 	return errs
