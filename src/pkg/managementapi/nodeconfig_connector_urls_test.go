@@ -265,6 +265,28 @@ func TestNATSConsumerStartChecks(t *testing.T) {
 		{name: "no stream", block: map[string]any{"servers": []string{"tls://nats.example.com"}, "durable": "d"}, sides: []string{"consumer"}, wantErr: "nats.stream is required"},
 		{name: "no durable", block: map[string]any{"servers": []string{"tls://nats.example.com"}, "stream": "S"}, sides: []string{"consumer"}, wantErr: "nats.durable is required"},
 	})
+	with := func(kv ...any) map[string]any {
+		m := ok([]string{"tls://nats.example.com:4222"})
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1]
+		}
+		return m
+	}
+	runConnectorURLCases(t, "nats", []connectorURLCase{
+		{name: "retailhero partner account", sides: []string{"consumer"}, block: with(
+			"auth_type", "nkey", "nkey_seed_secret_id", "s1", "api_prefix", "JS.RH.API", "inbox_prefix", "_INBOX_vrsky_t_a", "create_durable", false)},
+		{name: "creds", sides: []string{"consumer"}, block: with("auth_type", "creds", "creds_secret_id", "s1")},
+		{name: "user and password", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "password_secret_id", "s1")},
+		{name: "unknown auth type", sides: []string{"consumer"}, block: with("auth_type", "token"), wantErr: "nats.auth_type must be one of"},
+		{name: "nkey without its secret", sides: []string{"consumer"}, block: with("auth_type", "nkey"), wantErr: "nats.nkey_seed_secret_id is required"},
+		{name: "creds without its secret", sides: []string{"consumer"}, block: with("auth_type", "creds"), wantErr: "nats.creds_secret_id is required"},
+		{name: "user without a name", sides: []string{"consumer"}, block: with("auth_type", "user_password", "password_secret_id", "s1"), wantErr: "nats.username is required"},
+		{name: "plaintext seed", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext password", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "password", urlSecret), wantErr: "nats.password is stored in plaintext"},
+		{name: "api prefix with a wildcard", sides: []string{"consumer"}, block: with("api_prefix", "JS.*.API"), wantErr: "nats.api_prefix must be a subject"},
+		{name: "inbox prefix with an empty token", sides: []string{"consumer"}, block: with("inbox_prefix", "_INBOX..x"), wantErr: "nats.inbox_prefix must be a subject"},
+		{name: "prefix with a trailing dot", sides: []string{"consumer"}, block: with("api_prefix", "JS.RH.API.")},
+	})
 	// There is no NATS destination.
 	if err := startOn("producer", nodeCfg(t, "nats", ok([]string{"tls://nats.example.com"}))); err == nil {
 		t.Error("a nats destination was accepted")

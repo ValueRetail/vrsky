@@ -210,6 +210,9 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "cloud_storage" && node.Type == "consumer" {
 		errs = append(errs, validateCloudStorageConsumer(node, raw)...)
 	}
+	if configType == "nats" && node.Type == "consumer" {
+		errs = append(errs, validateNATSConsumer(node, raw)...)
+	}
 	if configType == "sitoo" {
 		errs = append(errs, validateSitooBaseURL(node, raw)...)
 	}
@@ -330,6 +333,62 @@ func validateCloudStorageConsumer(node *Node, raw map[string]json.RawMessage) []
 		return []string{fmt.Sprintf("node %s (cloud_storage): cloud_storage.%v (served by %s)", node.ID, err, svc)}
 	}
 	return nil
+}
+
+// natsCredentialRefs maps each NATS auth_type to the stored secret it needs.
+// The connector reads the credential only from that reference.
+var natsCredentialRefs = map[string]string{
+	"none":          "",
+	"user_password": "password_secret_id",
+	"creds":         "creds_secret_id",
+	"nkey":          "nkey_seed_secret_id",
+}
+
+// validateNATSConsumer refuses what the nats-consumer would refuse at start
+// before it dials (#814): an unknown auth_type, a credential auth type
+// without its stored secret, a credential stored in plaintext, and an
+// api_prefix or inbox_prefix that is not a plain subject. Messages name the
+// field, never a value.
+func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
+	var block map[string]json.RawMessage
+	if json.Unmarshal(raw["nats"], &block) != nil {
+		return nil
+	}
+	svc := nodeConfigRules[nodeKind{node.Type, "nats"}].service
+	var errs []string
+	for _, field := range []string{"password", "creds", "nkey_seed"} {
+		if stringField(block, field) != "" {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is stored in plaintext; store it as a secret (%s_secret_id) (served by %s)", node.ID, field, field, svc))
+		}
+	}
+	authType := stringField(block, "auth_type")
+	if authType == "" {
+		authType = "none"
+	}
+	ref, known := natsCredentialRefs[authType]
+	switch {
+	case !known:
+		errs = append(errs, fmt.Sprintf("node %s (nats): nats.auth_type must be one of none, creds, user_password, nkey (served by %s)", node.ID, svc))
+	case ref != "" && stringField(block, ref) == "":
+		errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is required for auth_type %s (served by %s)", node.ID, ref, authType, svc))
+	}
+	if authType == "user_password" && stringField(block, "username") == "" {
+		errs = append(errs, fmt.Sprintf("node %s (nats): nats.username is required for auth_type user_password (served by %s)", node.ID, svc))
+	}
+	for _, field := range []string{"api_prefix", "inbox_prefix"} {
+		p := strings.TrimSuffix(stringField(block, field), ".")
+		if p == "" {
+			continue
+		}
+		bad := strings.ContainsAny(p, " \t\r\n*>")
+		for _, tok := range strings.Split(p, ".") {
+			bad = bad || tok == ""
+		}
+		if bad {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s must be a subject without spaces, wildcards or empty tokens (served by %s)", node.ID, field, svc))
+		}
+	}
+	return errs
 }
 
 // validateRemoteAgentTarget: a remote_agent node names either one agent
