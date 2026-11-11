@@ -72,6 +72,18 @@ describe('NatsConfigEditor', () => {
     expect(screen.getByText(/stored encrypted .* when you deploy/i)).toBeTruthy()
   })
 
+  it('stores the deliver policy and asks for a start time only when it needs one', () => {
+    const { last } = renderEditor()
+    expect(screen.queryByLabelText(/start time/i)).toBeNull()
+    fireEvent.change(screen.getByLabelText(/first start reads/i), { target: { value: 'by_start_time' } })
+    fireEvent.change(screen.getByLabelText(/start time/i), { target: { value: '2026-11-01T00:00:00Z' } })
+    expect(last()).toMatchObject({ deliver_policy: 'by_start_time', opt_start_time: '2026-11-01T00:00:00Z' })
+    fireEvent.change(screen.getByLabelText(/first start reads/i), { target: { value: 'new' } })
+    expect(last().deliver_policy).toBe('new')
+    expect(last().opt_start_time).toBeUndefined()
+    expect(screen.queryByLabelText(/start time/i)).toBeNull()
+  })
+
   it('stores a CA certificate', () => {
     const { last } = renderEditor()
     fireEvent.change(screen.getByLabelText(/ca certificate/i), { target: { value: '-----BEGIN CERTIFICATE-----' } })

@@ -38,6 +38,7 @@ export default function NatsConfigEditor({
   // before a second server could be typed.
   const [serversText, setServersText] = useState(() => servers.join('\n'))
   const authType = (nats.auth_type as string) || 'none'
+  const deliverPolicy = (nats.deliver_policy as string) || 'all'
   // A .creds file is several lines, which a password box would flatten, so it
   // gets a text area. Saved = a secret is bound and nothing new was pasted.
   const credsSaved = Boolean(nats.creds_secret_id) && !nats.creds
@@ -76,6 +77,29 @@ export default function NatsConfigEditor({
         value={(nats.filter_subject as string) || ''}
         onChange={(v) => update({ filter_subject: v })}
       />
+
+      <StyledSelect
+        label="First start reads"
+        value={deliverPolicy}
+        onChange={(v) => update({ deliver_policy: v, opt_start_time: v === 'by_start_time' ? nats.opt_start_time : undefined })}
+        options={[
+          { value: 'all', label: 'The whole stream' },
+          { value: 'new', label: 'Only new messages' },
+          { value: 'by_start_time', label: 'From a point in time' },
+        ]}
+      />
+      {deliverPolicy === 'by_start_time' && (
+        <StyledInput
+          label="Start time (RFC 3339)"
+          placeholder="2026-11-01T00:00:00Z"
+          value={(nats.opt_start_time as string) || ''}
+          onChange={(v) => update({ opt_start_time: v })}
+        />
+      )}
+      <div style={{ ...hintStyle, marginTop: '-8px', marginBottom: '12px' }}>
+        Applies only when VRSky creates the durable. &quot;The whole stream&quot; sends every message the stream
+        holds into the pipeline on the first start.
+      </div>
 
       <StyledSelect
         label="Authentication"
