@@ -83,6 +83,35 @@ No Dockerfile, manifest or workflow changes: #844 registered the worker.
   event id (`relay.rs`), so `event_id` and `Nats-Msg-Id` are the same key.
   A durable dedup store beyond the five-minute window is still #845.
 
+## Review round 1 (fresh Opus reviewer)
+
+Changes requested, nothing blocking. Fixed in 3f7945f7:
+
+- A pull the user may not send (no `MSG.NEXT` grant) got no answer and
+  looked like an empty stream, with the pipeline `running` forever. The
+  permission violation now ends it with status `error`. The bug dates from
+  #844; exact per-durable grants make it likely here. Test: the partner
+  server without the pull grant.
+- The start check now refuses `batch_size` above 256 and
+  `max_wait_seconds` above 30 or fractional, like the connector. The UI
+  stores whole numbers.
+- The `api_prefix` and `inbox_prefix` hints appear only when the setting
+  is unset, and say "if".
+- The read test asserts the double ack's confirmation comes back across
+  the account boundary.
+- Nits: the NKey comment says what is wiped; the `api_prefix` label only
+  when one is set; the 255-character limit in the start check; the deliver
+  policy hidden when creation is off; the test note and docs say the
+  create permission is not checked.
+
+## Manual check
+
+`nats:2.12` in Docker with the same rendered config (TLS, partner
+account, grants), through `go test -overlay` so no file was added: two
+events stored and acked, no ack failure, no seed in the log, and without
+`api_prefix` the run ends in `error` with the hint. The container was
+removed.
+
 ## Risks
 
 - Secrets handling changes (a new credential type): `agent:needs-human`.
