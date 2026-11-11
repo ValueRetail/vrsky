@@ -42,8 +42,12 @@ nodes, and switching off the BC webhook does not touch this pipeline.
 3. **Converter.** Wraps the event, unchanged, as the single entry of a
    `BIFROST-BASKET-v1` batch (table below). An event without
    `data.journal_sequence` is not converted: it is retried and then
-   dead-lettered with `X-Vrsky-Last-Error` naming the field, so it can be
-   replayed once Bifrost sends it.
+   dead-lettered with `X-Vrsky-Last-Error` naming the field, and nothing is
+   sent to Retailhero. A replay from the DLQ sends the same event and fails
+   the same way, so such an event has to be sent again by Bifrost with the
+   field, or discarded from the DLQ. The converter checks only that the field
+   is there; a value that is not a whole number from 1 goes out as written
+   and Retailhero judges it.
 4. **Producer.** POSTs the batch as JSON to the intake URL. A `5xx`, `429` or
    network error is retried and then dead-lettered. A `4xx` other than
    `401`/`403` is logged and dropped; see [HTTP failed deliveries](http.md#failed-deliveries).
@@ -165,6 +169,10 @@ guessed in the template; each one is a place where it will change.
    of `quantity`; one time for the whole sale instead of one per line; and
    what a `basket.cancelled` means for a sale already recorded. The template
    invents none of them.
+
+Pipelines deployed from this template before #851/#852 keep their old filter
+and converter: they send sales only, without `journalPosition`. Deploy the
+template again to get the new nodes.
 
 Settled, with the contract pinned for this path on 2026-11-11:
 

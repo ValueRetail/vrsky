@@ -796,6 +796,26 @@ describe('lookup rows and the required flag (#851)', () => {
     expect(mappingsOf(last())[0].required).toBe(true)
   })
 
+  it('keeps a new line and a half-typed entry while typing, one keystroke at a time', () => {
+    const { last } = renderEditor(config())
+    const box = screen.getByLabelText(/^Values of mapping 1/) as HTMLTextAreaElement
+    let typed = box.value
+    for (const ch of '\nbasket.return-recorded = r-{event_id}') {
+      typed += ch
+      fireEvent.change(box, { target: { value: typed } })
+      expect(box.value).toBe(typed)
+    }
+    expect(mappingsOf(last())[0].values).toEqual({
+      'basket.sale-recorded': 'bifrost-sale-{event_id}-r1',
+      'basket.return-recorded': 'r-{event_id}',
+    })
+  })
+
+  it('shows the box on a row whose type changed to one that ignores it, so it can be cleared', () => {
+    renderEditor({ mappings: [{ type: 'template', target: 't', expression: 'x', required: true }] })
+    expect(screen.getAllByRole('checkbox', { name: /^Required/ })).toHaveLength(1)
+  })
+
   it('warns about a lookup without values', () => {
     renderEditor({ mappings: [{ type: 'lookup', source: 'x', target: 'y' }] })
     expect(screen.getByText(/Values are required/)).toBeTruthy()

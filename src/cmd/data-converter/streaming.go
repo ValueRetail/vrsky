@@ -112,6 +112,7 @@ func (s *ConverterService) streamEntry(ctx context.Context, connectionID string,
 		delim      = csvDelim(cfg)
 	)
 
+	recordNo := 0
 	for {
 		parsedRec, derr := reader.Next()
 		if derr == io.EOF {
@@ -128,6 +129,7 @@ func (s *ConverterService) streamEntry(ctx context.Context, connectionID string,
 			s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Streamed payload record is malformed: " + derr.Error(), Time: now()})
 			return nil // deterministic — ack, matching the buffered parse-failure path
 		}
+		recordNo++
 		var rec interface{} = map[string]interface{}(parsedRec)
 
 		obj, isMap := rec.(map[string]interface{})
@@ -136,7 +138,9 @@ func (s *ConverterService) streamEntry(ctx context.Context, connectionID string,
 			// message (retried, then the DLQ), as requiredPresent does.
 			if rerr := checkRequired(obj, cfg.Mappings); rerr != nil {
 				spool.Abort(s.logger)
-				return fmt.Errorf("converter node %s: %w", entry.NodeID, rerr)
+				rerr = fmt.Errorf("converter node %s: record %d: %w", entry.NodeID, recordNo, rerr)
+				s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: rerr.Error(), Time: now()})
+				return rerr
 			}
 			// Buffered parity: map records are mapped, non-maps pass through.
 			obj, fieldCount = applyMappings(obj, cfg)

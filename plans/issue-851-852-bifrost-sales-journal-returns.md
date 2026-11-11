@@ -33,7 +33,8 @@ behave as before:
   backoff and dead-lettered with the field in `X-Vrsky-Last-Error`. That is
   the only route to the DLQ the platform has (no "dead-letter now"); the
   retries cost about 2.5 minutes per such message. The DLQ copy is the
-  original event, so it can be replayed once Bifrost sends the field. The
+  original event; replaying it fails again, so Bifrost has to send the event
+  again with the field (or it is discarded from the DLQ). The
   streamed path (over the rehydrate cap) does the same.
 - Filter operator `in` (comma-separated list, exact match per entry). The
   filter's rules are flat and/or, so "sale or return, and from a POS" needed
@@ -72,3 +73,22 @@ can merge in either order; the second may need a merge of main.
 Go and UI checks as CI runs them. Mutation runs: required check off in the
 buffered path, in the streamed path, and the `in` operator's empty-entry
 guard; each made its test fail.
+
+## Review round 1 (fresh reviewer, changes requested), fixed
+
+- The lookup values textarea lost new lines while typing: it now keeps the
+  typed text and parses it on each change.
+- `required` is honoured only on rename, copy, to_string, to_number and
+  lookup (`requiredApplies`), and the Required box shows on any row where it
+  is set, so a flag left after a type change can be cleared.
+- A required-field failure now fails the message before any branch
+  publishes, so a sibling branch does not publish again on every retry.
+- The Test Transform preview reports a missing required field.
+- The streamed path emits the error event and names the record.
+- `checkRequired` reads "." as the record only for copy, like the mappings.
+- A Go guard keeps the UI's filter operators in step with `evaluateRule`
+  (an unknown operator passes every message).
+- Docs: a DLQ replay of an event without the field fails again; pipelines
+  deployed earlier keep the old nodes; values are not range-checked.
+- Not changed: a data-filter pod on an old build during a rollout would pass
+  `in` rules as unknown. All workers roll out from the same merge.

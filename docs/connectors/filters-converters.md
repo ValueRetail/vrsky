@@ -123,19 +123,23 @@ Added for the Bifrost sales template (#851, #852).
     ```
 
 - **`required: true`** on a mapping that reads one field (`rename`, `copy`,
-  `to_string`, `to_number`, `lookup`): a record whose source is missing, `null`
+  `to_string`, `to_number`, `lookup`; ignored on other types): a record whose source is missing, `null`
   or `""` is not converted, and neither is a `lookup` value with no entry.
   Nothing is published for the message. It fails, is retried and then
   dead-lettered, with the field named in `X-Vrsky-Last-Error` (for example
   `required field missing: "data.journal_sequence" (mapped to
-  "journalPosition") is missing`). Fix the source, then replay it from the
-  DLQ. Inside an `each` the path is relative to the element, and the error
-  names the element (`lines[1]: …`). Use it for a field the destination
+  "journalPosition") is missing`). A replay from the DLQ sends the same
+  record and fails again, so it helps only after the mapping is changed; a
+  record that really lacks the field has to come again from the source.
+  Inside an `each` the path is relative to the element, and the error names
+  the element (`lines[1]: …`). In a pipeline with several branches the
+  message fails before any branch publishes. The **Test Transform** preview
+  reports the missing field instead of a result. Use it for a field the destination
   refuses a whole batch without, so the message waits in the DLQ instead of
   being refused there.
 
 The editor shows `values` one per line as `value = text`. The **Required**
-box shows on a `lookup` row, and on other rows once a template has set it.
+box shows on a `lookup` row, and on any row where it is set.
 
 The editor warns about a mapping the converter would skip or write wrongly:
 a missing source or target, a template with no expression, a type the

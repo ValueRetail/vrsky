@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import {
   CONVERTER_MAPPING_LABELS,
   CONVERTER_MAPPING_TYPES,
@@ -41,14 +41,48 @@ function mappingRowLabel(rowName: string, mapping: ConverterMapping): string {
 }
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-// The types whose Required flag the converter honours: they read one source
-// field (checkRequired in src/cmd/data-converter/main.go). The checkbox shows
-// on a lookup row, and on any other such row once the flag is set (a template
-// sets it), so it can be seen and cleared. Plain rows stay as they were.
-const READS_ONE_FIELD = new Set(['rename', 'copy', 'to_string', 'to_number', 'lookup'])
+// The Required box shows on a lookup row, and on any other row once the flag
+// is set (a template sets it), so it can be seen and cleared, also after a
+// type change. The converter honours it only on the types that read one
+// source field (requiredApplies in src/cmd/data-converter/main.go). Plain
+// rows keep the controls they had.
+
+// LookupValues edits a lookup's values as text. The text is kept as typed, so
+// a new line or an entry without its "=" yet is not lost while typing; it is
+// parsed into values on every change and reloaded only when the values change
+// from outside.
+function LookupValues({ label, describedBy, values, onChange }: {
+  label: string
+  describedBy?: string
+  values: Record<string, string> | undefined
+  onChange: (values: Record<string, string>) => void
+}) {
+  const [text, setText] = useState(() => lookupText(values))
+  const [seen, setSeen] = useState(values)
+  if (values !== seen) {
+    setSeen(values)
+    if (JSON.stringify(parseLookup(text)) !== JSON.stringify(values ?? {})) setText(lookupText(values))
+  }
+  return (
+    <label style={{ display: 'block', fontSize: '12px', color: '#374151', marginTop: '6px' }}>
+      Values (one per line: source value = text; the text takes {'{field}'} like a template)
+      <textarea
+        aria-label={label}
+        aria-describedby={describedBy}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value)
+          onChange(parseLookup(e.target.value))
+        }}
+        placeholder={'basket.sale-recorded = bifrost-sale-{event_id}-r1'}
+        style={{ width: '100%', minHeight: '56px', fontSize: '12px', fontFamily: 'monospace', boxSizing: 'border-box' }}
+      />
+    </label>
+  )
+}
 
 // A lookup's values as editable text, one "value = text" per line, and back.
-// Only the first " = " splits a line, so the text may hold "=".
+// The first "=" splits a line, so the text may hold "=" and the value may not.
 function lookupText(values: Record<string, string> | undefined): string {
   return Object.entries(values ?? {}).map(([k, v]) => `${k} = ${v}`).join('\n')
 }
@@ -160,19 +194,14 @@ function MappingRow({
         />
       )}
       {type === 'lookup' && (
-        <label style={{ display: 'block', fontSize: '12px', color: '#374151', marginTop: '6px' }}>
-          Values (one per line: source value = text; the text takes {'{field}'} like a template)
-          <textarea
-            aria-label={`Values of ${rowLabel}`}
-            aria-describedby={describedBy}
-            value={lookupText(mapping.values)}
-            onChange={(e) => onChange({ values: parseLookup(e.target.value) })}
-            placeholder={'basket.sale-recorded = bifrost-sale-{event_id}-r1'}
-            style={{ width: '100%', minHeight: '56px', fontSize: '12px', fontFamily: 'monospace', boxSizing: 'border-box' }}
-          />
-        </label>
+        <LookupValues
+          label={`Values of ${rowLabel}`}
+          describedBy={describedBy}
+          values={mapping.values}
+          onChange={(values) => onChange({ values })}
+        />
       )}
-      {READS_ONE_FIELD.has(type) && (type === 'lookup' || mapping.required) && (
+      {(type === 'lookup' || mapping.required) && (
         <label style={checkboxLabelStyle}>
           <input
             type="checkbox"
