@@ -96,8 +96,8 @@ batches to keep that quiet.
 
 The converter renames each field of `importItem` into the item, field for
 field, and drops everything else (`sourceItemId`, the rest of the batch
-header, the profile's `catalogueItem` copy). A field the row does not have stays absent; it
-does not become `null`.
+header, the profile's `catalogueItem` copy). A field the row does not have
+stays absent; it does not become `null`.
 
 | Bifrost item field | From | Notes |
 |---|---|---|

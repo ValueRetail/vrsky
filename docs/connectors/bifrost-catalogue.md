@@ -126,12 +126,12 @@ isn't a timestamp) is refused without contacting Bifrost, like a bad payload.
 | Network error, timeout, 5xx, 3xx | Retried (1 s, 5 s, 30 s, 2 min), then the DLQ. The import is abandoned each time and starts over. |
 | 429 (too many imports open) | Retried after `Retry-After`. |
 | 401, 403 | Retried, then the DLQ. The token, its `catalogue.import` permission or `tenant_id` is wrong. Fix the node, then replay the message from the DLQ. |
-| 413, or 400 on items | Retried, then the DLQ. Either a proxy in front of Bifrost refuses the request size (ingress-nginx defaults to 1 MiB; lower `batch_size`) or an item isn't valid UTF-8/JSON (fix the source). Then replay from the DLQ. |
+| 413, or 400 on items | Retried, then the DLQ. Either a proxy in front of Bifrost refuses the request size (ingress-nginx defaults to 1 MiB; lower `batch_size`) or an item isn't valid UTF-8/JSON (fix the source). Then replay from the DLQ (with a `sequence`, see [Replaying from the DLQ](#retries-are-safe)). |
 | 404 | Retried: the import expired or Bifrost restarted (imports live in its memory). On the first call it can also mean `base_url` isn't the catalogue-api. |
 | 200 that isn't Bifrost's (an HTML page from a proxy, an items answer without `total_so_far`, or one whose count differs from what was sent) | Retried, then the DLQ. The import is abandoned. |
-| 409 at commit, for a message with a `sequence` | Dropped, not retried or dead-lettered: Bifrost already has this import or a newer one. In `full` mode nothing is lost (a newer whole list is live) and it is logged as a warning. In `delta` mode the message's rows are lost unless a later import carried the same articles, so it is logged as an error (see [Retries are safe](#retries-are-safe)). |
+| 409 at commit, for a message with a `sequence` | Dropped, not retried or dead-lettered: Bifrost already has this import or a newer one. In `full` mode, when the tenant gets only full lists, nothing is lost (a newer whole list is live) and it is logged as a warning. In `delta` mode the message's rows are lost unless a later import carried the same articles, so it is logged as an error (see [Retries are safe](#retries-are-safe)). |
 | Other 4xx (the shrink guard, a file that is mostly bad rows, validation, a 409 for a message without a `sequence`) | Dropped, not retried. The same list would be refused again. Bifrost's reason is in the log and in the error text. |
-| The node's settings are missing or wrong | Retried, then the DLQ, for a replay after the fix. |
+| The node's settings are missing or wrong | Retried, then the DLQ, for a replay after the fix (with a `sequence`, see [Replaying from the DLQ](#retries-are-safe)). |
 | The payload isn't a list of items, or its `sequence` can't be used | Dropped. |
 
 Error texts carry Bifrost's own reason (its `{"error": "..."}` body, cut at 300
