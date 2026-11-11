@@ -249,3 +249,24 @@ func TestValidateNodeConfigs_ConnectorURLs_DevFlag(t *testing.T) {
 		}
 	}
 }
+
+// The NATS source (#814): the required fields and the same URL rule the
+// connector applies (connectorurl.NATS).
+func TestNATSConsumerStartChecks(t *testing.T) {
+	ok := func(servers any) map[string]any {
+		return map[string]any{"servers": servers, "stream": "RH_EVENTS", "durable": "vrsky"}
+	}
+	runConnectorURLCases(t, "nats", []connectorURLCase{
+		{name: "public tls", block: ok([]string{"tls://nats.example.com:4222"}), sides: []string{"consumer"}},
+		{name: "loopback", block: ok([]string{"tls://127.0.0.1:4222"}), sides: []string{"consumer"}, wantErr: "private"},
+		{name: "userinfo", block: ok([]string{"tls://rh:" + urlSecret + "@nats.example.com"}), sides: []string{"consumer"}, wantErr: "user name"},
+		{name: "not a list", block: ok("tls://nats.example.com"), sides: []string{"consumer"}, wantErr: "list of URLs"},
+		{name: "no servers", block: map[string]any{"stream": "S", "durable": "d"}, sides: []string{"consumer"}, wantErr: "nats.servers is required"},
+		{name: "no stream", block: map[string]any{"servers": []string{"tls://nats.example.com"}, "durable": "d"}, sides: []string{"consumer"}, wantErr: "nats.stream is required"},
+		{name: "no durable", block: map[string]any{"servers": []string{"tls://nats.example.com"}, "stream": "S"}, sides: []string{"consumer"}, wantErr: "nats.durable is required"},
+	})
+	// There is no NATS destination.
+	if err := startOn("producer", nodeCfg(t, "nats", ok([]string{"tls://nats.example.com"}))); err == nil {
+		t.Error("a nats destination was accepted")
+	}
+}

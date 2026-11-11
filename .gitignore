@@ -69,6 +69,7 @@ build/
 /src/cmd/postgres-consumer/postgres-consumer
 /src/cmd/postgres-producer/postgres-producer
 /src/cmd/rabbitmq-consumer/rabbitmq-consumer
+/src/cmd/nats-consumer/nats-consumer
 /src/cmd/rabbitmq-producer/rabbitmq-producer
 /src/cmd/remote-agent/remote-agent
 /src/cmd/salesforce-consumer/salesforce-consumer
@@ -245,6 +246,7 @@ docker-compose.override.yml
 /src/postgres-consumer
 /src/postgres-producer
 /src/rabbitmq-consumer
+/src/nats-consumer
 /src/rabbitmq-producer
 /src/remote-agent
 /src/salesforce-consumer

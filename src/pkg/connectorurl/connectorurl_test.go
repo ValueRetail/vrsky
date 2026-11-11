@@ -235,3 +235,51 @@ func TestBrightpearlUSWestHostIsAccepted(t *testing.T) {
 		t.Errorf("usw datacenter rejected: %v", err)
 	}
 }
+
+func TestNATS(t *testing.T) {
+	tests := []struct {
+		name         string
+		servers      []string
+		allowPrivate bool
+		wantErr      string
+	}{
+		{"tls", []string{"tls://nats.example.com:4222"}, false, ""},
+		{"nats scheme, TLS enforced by the consumer", []string{"nats://nats.example.com:4222"}, false, ""},
+		{"no port", []string{"tls://nats.example.com"}, false, ""},
+		{"trailing slash", []string{"tls://nats.example.com:4222/"}, false, ""},
+		{"several", []string{"tls://a.example.com:4222", " tls://b.example.com:4222 "}, false, ""},
+		{"loopback with the dev flag", []string{"nats://127.0.0.1:4222"}, true, ""},
+
+		{"none", nil, false, "at least one"},
+		{"empty string", []string{""}, false, "absolute URL"},
+		{"no scheme", []string{"nats.example.com:4222"}, false, "servers"},
+		{"http", []string{"http://nats.example.com:4222"}, false, "nats:// or tls://"},
+		{"websocket", []string{"wss://nats.example.com"}, false, "nats:// or tls://"},
+		{"loopback", []string{"tls://127.0.0.1:4222"}, false, "private"},
+		{"metadata service", []string{"nats://169.254.169.254:4222"}, false, "private"},
+		{"rfc1918", []string{"tls://10.1.2.3:4222"}, false, "private"},
+		{"ipv6 loopback", []string{"tls://[::1]:4222"}, false, "private"},
+		{"second server private", []string{"tls://nats.example.com", "tls://192.168.1.1"}, false, "private"},
+		{"userinfo", []string{"tls://u:" + secret + "@nats.example.com:4222"}, false, "user name"},
+		{"token userinfo", []string{"tls://" + secret + "@nats.example.com:4222"}, false, "user name"},
+		{"query", []string{"tls://nats.example.com:4222?k=" + secret}, false, "query"},
+		{"fragment", []string{"tls://nats.example.com:4222#" + secret}, false, "fragment"},
+		{"path", []string{"tls://nats.example.com:4222/x"}, false, "path"},
+		{"bad port", []string{"tls://nats.example.com:99999"}, false, "port"},
+		{"comma hides a second server", []string{"tls://a.example.com,127.0.0.1"}, false, "one URL per entry"},
+		{"space inside", []string{"tls://a.example.com tls://b.example.com"}, false, "one URL per entry"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			check(t, NATS(tt.servers, tt.allowPrivate), tt.wantErr)
+		})
+	}
+
+	t.Run("too many", func(t *testing.T) {
+		many := make([]string, MaxNATSServers+1)
+		for i := range many {
+			many[i] = "tls://nats.example.com"
+		}
+		check(t, NATS(many, false), "at most")
+	})
+}

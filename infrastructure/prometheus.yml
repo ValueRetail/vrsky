@@ -62,6 +62,7 @@ scrape_configs:
           - 'sftp-consumer:8080'
           - 'kafka-consumer:8080'
           - 'rabbitmq-consumer:8080'
+          - 'nats-consumer:8080'
           - 'cloud-storage-consumer:8080'
           - 'http-producer:8080'
           - 'file-producer:8080'

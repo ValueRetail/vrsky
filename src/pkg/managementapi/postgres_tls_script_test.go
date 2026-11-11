@@ -206,7 +206,7 @@ func writes(calls []string) []string {
 // A pasted command must not change a cluster by itself: every writing
 // subcommand stops at the gate, before any kubectl write.
 func TestPostgresTLS_WritesNeedConfirm(t *testing.T) {
-	s := newKubeStub(t, 31)
+	s := newKubeStub(t, fleetSize(t))
 	for _, args := range [][]string{
 		{"server"}, {"ca-sync"}, {"clients"}, {"urls", "verify-full"}, {"urls", "require"}, {"urls", "disable"}, {"canary"}, {"restart"},
 	} {
@@ -234,7 +234,7 @@ func TestPostgresTLS_WritesNeedConfirm(t *testing.T) {
 
 // DRY_RUN and check need no confirmation and write nothing.
 func TestPostgresTLS_DryRunAndCheckWriteNothing(t *testing.T) {
-	s := newKubeStub(t, 31)
+	s := newKubeStub(t, fleetSize(t))
 	for _, args := range [][]string{
 		{"check"}, {"server"}, {"ca-sync"}, {"clients"}, {"canary"}, {"restart"},
 	} {
@@ -258,7 +258,7 @@ func TestPostgresTLS_DryRunAndCheckWriteNothing(t *testing.T) {
 // main returned and aborted with "tmp: unbound variable", which would have
 // stopped rotate-secrets.sh after ALTER ROLE. Run it under /bin/bash.
 func TestPostgresTLS_CASyncExitsCleanly(t *testing.T) {
-	s := newKubeStub(t, 31)
+	s := newKubeStub(t, fleetSize(t))
 	code, out, errOut := s.run(t, []string{"CONFIRM=1"}, "ca-sync")
 	if code != 0 {
 		t.Fatalf("ca-sync exited %d under %s\nstdout: %s\nstderr: %s", code, s.bash, out, errOut)
@@ -279,7 +279,7 @@ func TestPostgresTLS_CASyncExitsCleanly(t *testing.T) {
 
 // However the canary ends, its pod is deleted last.
 func TestPostgresTLS_CanaryAlwaysDeletesItsPod(t *testing.T) {
-	s := newKubeStub(t, 31)
+	s := newKubeStub(t, fleetSize(t))
 	for _, phase := range []string{"Succeeded", "Failed"} {
 		t.Run(phase, func(t *testing.T) {
 			code, _, _ := s.run(t, []string{"CONFIRM=1", "STUB_PHASE=" + phase}, "canary")
@@ -307,16 +307,17 @@ func TestPostgresTLS_CanaryAlwaysDeletesItsPod(t *testing.T) {
 // restart and urls trust the connector list. A short, empty or failed list
 // must stop them before anything changes.
 func TestPostgresTLS_ConnectorListFailsClosed(t *testing.T) {
+	n := fleetSize(t)
 	cases := []struct {
 		name       string
 		connectors int
 		extra      []string
 		wantOK     bool
 	}{
-		{"all 31", 31, nil, true},
+		{"whole fleet", n, nil, true},
 		{"empty", 0, nil, false},
-		{"one short", 30, nil, false},
-		{"listing fails", 31, []string{"STUB_FAIL_LIST=1"}, false},
+		{"one short", n - 1, nil, false},
+		{"listing fails", n, []string{"STUB_FAIL_LIST=1"}, false},
 	}
 	for _, c := range cases {
 		t.Run("restart "+c.name, func(t *testing.T) {
@@ -329,8 +330,8 @@ func TestPostgresTLS_ConnectorListFailsClosed(t *testing.T) {
 				}
 			}
 			if c.wantOK {
-				if code != 0 || restarts != 3+31 {
-					t.Errorf("exit %d, %d restarts (want 0 and %d): %s", code, restarts, 3+31, errOut)
+				if code != 0 || restarts != 3+n {
+					t.Errorf("exit %d, %d restarts (want 0 and %d): %s", code, restarts, 3+n, errOut)
 				}
 				return
 			}
@@ -356,8 +357,10 @@ func TestPostgresTLS_ConnectorListFailsClosed(t *testing.T) {
 	}
 }
 
-// The count the script insists on is the fleet the generator emits.
-func TestPostgresTLS_ExpectedConnectorsMatchesTheManifest(t *testing.T) {
+// fleetSize is how many connector Deployments the generated manifest holds,
+// so the stubs above grow with the fleet instead of pinning a number.
+func fleetSize(t *testing.T) int {
+	t.Helper()
 	docs := readYAMLDocs(t, filepath.Join(k8sRoot(), "connectors", "connectors.yaml"))
 	n := 0
 	for _, d := range docs {
@@ -365,6 +368,12 @@ func TestPostgresTLS_ExpectedConnectorsMatchesTheManifest(t *testing.T) {
 			n++
 		}
 	}
+	return n
+}
+
+// The count the script insists on is the fleet the generator emits.
+func TestPostgresTLS_ExpectedConnectorsMatchesTheManifest(t *testing.T) {
+	n := fleetSize(t)
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "infrastructure", "azure", "postgres-tls.sh"))
 	if err != nil {
 		t.Skip(err)
@@ -392,7 +401,7 @@ func TestPostgresTLS_RotateSecretsConfirmsItsOwnCASync(t *testing.T) {
 // not; the first version hashed the bytes and always reported an older
 // certificate (seen on the first production rollout, 2026-11-02).
 func TestPostgresTLS_CheckMatchesTheServedCertificate(t *testing.T) {
-	s := newKubeStub(t, 31)
+	s := newKubeStub(t, fleetSize(t))
 	_, stdout, stderr := s.run(t, nil, "check")
 	if !strings.Contains(stdout, "Postgres serves the Secret's current certificate") {
 		t.Fatalf("check did not match the served certificate\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
@@ -404,7 +413,7 @@ func TestPostgresTLS_CheckMatchesTheServedCertificate(t *testing.T) {
 
 // A pod serving a different certificate than the Secret still gets the warning.
 func TestPostgresTLS_CheckReportsADifferentCertificate(t *testing.T) {
-	s := newKubeStub(t, 31)
+	s := newKubeStub(t, fleetSize(t))
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -436,7 +445,7 @@ func TestPostgresTLS_CheckReportsADifferentCertificate(t *testing.T) {
 // lets a remote client in without TLS; `urls require` is the rollback that
 // still works.
 func TestPostgresTLS_URLsDisableRefusedWhileHostSSL(t *testing.T) {
-	s := newKubeStub(t, 31)
+	s := newKubeStub(t, fleetSize(t))
 	code, _, errOut := s.run(t, []string{"CONFIRM=1"}, "urls", "disable")
 	if code == 0 {
 		t.Fatal("urls disable succeeded while Postgres refuses plain connections")

@@ -84,6 +84,13 @@ var nodeConfigRules = map[nodeKind]nodeConfigRule{
 	{"consumer", "tenant"}: {"tenant-consumer", []configRequirement{{
 		"tenant.source_connection_id", "the source connection to mirror is required",
 	}}},
+	// External JetStream (#814). The server URLs are also checked by
+	// validateConnectorURLs (connectorurl.NATS), like the connector does.
+	{"consumer", "nats"}: {"nats-consumer", []configRequirement{
+		{"nats.servers", "the NATS server URL is required (tls://host:4222)"},
+		{"nats.stream", "the JetStream stream to read is required"},
+		{"nats.durable", "the durable consumer name is required"},
+	}},
 
 	// --- generic destinations ------------------------------------------------
 	{"producer", "http"}: {"http-producer", []configRequirement{{
