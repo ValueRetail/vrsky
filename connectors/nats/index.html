@@ -1687,6 +1687,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#a-retailhero-partner-account" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A Retailhero partner account
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#delivery" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2562,6 +2573,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#a-retailhero-partner-account" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A Retailhero partner account
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#delivery" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2634,9 +2656,10 @@ message into a pipeline message.</p>
   <code>nats://host:4222</code>, one per entry. No user name, password, path, query or
   comma in a URL.</li>
 <li><code>stream</code>: the JetStream stream to read.</li>
-<li><code>durable</code>: the durable consumer name. If it does not exist, a start of the
-  pipeline creates it (pull, explicit ack, <code>deliver_policy</code>, AckWait 30 s,
-  unlimited redeliveries). Use one durable per connection: two connections
+<li><code>durable</code>: the durable consumer name. It is bound by name with consumer
+  info only; the connector never asks for stream info. If it does not exist,
+  a start of the pipeline creates it (pull, explicit ack, <code>deliver_policy</code>,
+  AckWait 30 s, unlimited redeliveries), unless <code>create_durable</code> is <code>false</code>. Use one durable per connection: two connections
   on one durable split its messages between them. An existing durable is
   used as it is and never changed. If it has a
   MaxDeliver limit, the connector logs a warning: a connection loss or a
@@ -2645,22 +2668,37 @@ message into a pipeline message.</p>
 <li><code>filter_subject</code> (optional): the subject filter, e.g. <code>rh.evt.v1.acme.&gt;</code>.
   Used when VRSky creates the durable. For an existing durable it must match
   the durable's own filter, or the start fails.</li>
+<li><code>create_durable</code> (optional, default <code>true</code>): <code>false</code> only binds an
+  existing durable. A missing one then stops the pipeline with status
+  <code>error</code> at every start. Use it when the server's owner creates the durable.</li>
 <li><code>auth_type</code>: <code>none</code>, <code>creds</code> (a <code>.creds</code> file with the user JWT and NKey
-  seed, as issued for a NATS account) or <code>user_password</code>.</li>
-<li><code>username</code>, plus <code>password_secret_id</code> or <code>creds_secret_id</code>: the credentials,
-  always as stored secrets.</li>
+  seed, as issued for a NATS account), <code>user_password</code>, or <code>nkey</code> (a bare
+  user NKey seed, <code>SU…</code>, as a Retailhero partner account uses).</li>
+<li><code>username</code>, plus <code>password_secret_id</code>, <code>creds_secret_id</code> or
+  <code>nkey_seed_secret_id</code>: the credentials, always as stored secrets.</li>
 <li><code>ca_cert</code> (optional): a PEM CA certificate, for a server whose certificate is
-  not signed by a public CA.</li>
+  not signed by a public CA. <code>ca_cert_secret_id</code> reads it from a stored
+  secret instead.</li>
+<li><code>api_prefix</code> (optional): the JetStream API prefix, for an account that
+  imports the API from another account (Retailhero: <code>JS.RH.API</code>). Without it
+  requests go to <code>$JS.API</code>.</li>
+<li><code>inbox_prefix</code> (optional): the prefix of every reply subject, for a user
+  that may subscribe only to its own inboxes (Retailhero:
+  <code>_INBOX_vrsky_t_&lt;tenant&gt;</code>). Without it replies go to <code>_INBOX</code>.</li>
 <li><code>deliver_policy</code> (optional): where a durable VRSky creates starts. <code>all</code>
   (default) is the whole stream, <code>new</code> only what arrives after the durable
   exists, <code>by_start_time</code> the messages from <code>opt_start_time</code> (RFC 3339, e.g.
   <code>2026-11-01T00:00:00Z</code>). It does nothing for an existing durable.</li>
 <li><code>batch_size</code> (optional): the most messages one pull takes, default 10, at
   most 256. The connector lowers it so that one pull holds at most 32 MiB:
-  the batch × the largest message the server (or the stream's
-  MaxMsgSize) allows. On a server with 1 MB messages that is 32; with 64 MB
-  messages, one at a time. It also stays within a durable's
-  MaxRequestBatch and MaxRequestExpires.</li>
+  the batch × the largest message the server allows (<code>max_payload</code>). On a
+  server with 1 MB messages that is 32; with 64 MB messages, one at a time.
+  It also stays within a durable's MaxRequestBatch and MaxRequestExpires.</li>
+<li><code>max_wait_seconds</code> (optional): how long a pull waits for a message when
+  none is there, default 5, at most 30. A stop can take this long. A start
+  within that time after a stop can deliver a message out of order: the old
+  pull, still waiting, may catch it and hand it back (nak), and it comes again
+  after newer ones.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"nats"</span><span class="p">,</span>
@@ -2675,6 +2713,43 @@ message into a pipeline message.</p>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h2 id="a-retailhero-partner-account">A Retailhero partner account<a class="headerlink" href="#a-retailhero-partner-account" title="Permanent link">&para;</a></h2>
+<p>Retailhero gives VRSky one NATS account per tenant (Retailhero#2680). It
+sees only that tenant's exported subjects
+<code>rh.evt.v1.&lt;tenant&gt;.&lt;owner&gt;.&lt;event-type&gt;</code>, has no JetStream of its own, may
+use the consumer API of its own durables only, and may not read stream
+information. Retailhero hands over the user's NKey seed (<code>vrsky_t_a.nk</code>),
+the run CA (<code>ca.crt</code>) and the URL. One pipeline reads one durable, which is
+one tenant and one event type:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"nats"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"nats"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"servers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"tls://nats.retailhero.example:4222"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"auth_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"nkey"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"nkey_seed_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret id&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"ca_cert"</span><span class="p">:</span><span class="w"> </span><span class="s2">"-----BEGIN CERTIFICATE-----\n…"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">"JS.RH.API"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"inbox_prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">"_INBOX_vrsky_t_a"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"stream"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RH_EVT_V1_PRODUCT"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"durable"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vrsky_product-version_T-A"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"filter_subject"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rh.evt.v1.T-A.product.product.version"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"create_durable"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>Retailhero's operator creates the durables (<code>messaging-up</code>), so set
+  <code>create_durable</code> to <code>false</code>. The account may create its own durable only
+  with the exact filter, because the create grant names it; a create
+  without <code>filter_subject</code> is refused.</li>
+<li>Retailhero's durables give up on a message after 10 deliveries, and the
+  connector logs a warning about that at each connect. A long VRSky outage
+  does not spend deliveries: held messages are kept in progress. A crash or
+  a lost connection does spend one.</li>
+<li>Retailhero's relay sets <code>Nats-Msg-Id</code> to the event's <code>event_id</code>, so the
+  envelope id follows the event id: a re-published or replayed event
+  reaches the pipeline once inside the five-minute window below.</li>
+</ul>
 <h2 id="delivery">Delivery<a class="headerlink" href="#delivery" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>At least once, no duplicates in the pipeline.</strong> A message is acked on the
@@ -2715,7 +2790,9 @@ message into a pipeline message.</p>
   credentials the server refuses, a stream that does not exist, JetStream not
   enabled for the account, a permission violation (including a user that may
   not ack: without acks every message would come back each AckWait and be
-  published again), a certificate that cannot
+  published again; a denied <code>$JS.API</code> request or <code>_INBOX</code> subscription says
+  to set <code>api_prefix</code> or <code>inbox_prefix</code>), a durable that does not exist
+  while <code>create_durable</code> is <code>false</code>, a certificate that cannot
   be verified, a server without TLS, a server address that is private, a
   durable that does not fit (a push consumer, not explicit ack, another
   filter), and a message too large for VRSky's NATS. Fix the cause and start
@@ -2731,24 +2808,29 @@ message into a pipeline message.</p>
 </ul>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Secrets.</strong> The password or <code>.creds</code> file typed in the builder is minted
-  into an encrypted tenant secret at deploy and stored as <code>password_secret_id</code>
-  or <code>creds_secret_id</code>. A stored config with either in plaintext is refused at
-  start. Credentials are never logged.</li>
+<li><strong>Secrets.</strong> The password, <code>.creds</code> file or NKey seed typed in the builder
+  is minted into an encrypted tenant secret at deploy and stored as
+  <code>password_secret_id</code>, <code>creds_secret_id</code> or <code>nkey_seed_secret_id</code>. A stored
+  config with any of them in plaintext is refused at start. Credentials are
+  never logged.</li>
 <li><strong>TLS and addresses.</strong> TLS is required. The URLs must not point at a
   private, loopback or link-local address, and the check is repeated on the
   address a host name resolves to. Servers that a cluster announces are not
   dialled; list every server you want in <code>servers</code>. The operator's
   <code>ALLOW_PRIVATE_UPSTREAMS</code> switch lifts both rules for local development.</li>
-<li><strong>Test connection.</strong> The button connects, looks up the stream and the
-  durable, and disconnects. It creates nothing. A server it cannot reach is
-  reported without its address.</li>
-<li><strong>Permissions.</strong> The NATS user needs the JetStream API for the stream
-  (<code>$JS.API.STREAM.INFO.&lt;stream&gt;</code>, <code>$JS.API.CONSUMER.INFO.&lt;stream&gt;.&lt;durable&gt;</code>,
-  <code>$JS.API.CONSUMER.MSG.NEXT.&lt;stream&gt;.&lt;durable&gt;</code>), acks (<code>$JS.ACK.&gt;</code>),
-  subscribe on <code>_INBOX.&gt;</code> for the replies, and
-  <code>$JS.API.CONSUMER.CREATE.&lt;stream&gt;.&gt;</code> if VRSky is to create the durable.
-  An account without the create permission needs the durable made for it.</li>
+<li><strong>Test connection.</strong> The button connects, looks up the durable, and
+  disconnects. It creates nothing. A missing durable is fine when the first
+  start may create it (whether the account has the create permission is not
+  checked), and an error when <code>create_durable</code> is <code>false</code>. A
+  server it cannot reach is reported without its address.</li>
+<li><strong>Permissions.</strong> The NATS user needs <code>$JS.API.CONSUMER.INFO.&lt;stream&gt;.&lt;durable&gt;</code>
+  and <code>$JS.API.CONSUMER.MSG.NEXT.&lt;stream&gt;.&lt;durable&gt;</code> (under <code>api_prefix</code>
+  when it is set), acks (<code>$JS.ACK.&lt;stream&gt;.&lt;durable&gt;.&gt;</code>), subscribe on
+  <code>_INBOX.&gt;</code> (or <code>&lt;inbox_prefix&gt;.&gt;</code>) for the replies, and
+  <code>$JS.API.CONSUMER.CREATE.&lt;stream&gt;.&lt;durable&gt;.&lt;filter_subject&gt;</code> if VRSky is
+  to create the durable (<code>$JS.API.CONSUMER.CREATE.&lt;stream&gt;.&lt;durable&gt;</code> when
+  no <code>filter_subject</code> is set). No stream info is needed. An account without the
+  create permission needs the durable made for it.</li>
 </ul>
 
 
