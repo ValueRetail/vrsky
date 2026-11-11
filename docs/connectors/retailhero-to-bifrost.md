@@ -159,9 +159,9 @@ batches to keep that quiet.
 ## Mapping
 
 The converter renames each field of `importItem` into the item, field for
-field, and drops everything else (`sourceItemId`, the batch header, the
-profile's `catalogueItem` copy). A field the row does not have stays absent; it
-does not become `null`.
+field, and drops everything else (`sourceItemId`, the rest of the batch
+header, the profile's `catalogueItem` copy). A field the row does not have
+stays absent; it does not become `null`.
 
 | Bifrost item field | From | Notes |
 |---|---|---|
@@ -175,6 +175,14 @@ does not become `null`.
 | `min_age` | `importItem.min_age` | optional |
 | `alcohol` | `importItem.alcohol` | |
 | `effective_from` | `importItem.effective_from` | UTC start of the price; prices are sent before they apply |
+
+Beside the items, the batch's `recordedAt` (the time every Retailhero event
+carries) is passed through as `sequence`. The producer sends it to Bifrost in
+milliseconds, and Bifrost refuses an older batch that arrives after a newer
+one (see [Sequence](bifrost-catalogue.md#sequence)). It has to grow from one
+batch to the next, in milliseconds: two batches with the same `recordedAt`
+count as one delivery, and the second is dropped with its rows. A batch
+without `recordedAt` is sent unnumbered.
 
 The mapping lives in `ui/src/onboarding/templates.ts` and is the same file the
 Go test reads (`ui/src/onboarding/testdata/retailhero-to-bifrost.json`).
@@ -239,10 +247,16 @@ event; each durable is filtered to exactly one subject.
 - **Campaigns and member prices** have no place in Bifrost's catalogue yet
   (ValueRetail/Bifrost#247). The campaign price itself flows as an ordinary
   price.
-- **Order.** A retried message can commit after a newer one. See "Retries are
-  safe" in [Bifrost catalogue](bifrost-catalogue.md). Bifrost now has a
-  `sequence` guard on begin (Bifrost#253); the producer doesn't send it yet
-  (#858).
+- **Order.** The template passes `recordedAt` through as Bifrost's `sequence`
+  (#858), so a retried older batch is dropped instead of overwriting a newer
+  one. Before go-live, Retailhero has to confirm that every batch carries a
+  `recordedAt` that grows by at least a millisecond per batch, including the
+  several batches one package is cut into, or send a per-batch counter
+  instead. Retailhero's `recordedAt` is today the writing transaction's start
+  time, so batches written in one transaction would share it, and every batch
+  after the first would be dropped. Also, a delta that is retried after a
+  newer one committed is dropped even when the newer one held other articles
+  (see [What the guard costs](bifrost-catalogue.md#retries-are-safe)).
 
 ## Tests
 
@@ -251,7 +265,8 @@ event; each durable is filtered to exactly one subject.
   compares with the item lists in `src/test/fixtures/retailhero`.
 - `src/cmd/bifrost-catalogue-producer/retailhero_template_test.go` sends those
   lists through the producer in `delta` mode to the stubbed catalogue-api and
-  checks that every field, the price strings included, arrives as written and
-  that articles the batches don't mention stay.
+  checks that every field, the price strings included, arrives as written,
+  that articles the batches don't mention stay, and that an older batch
+  retried after a newer one is dropped.
 - `ui/src/onboarding/templates.test.ts` keeps the template in step with the
   Go test's config and with the connectors' keys.
