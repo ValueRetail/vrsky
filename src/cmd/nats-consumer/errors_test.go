@@ -235,45 +235,60 @@ func TestPermanentErrors_EndWithStatusError(t *testing.T) {
 }
 
 // startConnection refuses a stored config with a plaintext credential: status
-// error, and the value appears nowhere.
+// error, and the value appears nowhere. A key in another case is a credential
+// too: encoding/json would read it into the config (#859 review).
 func TestStart_PlaintextCredentialRefused(t *testing.T) {
-	c := newTestConsumer(nil)
-	logs := &lockedBuf{}
-	c.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-	c.db = db
-	nodes, _ := json.Marshal([]map[string]any{{
-		"id": "src", "type": "consumer",
-		"config": map[string]any{"type": "nats", "nats": map[string]any{
-			"servers": []string{"tls://nats.example.com:4222"}, "auth_type": "user_password",
-			"username": "rh", "password": tPassword, "stream": tStream, "durable": tDur,
-		}},
-	}})
-	mock.ExpectQuery("SELECT nodes FROM connections").WithArgs(tConn, tTenant).
-		WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow(nodes))
-	rec := &statusRec{}
-	mock.ExpectExec(`UPDATE connections SET status = \$1, last_error = \$2`).
-		WithArgs(argCapture{rec, 0}, argCapture{rec, 1}, argCapture{rec, 2}, argCapture{rec, 3}).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	for _, tt := range []struct {
+		name string
+		cred map[string]any
+	}{
+		{"password", map[string]any{"auth_type": "user_password", "username": "rh", "password": tPassword}},
+		{"Password", map[string]any{"auth_type": "user_password", "username": "rh", "password_secret_id": "0b1c", "Password": tPassword}},
+		{"NKEY_SEED with Auth_Type", map[string]any{"Auth_Type": "nkey", "NKEY_SEED": "SU" + tPassword}},
+		{"Nkey_Seed next to its secret", map[string]any{"auth_type": "nkey", "nkey_seed_secret_id": "0b1c", "Nkey_Seed": "SU" + tPassword}},
+		{"Creds", map[string]any{"auth_type": "creds", "Creds": "-----BEGIN NATS USER JWT-----" + tPassword}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestConsumer(nil)
+			logs := &lockedBuf{}
+			c.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock: %v", err)
+			}
+			defer db.Close()
+			c.db = db
+			block := map[string]any{"servers": []string{"tls://nats.example.com:4222"}, "stream": tStream, "durable": tDur}
+			for k, v := range tt.cred {
+				block[k] = v
+			}
+			nodes, _ := json.Marshal([]map[string]any{{
+				"id": "src", "type": "consumer",
+				"config": map[string]any{"type": "nats", "nats": block},
+			}})
+			mock.ExpectQuery("SELECT nodes FROM connections").WithArgs(tConn, tTenant).
+				WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow(nodes))
+			rec := &statusRec{}
+			mock.ExpectExec(`UPDATE connections SET status = \$1, last_error = \$2`).
+				WithArgs(argCapture{rec, 0}, argCapture{rec, 1}, argCapture{rec, 2}, argCapture{rec, 3}).
+				WillReturnResult(sqlmock.NewResult(0, 1))
 
-	c.startConnection(context.Background(), tConn, tTenant)
+			c.startConnection(context.Background(), tConn, tTenant)
 
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("db: %v", err)
-	}
-	reason, ok := rec.errorWrite()
-	if !ok || !strings.Contains(reason, "plaintext") {
-		t.Fatalf("status error reason = %q (written %v), want one about plaintext", reason, ok)
-	}
-	if strings.Contains(reason, tPassword) || strings.Contains(logs.String(), tPassword) {
-		t.Error("the plaintext password reached the reason or the log")
-	}
-	if _, active := c.active[tConn]; active {
-		t.Error("connection active after a refused start")
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("db: %v", err)
+			}
+			reason, ok := rec.errorWrite()
+			if !ok || !strings.Contains(reason, "plaintext") {
+				t.Fatalf("status error reason = %q (written %v), want one about plaintext", reason, ok)
+			}
+			if strings.Contains(reason, tPassword) || strings.Contains(logs.String(), tPassword) {
+				t.Error("the plaintext credential reached the reason or the log")
+			}
+			if _, active := c.active[tConn]; active {
+				t.Error("connection active after a refused start")
+			}
+		})
 	}
 }
 

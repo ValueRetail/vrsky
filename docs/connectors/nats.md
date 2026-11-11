@@ -64,7 +64,10 @@ Config bullets:
   server with 1 MB messages that is 32; with 64 MB messages, one at a time.
   It also stays within a durable's MaxRequestBatch and MaxRequestExpires.
 - `max_wait_seconds` (optional): how long a pull waits for a message when
-  none is there, default 5, at most 30. A stop can take this long.
+  none is there, default 5, at most 30. A stop can take this long. A start
+  within that time after a stop can deliver a message out of order: the old
+  pull, still waiting, may catch it and hand it back (nak), and it comes again
+  after newer ones.
 
 ```json
 {
@@ -199,5 +202,6 @@ one tenant and one event type:
   when it is set), acks (`$JS.ACK.<stream>.<durable>.>`), subscribe on
   `_INBOX.>` (or `<inbox_prefix>.>`) for the replies, and
   `$JS.API.CONSUMER.CREATE.<stream>.<durable>.<filter_subject>` if VRSky is
-  to create the durable. No stream info is needed. An account without the
+  to create the durable (`$JS.API.CONSUMER.CREATE.<stream>.<durable>` when
+  no `filter_subject` is set). No stream info is needed. An account without the
   create permission needs the durable made for it.

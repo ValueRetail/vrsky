@@ -68,6 +68,11 @@ func TestValidate(t *testing.T) {
 		{"inbox prefix with a space", func(c *NATSConfig) { c.InboxPrefix = "_INBOX vrsky" }, false, "inbox_prefix"},
 		{"inbox prefix with >", func(c *NATSConfig) { c.InboxPrefix = "_INBOX.>" }, false, "inbox_prefix"},
 		{"max wait too long", func(c *NATSConfig) { c.MaxWaitSeconds = maxMaxWaitSeconds + 1 }, false, "max_wait_seconds"},
+		// Negative values are refused, as the start check refuses them;
+		// 0 (or absent) is the default.
+		{"negative batch", func(c *NATSConfig) { c.BatchSize = -1 }, false, "batch_size must be from 1 to 256"},
+		{"negative max wait", func(c *NATSConfig) { c.MaxWaitSeconds = -1 }, false, "max_wait_seconds must be from 1 to 30"},
+		{"batch and wait 0 mean the defaults", func(c *NATSConfig) { c.BatchSize, c.MaxWaitSeconds = 0, 0 }, false, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,6 +220,18 @@ func TestPlaintextCredentials(t *testing.T) {
 		{`{"creds":"-----BEGIN NATS USER JWT-----"}`, "creds is stored in plaintext"},
 		{`{"nkey_seed":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
 		{`{"nkey_seed_secret_id":"0b1c","ca_cert":"-----BEGIN CERTIFICATE-----"}`, ""},
+		// encoding/json reads these keys into the credential fields too
+		// (#859 review): every spelling is refused.
+		{`{"Auth_Type":"nkey","NKEY_SEED":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
+		{`{"auth_type":"nkey","nkey_seed_secret_id":"0b1c","Nkey_Seed":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
+		{`{"nkey_ſeed":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
+		{`{"Password":"` + tPassword + `"}`, "password is stored in plaintext"},
+		{`{"Creds":"-----BEGIN NATS USER JWT-----"}`, "creds is stored in plaintext"},
+		// Two spellings: refused whichever comes last.
+		{`{"Password":"` + tPassword + `","password":""}`, "password is stored in plaintext"},
+		{`{"password":"","pAssword":"` + tPassword + `"}`, "password is stored in plaintext"},
+		{`{"Auth_Type":"nkey","nkey_seed_secret_id":"0b1c"}`, ""},
+		{`{"Auth_Type":"user_password","Username":"rh","password_secret_id":"0b1c","Password":""}`, ""},
 	}
 	for _, tt := range tests {
 		err := plaintextCredentials([]byte(tt.block))

@@ -104,6 +104,36 @@ Changes requested, nothing blocking. Fixed in 3f7945f7:
   policy hidden when creation is off; the test note and docs say the
   create permission is not checked.
 
+## Review round 2 (fresh Opus reviewer)
+
+Changes requested, one blocking:
+
+- The plaintext refusal missed mixed-case keys. encoding/json reads
+  `NKEY_SEED`, `Password` or `Auth_Type` into the connector's struct, while
+  the connector's own check and the start check looked up exact keys. Both
+  now check every key that folds to `password`, `creds` or `nkey_seed`
+  (`strings.EqualFold`, the rule encoding/json uses, so `nkey_ſeed` counts
+  too). Decision: not the single-struct decode #862 used. With two
+  spellings of one key, a struct keeps the last one, and the connector's
+  typed parse sees the block re-encoded with sorted keys (the secret
+  resolver goes through a map), so "last" differs between the check and the
+  parse. Checking every spelling does not depend on order.
+- The start check reads `auth_type` and `username` in any case, and refuses
+  either spelled two ways, since which one the connector reads depends on
+  key order. The `*_secret_id` references stay exact: the connector resolves
+  only those names (`onlyCredentialSecrets`, and crypto matches the
+  lowercase suffix), so a `NKEY_SEED_SECRET_ID` is not a stored seed in
+  either place.
+- The connector now refuses a negative `batch_size` or `max_wait_seconds`
+  as the start check does, instead of using the default. 0 or absent is
+  still the default.
+- Docs: a start soon after a stop can deliver one message out of order (the
+  old waiting pull lives up to `max_wait_seconds`); the cap stays 30. The
+  create grant has the `.<filter_subject>` suffix only when a filter is set.
+- Mutation run: with the exact-key lookup put back, the new cases in
+  `TestPlaintextCredentials`, `TestStart_PlaintextCredentialRefused` and
+  `TestNATSConsumerStartChecks` fail.
+
 ## Manual check
 
 `nats:2.12` in Docker with the same rendered config (TLS, partner

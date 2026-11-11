@@ -283,6 +283,23 @@ func TestNATSConsumerStartChecks(t *testing.T) {
 		{name: "user without a name", sides: []string{"consumer"}, block: with("auth_type", "user_password", "password_secret_id", "s1"), wantErr: "nats.username is required"},
 		{name: "plaintext seed", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
 		{name: "plaintext password", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "password", urlSecret), wantErr: "nats.password is stored in plaintext"},
+		// encoding/json reads a key in any case into the connector's
+		// struct, so the check does too (#859 review).
+		{name: "plaintext seed as NKEY_SEED", sides: []string{"consumer"}, block: with("Auth_Type", "nkey", "NKEY_SEED", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext seed as Nkey_Seed", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed_secret_id", "s1", "Nkey_Seed", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext seed with a long s", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed_secret_id", "s1", "nkey_ſeed", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext seed next to an empty one", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed_secret_id", "s1", "nkey_seed", "", "NKEY_SEED", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext Password", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "password_secret_id", "s1", "Password", urlSecret), wantErr: "nats.password is stored in plaintext"},
+		{name: "plaintext Creds", sides: []string{"consumer"}, block: with("auth_type", "creds", "creds_secret_id", "s1", "Creds", "-----BEGIN NATS USER JWT-----"+urlSecret), wantErr: "nats.creds is stored in plaintext"},
+		{name: "Auth_Type nkey without a secret", sides: []string{"consumer"}, block: with("Auth_Type", "nkey"), wantErr: "nats.nkey_seed_secret_id is required"},
+		{name: "Auth_Type nkey with its secret", sides: []string{"consumer"}, block: with("Auth_Type", "nkey", "nkey_seed_secret_id", "s1")},
+		{name: "AUTH_TYPE unknown", sides: []string{"consumer"}, block: with("AUTH_TYPE", "token"), wantErr: "nats.auth_type must be one of"},
+		{name: "Auth_Type user_password with Username", sides: []string{"consumer"}, block: with("Auth_Type", "user_password", "Username", "rh", "password_secret_id", "s1")},
+		{name: "auth_type spelled twice", sides: []string{"consumer"}, block: with("auth_type", "none", "Auth_Type", "nkey", "nkey_seed_secret_id", "s1"), wantErr: "nats.auth_type is set more than once"},
+		{name: "username spelled twice", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "UserName", "", "password_secret_id", "s1"), wantErr: "nats.username is set more than once"},
+		// The connector resolves only the exact reference names, so a
+		// differently cased one does not count as the stored secret.
+		{name: "secret id in capitals", sides: []string{"consumer"}, block: with("auth_type", "nkey", "NKEY_SEED_SECRET_ID", "s1"), wantErr: "nats.nkey_seed_secret_id is required"},
 		{name: "api prefix with a wildcard", sides: []string{"consumer"}, block: with("api_prefix", "JS.*.API"), wantErr: "nats.api_prefix must be a subject"},
 		{name: "inbox prefix with an empty token", sides: []string{"consumer"}, block: with("inbox_prefix", "_INBOX..x"), wantErr: "nats.inbox_prefix must be a subject"},
 		{name: "prefix with a trailing dot", sides: []string{"consumer"}, block: with("api_prefix", "JS.RH.API.")},

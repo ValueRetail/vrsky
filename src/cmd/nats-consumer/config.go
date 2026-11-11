@@ -129,7 +129,7 @@ func (c *NATSConfig) normalise() {
 	c.Stream = strings.TrimSpace(c.Stream)
 	c.Durable = strings.TrimSpace(c.Durable)
 	c.FilterSubject = strings.TrimSpace(c.FilterSubject)
-	if c.BatchSize <= 0 {
+	if c.BatchSize == 0 {
 		c.BatchSize = defaultBatchSize
 	}
 	c.DeliverPolicy = strings.TrimSpace(c.DeliverPolicy)
@@ -140,7 +140,7 @@ func (c *NATSConfig) normalise() {
 	// nats.go adds the dot itself; one typed in would make an empty token.
 	c.APIPrefix = strings.TrimSuffix(strings.TrimSpace(c.APIPrefix), ".")
 	c.InboxPrefix = strings.TrimSuffix(strings.TrimSpace(c.InboxPrefix), ".")
-	if c.MaxWaitSeconds <= 0 {
+	if c.MaxWaitSeconds == 0 {
 		c.MaxWaitSeconds = defaultMaxWaitSeconds
 	}
 }
@@ -161,11 +161,13 @@ func (c *NATSConfig) validate(allowPrivate bool) error {
 	if c.FilterSubject != "" && strings.ContainsAny(c.FilterSubject, " \t\r\n") {
 		return errors.New("filter_subject must not contain spaces")
 	}
-	if c.BatchSize > maxBatchSize {
-		return fmt.Errorf("batch_size must be at most %d", maxBatchSize)
+	// Absent or 0 means the default (normalise); a negative value is
+	// refused, as the start check refuses it.
+	if c.BatchSize < 0 || c.BatchSize > maxBatchSize {
+		return fmt.Errorf("batch_size must be from 1 to %d", maxBatchSize)
 	}
-	if c.MaxWaitSeconds > maxMaxWaitSeconds {
-		return fmt.Errorf("max_wait_seconds must be at most %d", maxMaxWaitSeconds)
+	if c.MaxWaitSeconds < 0 || c.MaxWaitSeconds > maxMaxWaitSeconds {
+		return fmt.Errorf("max_wait_seconds must be from 1 to %d", maxMaxWaitSeconds)
 	}
 	if err := checkPrefix("api_prefix", c.APIPrefix); err != nil {
 		return err
@@ -299,17 +301,27 @@ func (c *NATSConfig) tlsConfig(allowPrivate bool) (*tls.Config, error) {
 
 // plaintextCredentials reports a credential stored in the clear in the node's
 // nats block, before secrets are resolved. The builder stores each one as a
-// tenant secret on deploy (password_secret_id, creds_secret_id); a config
-// written some other way with the value inline is refused rather than used.
+// tenant secret on deploy (password_secret_id, creds_secret_id,
+// nkey_seed_secret_id); a config written some other way with the value inline
+// is refused rather than used.
+//
+// encoding/json matches a key to a field without regard to case, so the typed
+// parse reads "Password" or "NKEY_SEED" as the credential too. Every key that
+// folds to a credential field is checked (strings.EqualFold is the rule
+// encoding/json uses), not only one of them: the typed parse sees the block
+// re-encoded with its keys sorted, so which of two spellings wins there need
+// not be the one that would win here.
 func plaintextCredentials(block json.RawMessage) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(block, &raw); err != nil {
 		return nil // not an object: the typed parse reports it
 	}
 	for _, field := range []string{"password", "creds", "nkey_seed"} {
-		var s string
-		if v, ok := raw[field]; ok && json.Unmarshal(v, &s) == nil && s != "" {
-			return fmt.Errorf("%s is stored in plaintext; store it as a secret (%s_secret_id)", field, field)
+		for key, v := range raw {
+			var s string
+			if strings.EqualFold(key, field) && json.Unmarshal(v, &s) == nil && s != "" {
+				return fmt.Errorf("%s is stored in plaintext; store it as a secret (%s_secret_id)", field, field)
+			}
 		}
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -390,6 +391,16 @@ var natsCredentialRefs = map[string]string{
 // api_prefix or inbox_prefix that is not a plain subject, and a batch_size
 // or max_wait_seconds out of the connector's range. Messages name the field,
 // never a value.
+//
+// The connector reads the block into a struct, and encoding/json matches keys
+// without regard to case: "NKEY_SEED" is the seed there and "Auth_Type" the
+// auth type, so they are read that way here too (foldedStrings). A plaintext
+// credential is refused under any spelling. auth_type or username spelled two
+// ways is refused: which spelling the connector reads depends on the order
+// the keys reach it, which this check cannot know. The *_secret_id references
+// are read by their exact key, because the connector resolves only those
+// (onlyCredentialSecrets keeps the exact names, and crypto resolves only the
+// lowercase _secret_id suffix).
 func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
 	var block map[string]json.RawMessage
 	if json.Unmarshal(raw["nats"], &block) != nil {
@@ -398,11 +409,19 @@ func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
 	svc := nodeConfigRules[nodeKind{node.Type, "nats"}].service
 	var errs []string
 	for _, field := range []string{"password", "creds", "nkey_seed"} {
-		if stringField(block, field) != "" {
+		vals, _ := foldedStrings(block, field)
+		// Untrimmed, like the connector's own check: whitespace alone is
+		// still a value written into the node.
+		if slices.ContainsFunc(vals, func(v string) bool { return v != "" }) {
 			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is stored in plaintext; store it as a secret (%s_secret_id) (served by %s)", node.ID, field, field, svc))
 		}
 	}
-	authType := stringField(block, "auth_type")
+	for _, field := range []string{"auth_type", "username"} {
+		if _, keys := foldedStrings(block, field); keys > 1 {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is set more than once, in keys that differ only in case (served by %s)", node.ID, field, svc))
+		}
+	}
+	authType := firstFolded(block, "auth_type")
 	if authType == "" {
 		authType = "none"
 	}
@@ -413,7 +432,7 @@ func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
 	case ref != "" && stringField(block, ref) == "":
 		errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is required for auth_type %s (served by %s)", node.ID, ref, authType, svc))
 	}
-	if authType == "user_password" && stringField(block, "username") == "" {
+	if authType == "user_password" && firstFolded(block, "username") == "" {
 		errs = append(errs, fmt.Sprintf("node %s (nats): nats.username is required for auth_type user_password (served by %s)", node.ID, svc))
 	}
 	for _, field := range []string{"api_prefix", "inbox_prefix"} {
@@ -519,6 +538,35 @@ func stringField(raw map[string]json.RawMessage, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+// foldedStrings returns, untrimmed, the string value of every key in raw that
+// encoding/json would decode into a struct field tagged name: the key itself
+// and any spelling that differs only in case (strings.EqualFold is the rule
+// encoding/json applies). keys counts the matching keys, string-valued or not.
+func foldedStrings(raw map[string]json.RawMessage, name string) (vals []string, keys int) {
+	for k, v := range raw {
+		if !strings.EqualFold(k, name) {
+			continue
+		}
+		keys++
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			vals = append(vals, s)
+		}
+	}
+	return vals, keys
+}
+
+// firstFolded is the trimmed string value of a key spelled like name in any
+// case, or "" when there is none. With two spellings it returns either; a
+// caller that cares refuses that first (foldedStrings).
+func firstFolded(raw map[string]json.RawMessage, name string) string {
+	vals, _ := foldedStrings(raw, name)
+	if len(vals) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(vals[0])
 }
 
 // hasNonEmpty reports whether a dotted path within the config resolves to a
