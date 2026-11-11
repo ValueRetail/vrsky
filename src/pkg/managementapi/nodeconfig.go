@@ -308,14 +308,15 @@ func validateHTTPProducerBearer(node *Node, _ map[string]json.RawMessage) []stri
 			TokenSecretID string `json:"token_secret_id"`
 		} `json:"http"`
 	}
-	if json.Unmarshal(node.Config, &c) != nil {
-		return nil
-	}
+	// A type error (a number where a string belongs) still fills the other
+	// fields, so the checks run anyway; the producer reads it the same way.
+	_ = json.Unmarshal(node.Config, &c)
 	var errs []string
 	if strings.TrimSpace(c.HTTP.Token) != "" {
 		errs = append(errs, fmt.Sprintf("node %s (http): http.token is written into the node; store the bearer token as a secret (http.token_secret_id) (served by http-producer)", node.ID))
 	}
-	if strings.TrimSpace(c.HTTP.AuthType) == "bearer" && strings.TrimSpace(c.HTTP.TokenSecretID) == "" {
+	// auth_type is compared as stored: the producer does not trim it either.
+	if c.HTTP.AuthType == "bearer" && strings.TrimSpace(c.HTTP.TokenSecretID) == "" {
 		errs = append(errs, fmt.Sprintf("node %s (http): auth_type is bearer but http.token_secret_id is missing; store the bearer token as a secret (served by http-producer)", node.ID))
 	}
 	return errs
