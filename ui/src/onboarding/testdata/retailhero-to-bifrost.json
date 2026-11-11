@@ -1,0 +1,63 @@
+{
+  "drop_unmapped": true,
+  "mappings": [
+    {
+      "type": "each",
+      "source": "rows",
+      "target": "items",
+      "drop_unmapped": true,
+      "mappings": [
+        {
+          "type": "rename",
+          "source": "importItem.article_no",
+          "target": "article_no"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.gtin",
+          "target": "gtin"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.name",
+          "target": "name"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.price_incl_vat",
+          "target": "price_incl_vat"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.vat_code",
+          "target": "vat_code"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.unit",
+          "target": "unit"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.category",
+          "target": "category"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.min_age",
+          "target": "min_age"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.alcohol",
+          "target": "alcohol"
+        },
+        {
+          "type": "rename",
+          "source": "importItem.effective_from",
+          "target": "effective_from"
+        }
+      ]
+    }
+  ]
+}

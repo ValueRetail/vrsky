@@ -1624,3 +1624,19 @@ Last updated 2026-10-28.
    `docs/operator/webhook-mtls.md`. Also say whether the cluster enforces
    NetworkPolicy (`az aks show --query networkProfile.networkPolicy`),
    which decides whether the optional policy there does anything.
+
+212. **Agree the Retailhero message for the Bifrost template.** The template
+    (#816) reads one profile import batch per message (`rows[].importItem`).
+    How Retailhero wraps the profile output in an `rh.evt.v1` event and on
+    which subject is open (Retailhero#2680). Settle it there, then correct the
+    converter paths and the filter help if they differ. Found in #816.
+
+213. **Full-list variant of the Retailhero template.** The first load and
+    clean-ups of a store need `mode: full` with the whole list in one message
+    (#841) and a named person for `allow_shrink`. Add the variant once #841
+    lands. Found in #816.
+
+214. **A multi-line secret field in the onboarding wizard.** The wizard's secret
+    field is one line, so a NATS `.creds` file can't be pasted there. The
+    Retailhero template asks for user and password instead; a textarea field
+    kind would let templates use creds. Found in #816.

@@ -13,6 +13,7 @@ import { connectorKeysFor, CONVERTER_MAPPING_TYPES } from '../types/nodeConfig'
 import { TEMPLATES, type PipelineTemplate } from './templates'
 import sitooToBusinessCentral from './testdata/sitoo-to-business-central.json'
 import businessCentralToSitoo from './testdata/business-central-to-sitoo.json'
+import retailheroToBifrost from './testdata/retailhero-to-bifrost.json'
 
 // Walks a dot-path without creating anything, mirroring the wizard's readObj.
 function at(root: Record<string, unknown>, path: string): unknown {
@@ -276,11 +277,13 @@ describe('a wizard value inside a converter mapping is a static value', () => {
 
 describe('the retail templates deploy the mapping the Go tests check', () => {
   // src/cmd/data-converter/template_mapping_test.go runs the real converter
-  // with these files on Sitoo and BC fixtures. A mapping changed here but not
+  // with these files on Sitoo and BC fixtures (and retailhero_template_test.go
+  // on Retailhero's Bifrost catalogue fixtures). A mapping changed here but not
   // there would ship untested.
   const goTestdata: Record<string, unknown> = {
     'sitoo-to-business-central': sitooToBusinessCentral,
     'business-central-to-sitoo': businessCentralToSitoo,
+    'retailhero-to-bifrost': retailheroToBifrost,
   }
   for (const [id, want] of Object.entries(goTestdata)) {
     it(id, () => {
@@ -307,5 +310,36 @@ describe('the retail templates', () => {
     // republishes a whole page on redelivery: without this BC gets duplicates.
     const dst = TEMPLATES.find((t) => t.id === 'sitoo-to-business-central')!.nodes.find((n) => n.id === 'dst')!
     expect((dst.config.business_central as Record<string, unknown>).dedupe_fields).toEqual(['externalDocumentNumber'])
+  })
+})
+
+describe('the Retailhero → Bifrost template', () => {
+  const t = () => TEMPLATES.find((t) => t.id === 'retailhero-to-bifrost')!
+
+  it('says it is beta and why', () => {
+    expect(t().summary).toMatch(/^Beta:/)
+  })
+
+  it('sends a delta, because a Retailhero batch is not the whole catalogue', () => {
+    const dst = t().nodes.find((n) => n.id === 'dst')!
+    expect((dst.config.bifrost_catalogue as Record<string, unknown>).mode).toBe('delta')
+  })
+
+  it('starts the NATS durable at new messages, not the whole stream', () => {
+    const src = t().nodes.find((n) => n.id === 'src')!
+    expect((src.config.nats as Record<string, unknown>).deliver_policy).toBe('new')
+  })
+
+  it('never turns a price into a number', () => {
+    // to_number goes through a float; Bifrost takes the price as a string.
+    const conv = t().nodes.find((n) => n.id === 'conv')!
+    const types = allMappings(conv.config.mappings as Mapping[]).map((m) => m.type)
+    expect(types).not.toContain('to_number')
+  })
+
+  it('asks for the server as a one-entry list', () => {
+    const src = t().nodes.find((n) => n.id === 'src')!
+    expect((src.config.nats as Record<string, unknown>).servers).toEqual([''])
+    expect(t().fields.find((f) => f.key === '0')?.objectPath).toBe('nats.servers')
   })
 })
