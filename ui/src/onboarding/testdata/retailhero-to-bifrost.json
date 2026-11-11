@@ -58,6 +58,11 @@
           "target": "effective_from"
         }
       ]
+    },
+    {
+      "type": "rename",
+      "source": "recordedAt",
+      "target": "sequence"
     }
   ]
 }

@@ -30,8 +30,10 @@ type fault struct {
 // sessions.rs): imports live in memory, nothing reaches the live catalogue
 // before commit, commit takes the import out whatever its outcome, a full
 // commit smaller than half the live catalogue is refused with 422 (the shrink
-// guard), DELETE of an unknown import is 404, and an Idempotency-Key repeated
-// inside one import is a replay.
+// guard), DELETE of an unknown import is 404, an Idempotency-Key repeated
+// inside one import is a replay, and a commit whose sequence is not above the
+// highest one the tenant has is refused with 409 (crates/catalogue/src/
+// import.rs; an unnumbered import leaves the highest in place).
 type bifrostStub struct {
 	t     *testing.T
 	srv   *httptest.Server
@@ -49,16 +51,20 @@ type bifrostStub struct {
 	// once. begin/items/commit/abort are the four kinds.
 	faults  map[string]fault
 	counts  map[string]int
+	newest  *uint64     // highest sequence committed
 	onItems func(n int) // called with the batch number as it arrives
 }
 
 type stubBegin struct {
-	Kind        string `json:"kind"`
-	AllowShrink string `json:"allow_shrink"`
+	Kind        string  `json:"kind"`
+	AllowShrink string  `json:"allow_shrink"`
+	Sequence    *uint64 `json:"sequence"`
+	raw         string
 }
 
 type stubImport struct {
 	kind    string
+	seq     *uint64
 	items   []json.RawMessage
 	seen    map[string]bool
 	batches int
@@ -252,10 +258,11 @@ func (s *bifrostStub) begin(w http.ResponseWriter, _ *http.Request, body []byte)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	b.raw = string(body)
 	s.begins = append(s.begins, b)
 	s.nextID++
 	id := fmt.Sprintf("imp_%04d", s.nextID)
-	s.imports[id] = &stubImport{kind: b.Kind, seen: map[string]bool{}}
+	s.imports[id] = &stubImport{kind: b.Kind, seq: b.Sequence, seen: map[string]bool{}}
 	// Remembered for the shrink override.
 	if b.AllowShrink != "" {
 		s.imports[id].seen["allow_shrink"] = true
@@ -300,6 +307,10 @@ func (s *bifrostStub) commit(w http.ResponseWriter, r *http.Request, _ []byte) {
 		return
 	}
 	delete(s.imports, id) // taken whatever the outcome
+	if imp.seq != nil && s.newest != nil && *imp.seq <= *s.newest {
+		apiError(w, http.StatusConflict, fmt.Sprintf("import sequence %d is not newer than %d, which is already committed", *imp.seq, *s.newest))
+		return
+	}
 	if imp.kind == "full" && !imp.seen["allow_shrink"] && len(s.live) > 0 && float64(len(imp.items)) < 0.5*float64(len(s.live)) {
 		apiError(w, http.StatusUnprocessableEntity,
 			fmt.Sprintf("refusing a full import of %d articles over a live catalogue of %d: shrink guard", len(imp.items), len(s.live)))
@@ -310,6 +321,10 @@ func (s *bifrostStub) commit(w http.ResponseWriter, r *http.Request, _ []byte) {
 	}
 	for _, it := range imp.items {
 		s.live[articleNo(it)] = it
+	}
+	if imp.seq != nil && (s.newest == nil || *imp.seq > *s.newest) {
+		v := *imp.seq
+		s.newest = &v
 	}
 	writeJSON(w, http.StatusOK, fmt.Sprintf(
 		`{"import_id":%q,"version":"v%d","kind":%q,"applied":%d,"catalogue_size":%d,"rejected":0,"errors":[]}`,

@@ -630,6 +630,10 @@ export const TEMPLATES: PipelineTemplate[] = [
                 { type: 'rename', source: 'importItem.effective_from', target: 'effective_from' },
               ],
             },
+            // The event's own time becomes Bifrost's ordering sequence: the
+            // producer sends it on begin in milliseconds, and Bifrost refuses
+            // an older batch that arrives after a newer one (#858).
+            { type: 'rename', source: 'recordedAt', target: 'sequence' },
           ],
         },
       },

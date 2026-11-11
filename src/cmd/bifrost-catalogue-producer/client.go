@@ -47,10 +47,20 @@ type bifrostClient struct {
 // beginBody is the body of POST /v1/catalogue/imports. effective_from is left
 // out, so Bifrost uses the time of begin (Utc::now() in routes.rs) as the
 // default; an item may carry its own.
+//
+// Sequence is Bifrost's ordering guard (#253 there, #858 here): a number that
+// only grows per tenant. Left out, the import is unnumbered and does not reset
+// the guard.
 type beginBody struct {
-	Kind        string `json:"kind"`
-	AllowShrink string `json:"allow_shrink,omitempty"`
+	Kind        string  `json:"kind"`
+	AllowShrink string  `json:"allow_shrink,omitempty"`
+	Sequence    *uint64 `json:"sequence,omitempty"`
 }
+
+// errSuperseded is a commit Bifrost refused with 409: the tenant already has
+// an import with this sequence or a higher one (docs/catalogue-doors.md in
+// Bifrost, "Deliveries that arrive out of order").
+var errSuperseded = errors.New("bifrost commit 409: a newer import is already there")
 
 // commitReport is what commit answers. Fields Bifrost adds later are ignored.
 type commitReport struct {
@@ -79,8 +89,8 @@ func (e *userError) Error() string { return e.msg }
 func (e *userError) Unwrap() error { return e.cause }
 
 // begin opens an import and returns its id.
-func (c *bifrostClient) begin(ctx context.Context, kind, allowShrink string) (string, error) {
-	body, err := json.Marshal(beginBody{Kind: kind, AllowShrink: allowShrink})
+func (c *bifrostClient) begin(ctx context.Context, kind, allowShrink string, seq *uint64) (string, error) {
+	body, err := json.Marshal(beginBody{Kind: kind, AllowShrink: allowShrink, Sequence: seq})
 	if err != nil {
 		return "", sdk.Permanent(fmt.Errorf("bifrost begin: %w", err))
 	}
@@ -139,6 +149,9 @@ func (c *bifrostClient) commit(ctx context.Context, id string) (*commitReport, e
 	status, resp, hdr, err := c.do(ctx, http.MethodPost, importPath(id)+"/commit", nil, nil)
 	if err != nil {
 		return nil, err
+	}
+	if status == http.StatusConflict {
+		return nil, fmt.Errorf("%w: %s", errSuperseded, c.reason(resp))
 	}
 	if status != http.StatusOK {
 		return nil, c.classify("commit", status, resp, hdr)

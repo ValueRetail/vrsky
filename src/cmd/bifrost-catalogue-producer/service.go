@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,6 +165,13 @@ func (p *catalogueProducer) Deliver(ctx context.Context, env *envelope.Envelope)
 		}
 	}
 
+	// The sequence is the same for every node: it belongs to the message.
+	seq, serr := parseSequence(env.Payload)
+	if serr != nil {
+		p.logger.Error("dropping: the payload's sequence cannot be used", "envelope_id", env.ID, "error", serr)
+		return sdk.Permanent(serr)
+	}
+
 	var failed, permanent []error
 	for _, n := range eligible {
 		items, perr := parseItems(env.Payload, n.cfg.mode())
@@ -172,7 +180,7 @@ func (p *catalogueProducer) Deliver(ctx context.Context, env *envelope.Envelope)
 			permanent = append(permanent, fmt.Errorf("node %s: %w", n.id, perr))
 			continue
 		}
-		if err := p.runImport(ctx, env, n, items); err != nil {
+		if err := p.runImport(ctx, env, n, items, seq); err != nil {
 			if sdk.IsPermanent(err) {
 				permanent = append(permanent, fmt.Errorf("node %s: %w", n.id, err))
 			} else {
@@ -238,7 +246,12 @@ func (c *CatalogueConfig) batchSize() int {
 // a half-filled one for longer than it takes the DELETE to arrive (and an
 // hour at most if that fails). There is no retry of a single request here: the
 // whole import is retried by redelivery, from a fresh begin.
-func (p *catalogueProducer) runImport(ctx context.Context, env *envelope.Envelope, n boundNode, items []json.RawMessage) (err error) {
+//
+// seq, when set, is sent on begin. Bifrost then refuses the commit with 409 if
+// the tenant already has an import with that sequence or a higher one. That
+// delivery is older than what the tills have, or it is a redelivery of one
+// that already landed, so it is dropped: logged and acked, not retried.
+func (p *catalogueProducer) runImport(ctx context.Context, env *envelope.Envelope, n boundNode, items []json.RawMessage, seq *uint64) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, deliveryTimeout)
 	defer cancel()
 
@@ -251,7 +264,7 @@ func (p *catalogueProducer) runImport(ctx context.Context, env *envelope.Envelop
 	}
 	mode := n.cfg.mode()
 
-	importID, err := c.begin(ctx, mode, strings.TrimSpace(n.cfg.AllowShrinkReason))
+	importID, err := c.begin(ctx, mode, strings.TrimSpace(n.cfg.AllowShrinkReason), seq)
 	if err != nil {
 		return err
 	}
@@ -274,6 +287,17 @@ func (p *catalogueProducer) runImport(ctx context.Context, env *envelope.Envelop
 	}
 
 	rep, err := c.commit(ctx, importID)
+	if errors.Is(err, errSuperseded) && seq == nil {
+		// A 409 without a sequence is not Bifrost's ordering guard (a proxy,
+		// or an API change): refused, like any other 4xx.
+		return sdk.Permanent(err)
+	}
+	if errors.Is(err, errSuperseded) {
+		// Bifrost has taken the import out already; nothing to abort.
+		c.logger.Warn("Bifrost already has this import or a newer one; dropped the delivery",
+			"mode", mode, "import_id", importID, "sequence", *seq, "items", len(items), "reason", err.Error())
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -337,6 +361,61 @@ func parseItems(payload []byte, mode string) ([]json.RawMessage, error) {
 		}
 	}
 	return items, nil
+}
+
+// parseSequence reads the optional "sequence" beside "items" in an object
+// payload ({"items": [...], "sequence": ...}). It is either a whole number from
+// 1, sent as it is, or an RFC 3339 timestamp, sent as its Unix time in
+// milliseconds: the source event's own time, which a converter can copy but
+// not convert. Absent or null means the import is sent without one, as before.
+// A list payload, or a single-item object in delta mode, has no sequence.
+func parseSequence(payload []byte) (*uint64, error) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, nil
+	}
+	var obj struct {
+		Items    json.RawMessage `json:"items"`
+		Sequence json.RawMessage `json:"sequence"`
+	}
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return nil, nil // parseItems reports what is wrong with the payload
+	}
+	raw := bytes.TrimSpace(obj.Sequence)
+	if len(obj.Items) == 0 || len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	switch raw[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, errors.New(`"sequence" is not a valid string`)
+		}
+		t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(s))
+		if err != nil {
+			return nil, errors.New(`"sequence" is a string but not an RFC 3339 timestamp`)
+		}
+		ms := t.UnixMilli()
+		if ms < 1 {
+			return nil, errors.New(`"sequence" is a timestamp not after 1970-01-01T00:00:00Z`)
+		}
+		v := uint64(ms)
+		return &v, nil
+	default:
+		for _, b := range raw {
+			if b < '0' || b > '9' {
+				return nil, errors.New(`"sequence" is neither a whole number nor an RFC 3339 timestamp`)
+			}
+		}
+		v, err := strconv.ParseUint(string(raw), 10, 64)
+		if err != nil {
+			return nil, errors.New(`"sequence" is too large for a whole number`)
+		}
+		if v < 1 {
+			return nil, errors.New(`"sequence" must be 1 or more`)
+		}
+		return &v, nil
+	}
 }
 
 // splitBatches cuts items into runs of at most size items and, roughly,
