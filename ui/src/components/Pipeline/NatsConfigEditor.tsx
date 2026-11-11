@@ -5,9 +5,11 @@ import { StyledInput, StyledSelect } from './StyledFields'
 
 // NatsConfigEditor (#814): the source settings for an external NATS JetStream,
 // such as a Retailhero partner account. Stores config.nats = {servers[],
-// auth_type, username, password, creds, ca_cert, stream, durable,
-// filter_subject}. password and creds are minted into the secrets vault on
-// deploy (SECRET_FIELDS); the connector refuses them in plaintext.
+// auth_type, username, password, creds, nkey_seed, ca_cert, stream, durable,
+// filter_subject, create_durable, api_prefix, inbox_prefix, batch_size,
+// max_wait_seconds}. password, creds and nkey_seed are minted into the
+// secrets vault on deploy (SECRET_FIELDS); the connector refuses them in
+// plaintext.
 
 const labelStyle: React.CSSProperties = {
   fontSize: '12px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px',
@@ -42,6 +44,9 @@ export default function NatsConfigEditor({
   // A .creds file is several lines, which a password box would flatten, so it
   // gets a text area. Saved = a secret is bound and nothing new was pasted.
   const credsSaved = Boolean(nats.creds_secret_id) && !nats.creds
+  // Unset means VRSky may create the durable, as before the switch existed.
+  const createDurable = nats.create_durable !== false
+  const numberOrUndefined = (v: string) => (v.trim() === '' ? undefined : Number(v))
 
   return (
     <div className="space-y-3">
@@ -77,6 +82,14 @@ export default function NatsConfigEditor({
         value={(nats.filter_subject as string) || ''}
         onChange={(v) => update({ filter_subject: v })}
       />
+      <label style={{ ...hintStyle, display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '16px' }}>
+        <input
+          type="checkbox"
+          checked={createDurable}
+          onChange={(e) => update({ create_durable: e.target.checked })}
+        />
+        Create the durable on the first start if it is missing
+      </label>
 
       <StyledSelect
         label="First start reads"
@@ -109,6 +122,7 @@ export default function NatsConfigEditor({
           { value: 'none', label: 'None' },
           { value: 'creds', label: 'Credentials file (JWT + NKey)' },
           { value: 'user_password', label: 'User and password' },
+          { value: 'nkey', label: 'NKey seed' },
         ]}
       />
 
@@ -150,6 +164,53 @@ export default function NatsConfigEditor({
         </div>
       )}
 
+      {authType === 'nkey' && (
+        <SecretInput
+          label="NKey seed"
+          placeholder="SU…"
+          field="nkey_seed"
+          config={nats}
+          defaultSecretName="nats-nkey-seed"
+          onChange={(patch) => update(patch)}
+        />
+      )}
+
+      <StyledInput
+        label="JetStream API prefix (optional)"
+        placeholder="JS.RH.API"
+        value={(nats.api_prefix as string) || ''}
+        onChange={(v) => update({ api_prefix: v })}
+      />
+      <StyledInput
+        label="Inbox prefix (optional)"
+        placeholder="_INBOX_vrsky_t_a"
+        value={(nats.inbox_prefix as string) || ''}
+        onChange={(v) => update({ inbox_prefix: v })}
+      />
+      <div style={{ ...hintStyle, marginTop: '-8px', marginBottom: '12px' }}>
+        Set both for an account that imports the JetStream API from another account and may only use its own reply
+        inboxes, such as a Retailhero partner account.
+      </div>
+
+      <StyledInput
+        label="Batch size (optional)"
+        type="number"
+        min={1}
+        max={256}
+        placeholder="10"
+        value={nats.batch_size === undefined ? '' : String(nats.batch_size)}
+        onChange={(v) => update({ batch_size: numberOrUndefined(v) })}
+      />
+      <StyledInput
+        label="Pull wait in seconds (optional)"
+        type="number"
+        min={1}
+        max={30}
+        placeholder="5"
+        value={nats.max_wait_seconds === undefined ? '' : String(nats.max_wait_seconds)}
+        onChange={(v) => update({ max_wait_seconds: numberOrUndefined(v) })}
+      />
+
       <div>
         <label style={labelStyle} htmlFor="nats-ca">CA certificate (PEM, optional)</label>
         <textarea
@@ -164,8 +225,8 @@ export default function NatsConfigEditor({
 
       <div style={hintStyle}>
         A durable pull consumer with explicit ack. Each message is acked on the NATS server only after it is in the
-        pipeline, and its Nats-Msg-Id keeps a redelivery from being published twice. TLS is required. VRSky creates the
-        durable if it does not exist and never changes one that does.
+        pipeline, and its Nats-Msg-Id keeps a redelivery from being published twice. TLS is required. VRSky never changes
+        an existing durable.
       </div>
       <TestConnectionButton config={config} role="consumer" />
     </div>
