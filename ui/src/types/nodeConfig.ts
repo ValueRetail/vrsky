@@ -77,6 +77,14 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     required: ['account_id', 'site_id', 'api_id', 'api_password'],
     numeric: ['account_id', 'site_id'],
   },
+  // bifrost-catalogue-producer (CatalogueConfig in src/cmd/bifrost-catalogue-producer/service.go).
+  // token is replaced by token_secret_id at deploy.
+  'producer/bifrost_catalogue': {
+    block: 'bifrost_catalogue',
+    keys: ['base_url', 'token', 'tenant_id', 'mode', 'batch_size', 'allow_shrink_reason'],
+    required: ['base_url', 'token'],
+    numeric: ['batch_size'],
+  },
   // business-central-consumer (BCConfig in src/cmd/business-central-consumer/service.go)
   'consumer/business_central': {
     block: 'business_central',

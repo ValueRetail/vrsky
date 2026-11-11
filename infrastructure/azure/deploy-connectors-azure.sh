@@ -26,6 +26,13 @@
 #                    second replica would show the operator half the events.
 # Both are liftable — leader election for the pollers, a shared event bus for
 # the streams — but neither is in scope for #205.
+#
+# SINGLETON_PRODUCERS are pull-durable producers kept at one replica (no PDB)
+# on purpose. bifrost-catalogue-producer (#815): one pod delivers serially, so
+# a connection's catalogue imports commit in stream order; two pods could run
+# messages N and N+1 at once and let the older list win, and would double the
+# use of Bifrost's shared cap of 32 open imports.
+SINGLETON_PRODUCERS=" bifrost-catalogue-producer "
 set -euo pipefail
 
 REG="${REG:-vrskyprodacr}"
@@ -108,6 +115,7 @@ sftp-producer             producer -
 kafka-producer            producer -
 rabbitmq-producer         producer -
 salesforce-producer       producer -
+bifrost-catalogue-producer producer -
 "
 
 # extra_env <name> — connector-specific env beyond the shared block.
@@ -282,7 +290,7 @@ emit() {  # $1=name  $2=role  $3=port ("-" for none)
   local name="$1" role="$2" port="$3" replicas=1 scaled="" affinity=""
   [ "$port" = "-" ] && port=""
   # Pure pull-durable subscriber (producer, no HTTP surface) → safe to scale.
-  if [ "$role" = "producer" ] && [ -z "$port" ]; then
+  if [ "$role" = "producer" ] && [ -z "$port" ] && [[ "$SINGLETON_PRODUCERS" != *" $name "* ]]; then
     replicas=2
     scaled=yes
     # Keep the two replicas off one node, or the HA they exist for is

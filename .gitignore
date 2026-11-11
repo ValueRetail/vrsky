@@ -42,6 +42,7 @@ build/
 # (pkg/managementapi) fails when a command is missing here.
 /src/cmd/alert-responder/alert-responder
 /src/cmd/api-consumer/api-consumer
+/src/cmd/bifrost-catalogue-producer/bifrost-catalogue-producer
 /src/cmd/brightpearl-consumer/brightpearl-consumer
 /src/cmd/brightpearl-producer/brightpearl-producer
 /src/cmd/business-central-consumer/business-central-consumer
@@ -219,6 +220,7 @@ docker-compose.override.yml
 # when a command is missing here. `make build` writes to src/bin/ instead.
 /src/alert-responder
 /src/api-consumer
+/src/bifrost-catalogue-producer
 /src/brightpearl-consumer
 /src/brightpearl-producer
 /src/business-central-consumer

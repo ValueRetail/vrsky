@@ -133,6 +133,13 @@ var nodeConfigRules = map[nodeKind]nodeConfigRule{
 	{"producer", "brightpearl"}:      {"brightpearl-producer", blockRequired("brightpearl")},
 	{"consumer", "sap_s4hana"}:       {"sap-s4hana-consumer", blockRequired("sap_s4hana")},
 	{"producer", "sap_s4hana"}:       {"sap-s4hana-producer", blockRequired("sap_s4hana")},
+
+	// Bifrost catalogue-api, destination only (#815). The token is only ever a
+	// stored secret; the connector refuses one inline.
+	{"producer", "bifrost_catalogue"}: {"bifrost-catalogue-producer", []configRequirement{
+		{"bifrost_catalogue.base_url", "the origin of Bifrost's catalogue-api is required"},
+		{"bifrost_catalogue.token_secret_id", "the tenant token must be stored as a secret"},
+	}},
 }
 
 // ValidateNodeConfigs checks that every node is configured completely enough

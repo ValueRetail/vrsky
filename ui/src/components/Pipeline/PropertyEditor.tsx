@@ -18,6 +18,7 @@ import SecretInput from './SecretInput'
 import SFTPConsumerConfig from './SFTPConsumerConfig'
 import CloudStorageConfigEditor from './CloudStorageConfigEditor'
 import NatsConfigEditor from './NatsConfigEditor'
+import BifrostCatalogueConfigEditor from './BifrostCatalogueConfigEditor'
 import WebhookSignatureConfig from './WebhookSignatureConfig'
 import OAuthGrantSelector from './OAuthGrantSelector'
 import { useAuthStore } from '../../store/authStore'
@@ -3435,6 +3436,7 @@ export default function PropertyEditor({
                 { value: 'visma', label: 'Visma.net (ERP)' },
                 { value: 'brightpearl', label: 'Brightpearl (OMS)' },
                 { value: 'sap_s4hana', label: 'SAP S/4HANA (ERP)' },
+                { value: 'bifrost_catalogue', label: 'Bifrost catalogue (POS)' },
               ]}
             />
 
@@ -3586,6 +3588,9 @@ export default function PropertyEditor({
 
             {config.type === 'cloud_storage' && (
               <CloudStorageConfigEditor config={config} setConfig={setConfig} role="producer" />
+            )}
+            {config.type === 'bifrost_catalogue' && (
+              <BifrostCatalogueConfigEditor config={config} setConfig={setConfig} />
             )}
             {config.type === 'sitoo' && (
               <SitooConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />

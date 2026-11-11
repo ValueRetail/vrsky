@@ -1,6 +1,6 @@
 // Package connectorurl holds the URL checks for connectors whose target comes
 // from tenant config and receives a credential: Brightpearl, Front Systems,
-// SAP S/4HANA, Business Central and the NATS consumer's servers. Each connector calls its function at start
+// SAP S/4HANA, Business Central, the Bifrost catalogue producer and the NATS consumer's servers. Each connector calls its function at start
 // and before it sends anything, and the management API calls the same one when
 // a connection starts, so the two cannot drift (#708). Visma has its own
 // package, pkg/vismaurl.
@@ -76,6 +76,16 @@ func Brightpearl(baseURL, datacenter, accountCode string, allowPrivate bool) err
 func FrontSystems(baseURL string, allowPrivate bool) error {
 	if strings.TrimSpace(baseURL) == "" {
 		return errors.New("base_url is required (the partner's Azure APIM host)")
+	}
+	return safeurl.CheckBaseURL(baseURL, allowPrivate)
+}
+
+// BifrostCatalogue checks the base_url the Bifrost catalogue producer sends
+// the tenant's bearer token to (#815). It is required: each customer has their
+// own catalogue-api.
+func BifrostCatalogue(baseURL string, allowPrivate bool) error {
+	if strings.TrimSpace(baseURL) == "" {
+		return errors.New("base_url is required (the origin of Bifrost's catalogue-api)")
 	}
 	return safeurl.CheckBaseURL(baseURL, allowPrivate)
 }
