@@ -28,6 +28,10 @@ const (
 	fetchWait = 5 * time.Second
 	// ackTimeout bounds the double ack to the source.
 	ackTimeout = 5 * time.Second
+	// publishTimeout bounds one publish into the pipeline, so a VRSky stream
+	// without a leader shows up as failed publishes, retried and logged,
+	// instead of a connection that hangs without a word.
+	publishTimeout = 30 * time.Second
 	// publishRetryDelay is the first wait before a failed publish into the
 	// pipeline is tried again; it doubles up to maxBackoff.
 	publishRetryDelay = time.Second
@@ -67,9 +71,9 @@ type natsConsumer struct {
 	// The redial schedule and the wait after a failed publish; tests
 	// shorten them.
 	minBackoff, maxBackoff, retryDelay time.Duration
-	// apiTimeout bounds binding the durable, fetchWait one waiting pull;
-	// tests shorten them.
-	apiTimeout, fetchWait time.Duration
+	// apiTimeout bounds binding the durable, fetchWait one waiting pull,
+	// publishTimeout one publish into the pipeline; tests shorten them.
+	apiTimeout, fetchWait, publishTimeout time.Duration
 
 	active map[string]*activeConn
 	mu     sync.RWMutex
@@ -129,6 +133,9 @@ func (c *natsConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	if c.fetchWait == 0 {
 		c.fetchWait = fetchWait
 	}
+	if c.publishTimeout == 0 {
+		c.publishTimeout = publishTimeout
+	}
 	c.RegisterHTTPHandler("/test-connection/", c.handleTestConnection())
 	res.Health.SetReady(true)
 	return nil
@@ -154,7 +161,7 @@ func (c *natsConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	c.logger.Info("Subscribed to NATS command topics")
 	// Start and stop are NATS commands and are not persisted: bring back what
 	// the database says is running.
-	sdk.RestoreRunning(ctx, c.db, c.logger, "nats", c.startConnection)
+	sdk.RestoreRunning(ctx, c.db, c.logger, "nats", c.restoreConnection)
 
 	<-ctx.Done()
 	return nil
@@ -192,16 +199,30 @@ func (c *natsConsumer) handleStartCommand(msg *nats.Msg) {
 	c.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
 }
 
-// startConnection is the start command's work, also what RestoreRunning calls
-// on boot for every pipeline the database says is running.
+// startConnection is the start command's work. Only a start command may create
+// a missing durable.
 func (c *natsConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	c.start(ctx, connectionID, tenantID, true)
+}
+
+// restoreConnection is what RestoreRunning calls on boot for every pipeline
+// the database says is running. It never creates the durable: one missing
+// now was deleted while the pipeline ran, and creating it on every pod start
+// (each deploy, each morning the cluster wakes) would replay the stream from
+// deliver_policy each time. A missing durable ends the pipeline in status
+// error instead; a start command creates it on purpose.
+func (c *natsConsumer) restoreConnection(ctx context.Context, connectionID, tenantID string) {
+	c.start(ctx, connectionID, tenantID, false)
+}
+
+func (c *natsConsumer) start(ctx context.Context, connectionID, tenantID string, mayCreate bool) {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here (#397); one refused while another is in
 	// flight runs again if that one gives up (#424).
 	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
-		func() { c.startConnection(ctx, connectionID, tenantID) })
+		func() { c.start(ctx, connectionID, tenantID, mayCreate) })
 	if !ok {
 		logger.Warn("NATS consumer already running or starting")
 		return
@@ -234,7 +255,7 @@ func (c *natsConsumer) startConnection(ctx context.Context, connectionID, tenant
 	claim.RunningStatus().Write(func() { c.writeStatus(connectionID, tenantID, "running", "", logger) })
 
 	logger.Info("Starting NATS consumer", "nats", cfg)
-	go c.consumeLoop(loopCtx, own, connectionID, tenantID, cfg, logger)
+	go c.consumeLoop(loopCtx, own, connectionID, tenantID, cfg, mayCreate, logger)
 }
 
 func (c *natsConsumer) handleStopCommand(msg *nats.Msg) {
@@ -291,17 +312,18 @@ func (c *natsConsumer) fail(own *activeConn, connectionID, tenantID string, caus
 // consumeLoop connects, pulls and forwards until ctx is cancelled or a
 // permanent error ends the connection. Transient errors redial after a
 // backoff that doubles up to maxBackoff and resets after a good connect.
-func (c *natsConsumer) consumeLoop(ctx context.Context, own *activeConn, connID, tenantID string, cfg *NATSConfig, logger *slog.Logger) {
+func (c *natsConsumer) consumeLoop(ctx context.Context, own *activeConn, connID, tenantID string, cfg *NATSConfig, mayCreate bool, logger *slog.Logger) {
 	backoff := c.minBackoff
-	// bound: this loop has bound the durable once. A durable that is gone
-	// after that was deleted on the server; creating it again would replay
-	// the whole stream, older than VRSky's dedup window, so that is left to
-	// a deliberate new start.
-	bound := false
+	// create: a start command may create a missing durable, until the loop
+	// has bound it once. A durable that is gone after that, or at a restore,
+	// was deleted on the server; creating it again would replay the stream
+	// from deliver_policy, older than VRSky's dedup window, so that is left
+	// to a deliberate new start.
+	create := mayCreate
 	for ctx.Err() == nil {
-		s, err := open(ctx, cfg, openOpts{allowPrivate: c.allowPrivate, create: !bound, apiWait: c.apiTimeout, dialWait: dialTimeout})
+		s, err := open(ctx, cfg, openOpts{allowPrivate: c.allowPrivate, create: create, apiWait: c.apiTimeout, dialWait: dialTimeout})
 		if err == nil {
-			bound = true
+			create = false
 			backoff = c.minBackoff
 			logger.Info("Connected to the NATS server", "stream", cfg.Stream, "durable", cfg.Durable)
 			for _, w := range s.warnings {
@@ -314,7 +336,7 @@ func (c *natsConsumer) consumeLoop(ctx context.Context, own *activeConn, connID,
 			return
 		}
 		if errors.Is(err, errDurableMissing) {
-			err = sdk.Permanent(fmt.Errorf("durable %q was deleted on the NATS server; start the pipeline again to create it anew, which replays the stream from its first message", cfg.Durable))
+			err = sdk.Permanent(fmt.Errorf("durable %q no longer exists on the NATS server; stop and start the pipeline to create it anew, which delivers from deliver_policy (%s) again", cfg.Durable, cfg.DeliverPolicy))
 		}
 		if sdk.IsPermanent(err) {
 			c.fail(own, connID, tenantID, err, logger)
@@ -341,7 +363,7 @@ func (c *natsConsumer) drain(ctx context.Context, connID, tenantID string, cfg *
 		if s.nc.IsClosed() || s.done.Err() != nil {
 			return sdk.Retriable(errors.New("the connection to the NATS server closed"))
 		}
-		msgs, err := pull(s, cfg, c.fetchWait)
+		msgs, err := pull(s, c.fetchWait)
 		if err != nil {
 			return classifyJS(err, s.async, "pull from durable "+cfg.Durable)
 		}
@@ -359,7 +381,17 @@ func (c *natsConsumer) drain(ctx context.Context, connID, tenantID string, cfg *
 				}
 				return err
 			}
-			c.ack(m, logger)
+			if err := c.ack(m, logger); err != nil {
+				// A user that may not publish to $JS.ACK never acks anything:
+				// every message would come back each AckWait and be published
+				// again once VRSky's dedup window has passed. Stop instead.
+				if v := s.async.takePermission(); v != nil {
+					for _, r := range msgs[i+1:] {
+						_ = r.Nak()
+					}
+					return sdk.Permanent(fmt.Errorf("the NATS user may not ack messages on durable %q (it needs publish on $JS.ACK.%s.>): %w", cfg.Durable, cfg.Stream, v))
+				}
+			}
 		}
 	}
 }
@@ -374,14 +406,17 @@ func (c *natsConsumer) drain(ctx context.Context, connID, tenantID string, cfg *
 // That takes a link slower than a second. The wait
 // follows the connection, not the loop's context: a message it receives
 // during a stop is handed back rather than left in flight.
-func pull(s *session, cfg *NATSConfig, wait time.Duration) ([]jetstream.Msg, error) {
-	batch, err := s.cons.FetchNoWait(cfg.BatchSize)
+func pull(s *session, wait time.Duration) ([]jetstream.Msg, error) {
+	batch, err := s.cons.FetchNoWait(s.batch)
 	if err != nil {
 		return nil, err
 	}
 	msgs, err := collect(batch)
 	if err != nil || len(msgs) > 0 {
 		return msgs, err
+	}
+	if s.maxWait > 0 && s.maxWait < wait {
+		wait = s.maxWait
 	}
 	fctx, cancel := context.WithTimeout(s.done, wait)
 	defer cancel()
@@ -450,26 +485,30 @@ func (c *natsConsumer) forwardWithRetry(ctx context.Context, s *session, connID,
 // ack confirms m on the source after its publish. Not bound to the loop's
 // context: a publish that went through just before a stop still gets its
 // ack, which saves a redelivery.
-func (c *natsConsumer) ack(m jetstream.Msg, logger *slog.Logger) {
+func (c *natsConsumer) ack(m jetstream.Msg, logger *slog.Logger) error {
 	actx, cancel := context.WithTimeout(context.Background(), ackTimeout)
 	defer cancel()
-	if err := m.DoubleAck(actx); err != nil {
+	err := m.DoubleAck(actx)
+	if err != nil {
 		// Redelivered later; the envelope id makes the repeat a no-op.
 		logger.Warn("Ack to the NATS server failed after the publish; the message may be redelivered", "error", err)
 	}
+	return err
 }
 
-// sourceKey is the idempotency key of a source message: its Nats-Msg-Id, or
-// the stream name and stream sequence when the publisher set none.
+// sourceKey is the idempotency key of a source message: "id:" and its
+// Nats-Msg-Id, or "seq:" and the stream name and sequence when the publisher
+// set none. The prefixes keep a publisher's Msg-Id "RH_EVENTS:5" apart from
+// the fifth message of a stream without one.
 func sourceKey(m jetstream.Msg) (key string, meta *jetstream.MsgMetadata, err error) {
 	meta, err = m.Metadata()
 	if err != nil {
 		return "", nil, fmt.Errorf("read message metadata: %w", err)
 	}
 	if id := m.Headers().Get(nats.MsgIdHdr); id != "" {
-		return id, meta, nil
+		return "id:" + id, meta, nil
 	}
-	return meta.Stream + ":" + strconv.FormatUint(meta.Sequence.Stream, 10), meta, nil
+	return "seq:" + meta.Stream + ":" + strconv.FormatUint(meta.Sequence.Stream, 10), meta, nil
 }
 
 // forward publishes one source message into the pipeline.
@@ -499,7 +538,14 @@ func (c *natsConsumer) forward(ctx context.Context, connID, tenantID string, m j
 	if id := m.Headers().Get(nats.MsgIdHdr); id != "" {
 		env.Metadata["nats_msg_id"] = id
 	}
-	return c.publish(ctx, env)
+	// Bounded: a publish that gets no answer is a failed one, and retried.
+	limit := c.publishTimeout
+	if limit <= 0 {
+		limit = publishTimeout
+	}
+	pctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	return c.publish(pctx, env)
 }
 
 // --- DB helpers ---

@@ -48,6 +48,12 @@ func TestValidate(t *testing.T) {
 			c.AuthType, c.Creds = authCreds, "-----BEGIN NATS USER JWT-----\neyJ0\n------END NATS USER JWT------\n"
 		}, false, "not a NATS .creds file"},
 		{"ca_cert not PEM", func(c *NATSConfig) { c.CACert = "nope" }, false, "ca_cert"},
+		{"deliver new", func(c *NATSConfig) { c.DeliverPolicy = deliverNew }, false, ""},
+		{"deliver by start time", func(c *NATSConfig) { c.DeliverPolicy, c.OptStartTime = deliverByStartTime, "2026-11-01T00:00:00Z" }, false, ""},
+		{"by start time without a time", func(c *NATSConfig) { c.DeliverPolicy = deliverByStartTime }, false, "opt_start_time"},
+		{"by start time, bad time", func(c *NATSConfig) { c.DeliverPolicy, c.OptStartTime = deliverByStartTime, "yesterday" }, false, "RFC 3339"},
+		{"start time without the policy", func(c *NATSConfig) { c.OptStartTime = "2026-11-01T00:00:00Z" }, false, "only used with"},
+		{"unknown deliver policy", func(c *NATSConfig) { c.DeliverPolicy = "last" }, false, "deliver_policy"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

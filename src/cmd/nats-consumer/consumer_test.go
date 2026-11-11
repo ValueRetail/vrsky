@@ -57,10 +57,10 @@ func TestForward_PublishesThenAcks(t *testing.T) {
 		t.Fatalf("publish calls = %d, want 2", len(calls))
 	}
 	first, second := calls[0], calls[1]
-	if first.ID != envelopeID(tConn, "evt-1") {
+	if first.ID != idFor("evt-1") {
 		t.Errorf("first envelope id = %s, want the id derived from Nats-Msg-Id evt-1", first.ID)
 	}
-	if second.ID != envelopeID(tConn, tStream+":2") {
+	if second.ID != envelopeID(tConn, "seq:"+tStream+":2") {
 		t.Errorf("second envelope id = %s, want the id derived from %s:2", second.ID, tStream)
 	}
 	if first.TenantID != tTenant || first.IntegrationID != tConn || first.Source != "nats-consumer" {
@@ -160,13 +160,13 @@ func TestForward_FailedPublishStaysOnSource(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get VRSKY_DATA %d: %v", seq, err)
 		}
-		if id := raw.Header.Get(nats.MsgIdHdr); id != envelopeID(tConn, key) {
+		if id := raw.Header.Get(nats.MsgIdHdr); id != idFor(key) {
 			t.Errorf("VRSKY_DATA seq %d has id %s, want the one for %s", seq, id, key)
 		}
 	}
 	// The first two attempts were both evt-1: nothing behind it went ahead.
 	calls := v.published()
-	if calls[0].ID != envelopeID(tConn, "evt-1") || calls[1].ID != envelopeID(tConn, "evt-1") {
+	if calls[0].ID != idFor("evt-1") || calls[1].ID != idFor("evt-1") {
 		t.Errorf("failed attempts were %s, %s; want evt-1 twice", calls[0].ID, calls[1].ID)
 	}
 }
@@ -311,7 +311,7 @@ func TestForward_LongOutageKeepsOrderAndDeliveries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get VRSKY_DATA %d: %v", seq, err)
 		}
-		if id := raw.Header.Get(nats.MsgIdHdr); id != envelopeID(tConn, fmt.Sprintf("evt-%d", seq)) {
+		if id := raw.Header.Get(nats.MsgIdHdr); id != idFor(fmt.Sprintf("evt-%d", seq)) {
 			t.Errorf("VRSKY_DATA seq %d holds the wrong event", seq)
 		}
 	}
@@ -323,13 +323,35 @@ func TestForward_LongOutageKeepsOrderAndDeliveries(t *testing.T) {
 	for _, env := range calls {
 		ids[env.ID]++
 	}
-	if ids[envelopeID(tConn, "evt-2")] != 1 || ids[envelopeID(tConn, "evt-3")] != 1 {
+	if ids[idFor("evt-2")] != 1 || ids[idFor("evt-3")] != 1 {
 		t.Errorf("messages behind the head were published more than once: %v", ids)
 	}
-	if ids[envelopeID(tConn, "evt-1")] < 2 {
+	if ids[idFor("evt-1")] < 2 {
 		t.Errorf("the head message was not retried: %v", ids)
 	}
 	if info := consumerInfo(t, js); info.Delivered.Consumer != 3 {
 		t.Errorf("the server made %d deliveries for 3 messages; retries spent deliveries", info.Delivered.Consumer)
+	}
+}
+
+// A publisher's Msg-Id that looks like a stream and sequence does not collide
+// with the fallback key of a message without one: both reach the pipeline.
+func TestForward_MsgIDAndSequenceKeysDoNotCollide(t *testing.T) {
+	ext := startExternal(t, nil)
+	_, js := ext.admin()
+	addStream(t, js)
+	publishEvent(t, js, "rh.evt.v1.tenant-a.pricing.price_changed", tStream+":2", `{"n":1}`) // seq 1
+	publishEvent(t, js, "rh.evt.v1.tenant-a.pricing.price_changed", "", `{"n":2}`)           // seq 2
+
+	v := startVRSky(t)
+	c := newTestConsumer(v.publish)
+	cancel, done := c.runLoop(baseConfig(ext.url()))
+	defer stop(t, cancel, done)
+	harness.Eventually(t, wait, "both acked", func() bool {
+		info, err := js.ConsumerInfo(tStream, tDur)
+		return err == nil && info.AckFloor.Stream == 2
+	})
+	if got := v.stored(t); got != 2 {
+		t.Fatalf("VRSKY_DATA holds %d, want 2: one key swallowed the other", got)
 	}
 }

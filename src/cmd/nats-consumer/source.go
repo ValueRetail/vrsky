@@ -45,6 +45,37 @@ type session struct {
 	async  *asyncErrs
 	// warnings are things about an existing durable worth an operator's eye.
 	warnings []string
+	// batch is the most messages one pull asks for, maxWait the longest a
+	// waiting pull may last (0: no limit); see pullLimits.
+	batch   int
+	maxWait time.Duration
+}
+
+// pullBytesBudget bounds what one pull can hold in memory: the batch is cut
+// so that batch × the largest message the server allows stays under it. One
+// message larger than the budget is still taken, alone.
+const pullBytesBudget = 32 << 20
+
+// pullLimits fits the configured batch to the memory budget, the server's
+// and the stream's largest message, and a limit the durable sets on pull
+// requests. A pull above a durable's MaxRequestBatch or MaxRequestExpires is
+// refused with a 409 that retrying would only repeat.
+func pullLimits(want int, maxPayload int64, streamMaxMsg int32, info *jetstream.ConsumerInfo) (batch int, maxWait time.Duration) {
+	largest := maxPayload
+	if streamMaxMsg > 0 && int64(streamMaxMsg) < largest {
+		largest = int64(streamMaxMsg)
+	}
+	batch = want
+	if largest > 0 {
+		batch = min(batch, max(1, int(pullBytesBudget/largest)))
+	}
+	if info != nil {
+		if mrb := info.Config.MaxRequestBatch; mrb > 0 {
+			batch = min(batch, mrb)
+		}
+		maxWait = info.Config.MaxRequestExpires
+	}
+	return max(batch, 1), maxWait
 }
 
 // openOpts are the settings of one connect.
@@ -202,6 +233,11 @@ func open(ctx context.Context, cfg *NATSConfig, o openOpts) (*session, error) {
 		s.close()
 		return nil, classifyJS(err, s.async, "bind durable "+cfg.Durable)
 	}
+	var streamMax int32
+	if si := s.stream.CachedInfo(); si != nil {
+		streamMax = si.Config.MaxMsgSize
+	}
+	s.batch, s.maxWait = pullLimits(cfg.BatchSize, s.nc.MaxPayload(), streamMax, s.cons.CachedInfo())
 	if info := s.cons.CachedInfo(); info != nil && info.Config.MaxDeliver > 0 {
 		s.warnings = append(s.warnings, fmt.Sprintf("durable %q gives up on a message after %d deliveries; a connection loss or crash counts as one, so set MaxDeliver -1", cfg.Durable, info.Config.MaxDeliver))
 	}
@@ -221,11 +257,13 @@ func bindConsumer(ctx context.Context, stream jetstream.Stream, cfg *NATSConfig,
 		if !create {
 			return nil, errDurableMissing
 		}
+		policy, start := cfg.consumerDeliver()
 		return stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
 			Durable:       cfg.Durable,
 			FilterSubject: cfg.FilterSubject,
 			AckPolicy:     jetstream.AckExplicitPolicy,
-			DeliverPolicy: jetstream.DeliverAllPolicy,
+			DeliverPolicy: policy,
+			OptStartTime:  start,
 			AckWait:       sourceAckWait,
 			// Unlimited: a long VRSky outage must not make the partner's
 			// server give up on a message we never took.
@@ -280,6 +318,11 @@ func classifyJS(err error, async *asyncErrs, what string) error {
 	}
 	if v := async.takePermission(); v != nil {
 		return sdk.Permanent(fmt.Errorf("%s: the NATS user may not do this: %w", what, v))
+	}
+	// A pull the durable's limits refuse (a 409) is refused again on retry.
+	// pullLimits keeps within them; this catches a limit changed under us.
+	if strings.Contains(err.Error(), "Exceeded MaxRequest") {
+		return sdk.Permanent(fmt.Errorf("%s: the durable's pull limits refuse the request: %w", what, err))
 	}
 	switch {
 	case errors.Is(err, jetstream.ErrJetStreamNotEnabled), errors.Is(err, jetstream.ErrJetStreamNotEnabledForAccount):

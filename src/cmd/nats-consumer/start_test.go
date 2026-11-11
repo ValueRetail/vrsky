@@ -80,7 +80,7 @@ func TestStartStopCommand_StoredSecret(t *testing.T) {
 		return ok
 	})
 	got := h.ExpectEnvelope(t, harness.MatchTenant(tTenant), wait)
-	if got.ID != envelopeID(tConn, "evt-1") || string(got.Payload) != `{"sku":"A"}` {
+	if got.ID != idFor("evt-1") || string(got.Payload) != `{"sku":"A"}` {
 		t.Errorf("envelope id %s payload %s", got.ID, got.Payload)
 	}
 	harness.Eventually(t, wait, "acked on the source", func() bool {

@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
 	"github.com/ValueRetail/vrsky/pkg/connectorurl"
@@ -22,6 +24,10 @@ const (
 
 	defaultBatchSize = 10
 	maxBatchSize     = 256
+
+	deliverAll         = "all"
+	deliverNew         = "new"
+	deliverByStartTime = "by_start_time"
 )
 
 // NATSConfig is the per-node configuration (config.nats). Password and Creds
@@ -37,7 +43,26 @@ type NATSConfig struct {
 	Stream        string   `json:"stream"`
 	Durable       string   `json:"durable"`
 	FilterSubject string   `json:"filter_subject"` // optional; used only when VRSky creates the durable, checked otherwise
-	BatchSize     int      `json:"batch_size"`     // messages per pull, default 10
+	BatchSize     int      `json:"batch_size"`     // most messages per pull, default 10; see pullBatch
+	// DeliverPolicy is where a durable VRSky creates starts: all (default,
+	// the whole stream), new (only what arrives after it exists) or
+	// by_start_time (from OptStartTime, RFC 3339). Ignored for an existing
+	// durable.
+	DeliverPolicy string `json:"deliver_policy"`
+	OptStartTime  string `json:"opt_start_time"`
+}
+
+// consumerDeliver maps DeliverPolicy to the durable's settings. validate has
+// checked it.
+func (c *NATSConfig) consumerDeliver() (jetstream.DeliverPolicy, *time.Time) {
+	switch c.DeliverPolicy {
+	case deliverNew:
+		return jetstream.DeliverNewPolicy, nil
+	case deliverByStartTime:
+		t, _ := time.Parse(time.RFC3339, c.OptStartTime)
+		return jetstream.DeliverByStartTimePolicy, &t
+	}
+	return jetstream.DeliverAllPolicy, nil
 }
 
 // LogValue keeps the credentials out of any log line the config reaches by
@@ -49,6 +74,7 @@ func (c NATSConfig) LogValue() slog.Value {
 		slog.String("stream", c.Stream),
 		slog.String("durable", c.Durable),
 		slog.String("filter_subject", c.FilterSubject),
+		slog.String("deliver_policy", c.DeliverPolicy),
 	)
 }
 
@@ -73,6 +99,11 @@ func (c *NATSConfig) normalise() {
 	if c.BatchSize <= 0 {
 		c.BatchSize = defaultBatchSize
 	}
+	c.DeliverPolicy = strings.TrimSpace(c.DeliverPolicy)
+	if c.DeliverPolicy == "" {
+		c.DeliverPolicy = deliverAll
+	}
+	c.OptStartTime = strings.TrimSpace(c.OptStartTime)
 }
 
 // validate checks the config from its values alone. Every error it returns is
@@ -93,6 +124,18 @@ func (c *NATSConfig) validate(allowPrivate bool) error {
 	}
 	if c.BatchSize > maxBatchSize {
 		return fmt.Errorf("batch_size must be at most %d", maxBatchSize)
+	}
+	switch c.DeliverPolicy {
+	case deliverAll, deliverNew:
+		if c.OptStartTime != "" {
+			return errors.New("opt_start_time is only used with deliver_policy by_start_time")
+		}
+	case deliverByStartTime:
+		if _, err := time.Parse(time.RFC3339, c.OptStartTime); err != nil {
+			return errors.New("deliver_policy by_start_time needs opt_start_time as an RFC 3339 time (2026-11-01T00:00:00Z)")
+		}
+	default:
+		return fmt.Errorf("deliver_policy %q is not one of all, new, by_start_time", c.DeliverPolicy)
 	}
 	switch c.AuthType {
 	case authNone:

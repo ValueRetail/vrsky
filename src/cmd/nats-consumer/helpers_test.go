@@ -196,15 +196,16 @@ func (v *vrsky) stored(t *testing.T) uint64 {
 // runner, for driving consumeLoop directly.
 func newTestConsumer(publish sdk.PublishFunc) *natsConsumer {
 	return &natsConsumer{
-		publish:      publish,
-		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		allowPrivate: true,
-		minBackoff:   50 * time.Millisecond,
-		maxBackoff:   200 * time.Millisecond,
-		retryDelay:   200 * time.Millisecond,
-		apiTimeout:   2 * time.Second,
-		fetchWait:    time.Second,
-		active:       make(map[string]*activeConn),
+		publish:        publish,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		allowPrivate:   true,
+		minBackoff:     50 * time.Millisecond,
+		maxBackoff:     200 * time.Millisecond,
+		retryDelay:     200 * time.Millisecond,
+		apiTimeout:     2 * time.Second,
+		fetchWait:      time.Second,
+		publishTimeout: 5 * time.Second,
+		active:         make(map[string]*activeConn),
 	}
 }
 
@@ -219,7 +220,7 @@ func (c *natsConsumer) runLoop(cfg *NATSConfig) (context.CancelFunc, <-chan stru
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		c.consumeLoop(ctx, own, tConn, tTenant, cfg, c.logger)
+		c.consumeLoop(ctx, own, tConn, tTenant, cfg, true, c.logger)
 	}()
 	return cancel, done
 }
@@ -340,3 +341,6 @@ func operatorServer(t *testing.T) (configure func(*natsserver.Options), creds st
 		o.AccountResolver = resolver
 	}, string(file)
 }
+
+// idFor is the envelope id of a source message with Nats-Msg-Id msgID on tConn.
+func idFor(msgID string) string { return envelopeID(tConn, "id:"+msgID) }

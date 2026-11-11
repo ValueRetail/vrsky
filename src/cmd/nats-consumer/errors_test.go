@@ -302,7 +302,7 @@ func TestDurableDeleted_EndsWithStatusError(t *testing.T) {
 		t.Fatal("the loop went on after its durable was deleted")
 	}
 	reason, ok := rec.errorWrite()
-	if !ok || !strings.Contains(reason, "was deleted") {
+	if !ok || !strings.Contains(reason, "no longer exists") {
 		t.Fatalf("status error reason = %q (written %v)", reason, ok)
 	}
 	if _, err := js.ConsumerInfo(tStream, tDur); err == nil {
