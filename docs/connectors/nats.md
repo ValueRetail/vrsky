@@ -7,6 +7,13 @@ events and gives each tenant a partner account to read them from.
 
 VRSky's own NATS is internal and is not what this connector talks to.
 
+!!! warning "The first start reads the whole stream"
+    When VRSky creates the durable, `deliver_policy` decides where it starts.
+    The default, `all`, sends every message the stream still holds into the
+    pipeline on the first start: for a stream with months of events, months of
+    events. Use `new` to take only what arrives from now on, or
+    `by_start_time` to start at a point in time.
+
 ## As a source (consumer)
 
 A consumer node binds a durable pull consumer on `stream` and turns each
@@ -18,9 +25,11 @@ Config bullets:
   `nats://host:4222`, one per entry. No user name, password, path, query or
   comma in a URL.
 - `stream`: the JetStream stream to read.
-- `durable`: the durable consumer name. If it does not exist, VRSky creates it
-  (pull, explicit ack, deliver all, AckWait 30 s, unlimited redeliveries). An
-  existing durable is used as it is and never changed. If it has a
+- `durable`: the durable consumer name. If it does not exist, a start of the
+  pipeline creates it (pull, explicit ack, `deliver_policy`, AckWait 30 s,
+  unlimited redeliveries). Use one durable per connection: two connections
+  on one durable split its messages between them. An existing durable is
+  used as it is and never changed. If it has a
   MaxDeliver limit, the connector logs a warning: a connection loss or a
   crash spends a delivery, and the server drops a message once the limit is
   reached. Ask for MaxDeliver -1.
@@ -33,8 +42,16 @@ Config bullets:
   always as stored secrets.
 - `ca_cert` (optional): a PEM CA certificate, for a server whose certificate is
   not signed by a public CA.
+- `deliver_policy` (optional): where a durable VRSky creates starts. `all`
+  (default) is the whole stream, `new` only what arrives after the durable
+  exists, `by_start_time` the messages from `opt_start_time` (RFC 3339, e.g.
+  `2026-11-01T00:00:00Z`). It does nothing for an existing durable.
 - `batch_size` (optional): the most messages one pull takes, default 10, at
-  most 256.
+  most 256. The connector lowers it so that one pull holds at most 32 MiB:
+  the batch × the largest message the server (or the stream's
+  MaxMsgSize) allows. On a server with 1 MB messages that is 32; with 64 MB
+  messages, one at a time. It also stays within a durable's
+  MaxRequestBatch and MaxRequestExpires.
 
 ```json
 {
@@ -44,8 +61,9 @@ Config bullets:
     "auth_type": "creds",
     "creds_secret_id": "<secret id>",
     "stream": "RH_EVENTS",
-    "durable": "vrsky",
-    "filter_subject": "rh.evt.v1.acme.>"
+    "durable": "vrsky-acme-prices",
+    "filter_subject": "rh.evt.v1.acme.>",
+    "deliver_policy": "new"
   }
 }
 ```
@@ -57,7 +75,10 @@ Config bullets:
   publish into the pipeline. The envelope id is derived from the connection
   and the message's `Nats-Msg-Id` (from the stream name and sequence when the
   publisher set none), so a redelivery publishes the same id and VRSky's
-  JetStream drops it.
+  JetStream drops it. The key is marked as either kind (`id:` or `seq:`), so
+  a Msg-Id that looks like a stream and sequence cannot collide with the
+  fallback. A publisher that reuses one Msg-Id for two different messages
+  within five minutes gets only the first into the pipeline.
 - **The dedup window is five minutes.** A message redelivered later than that
   after its first publish reaches the pipeline again. That needs a crash in
   the moment between VRSky's publish and the ack, followed by more than five
@@ -77,23 +98,29 @@ Config bullets:
 
 ## Errors
 
+- A publish into the pipeline that gets no answer within 30 s (VRSky's
+  stream without a leader, say) counts as failed and is retried as above.
 - A lost connection, a server restart or a timeout (a TLS handshake timeout
   included) is retried: the connector redials after 1 s, doubling up to
   30 s, and the pipeline stays `running`. A dead connection is noticed
   within about a minute (pings every 20 s).
 - These stop the pipeline with status `error` and the reason in `last_error`:
   credentials the server refuses, a stream that does not exist, JetStream not
-  enabled for the account, a permission violation, a certificate that cannot
+  enabled for the account, a permission violation (including a user that may
+  not ack: without acks every message would come back each AckWait and be
+  published again), a certificate that cannot
   be verified, a server without TLS, a server address that is private, a
   durable that does not fit (a push consumer, not explicit ack, another
   filter), and a message too large for VRSky's NATS. Fix the cause and start
   the pipeline again.
-- **A deleted durable.** If the durable disappears from the server while the
-  pipeline runs, the pipeline stops with status `error`. Starting it again
-  creates the durable anew, which delivers the stream from its first message
-  again: everything older than five minutes reaches the pipeline a second
-  time. Before restarting, have the durable recreated on the server at the
-  right position, or accept the replay.
+- **A deleted durable.** Only a start of the pipeline creates the durable. If
+  it disappears from the server while the pipeline runs, or while VRSky
+  restarts (a deploy, the cluster's morning start), the pipeline stops with
+  status `error`. Stopping and starting it creates the durable anew from
+  `deliver_policy`, which with `all` delivers the whole stream again:
+  everything older than five minutes reaches the pipeline a second time.
+  Have the durable recreated on the server at the right position first, or
+  choose `new` or `by_start_time` before the start.
 
 ## Notes
 

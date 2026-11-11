@@ -331,7 +331,7 @@ An Input is the start of your pipeline. It reads data from a source, such as:
 - a file or CSV,
 - an SFTP server,
 - cloud storage,
-- Apache Kafka or RabbitMQ,
+- Apache Kafka, RabbitMQ or an external NATS JetStream,
 - Salesforce,
 - or another workspace.
 

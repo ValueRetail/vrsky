@@ -69,7 +69,7 @@ subject filter), explicit ack. It is how VRSky takes Retailhero's
   `.github/workflows/integration.yml` (only if the connector has an
   integration-tagged test; it does not, so untouched),
   `docs/DEPLOYMENT_GUIDE.md`, `docs/connectors/index.md`, `mkdocs.yml`,
-  `docs/llms.txt`.
+  `docs/llms.txt`, `docs/llms-full.txt`, `docs/guide/connectors-and-nodes.md`.
 - UI: `ui/src/components/Pipeline/NatsConfigEditor.tsx` (+ test),
   `PropertyEditor.tsx` (source type), `ui/src/utils/secrets.ts` (`creds` is
   a secret field).
@@ -84,8 +84,8 @@ subject filter), explicit ack. It is how VRSky takes Retailhero's
   redelivery after AckWait (30 s when we create the durable). A crash in the
   milliseconds between VRSky's publish ack and the source ack, followed by
   more than five minutes of downtime, can still duplicate one message.
-  Backlog item added.
-- The durable is created when missing (pull, explicit ack, deliver all,
+  Filed as #845.
+- The durable is created when missing (pull, explicit ack, `deliver_policy`,
   AckWait 30 s, unlimited MaxDeliver so a long VRSky outage loses nothing).
   An existing durable is used as it is and never updated; one that does not
   fit is a permanent error, so VRSky never rewrites a consumer someone else
@@ -94,7 +94,7 @@ subject filter), explicit ack. It is how VRSky takes Retailhero's
   through the same error classification (an auth failure after a credential
   rotation becomes `error`, not an endless retry).
 - No sample-data endpoint in this PR. The SDK's last_payload preview covers
-  the builder once data has flowed. Backlog item added.
+  the builder once data has flowed. Filed as #846.
 - The test endpoint accepts a draft with plaintext credentials, the same as
   every other connector's: nothing is stored, and the stored config is what
   rule 2 guards.
@@ -104,7 +104,7 @@ subject filter), explicit ack. It is how VRSky takes Retailhero's
   normal `go test` job and need no `integration` build tag.
 - The management API reaches the NATS worker's test endpoint through
   `workerAddrTemplate()`, not a bare compose name like the other workers,
-  so the Test button works in AKS. The others are a backlog item (201).
+  so the Test button works in AKS. The others are #753.
 - The worker answers a connection test within 8 s, inside the management
   API's 10 s budget.
 - The ack after a successful publish is not bound to the loop's context: a
@@ -126,6 +126,34 @@ are resolved; .creds markers checked; the start test polls instead of
 sleeping; a warning for a durable with MaxDeliver. Left as backlog: the Kafka
 brokers box has the same typing bug; the workers' test endpoints have no
 authentication of their own.
+
+## Review round 2 (independent Opus review of #844 at cd92474f)
+
+- B1: a user that may not publish to `$JS.ACK.>` never acked, so every
+  message came back each AckWait and went into the pipeline again once the
+  dedup window passed. Now a failed ack with a permission violation on
+  record ends the connection with status error ("may not ack").
+- B2: restore at pod start created a deleted durable, replaying the stream
+  on every deploy and morning start. Now only a start command may create the
+  durable (`restoreConnection` passes create=false); a missing durable at
+  restore is status error.
+- F1: InProgress is tested with a second puller on the durable during a
+  retry longer than AckWait.
+- F2: one pull holds at most 32 MiB: the batch is cut by the server's
+  max_payload (or the stream's MaxMsgSize). jetstream's FetchNoWait takes no
+  max_bytes, so the cap comes from the batch instead.
+- F3 (coordinator's decision): `deliver_policy` `all` (default), `new`,
+  `by_start_time` with `opt_start_time`, used when VRSky creates the
+  durable; warning at the top of the docs page; UI select.
+- F4: source keys carry `id:` or `seq:`.
+- F5: each publish into the pipeline is bounded by 30 s, then retried.
+- F6: a durable's MaxRequestBatch and MaxRequestExpires are kept to (the
+  pull is cut to fit) rather than the durable refused: it can still be
+  served, and a 409 that remains is permanent. MaxRequestMaxBytes needs no
+  handling, since the server only checks it when a pull sends max_bytes,
+  which ours do not.
+- F7: docs say one durable per connection.
+- Backlog lines renumbered 210–214 after #840's 208/209, with their issues.
 
 ## Risks
 
