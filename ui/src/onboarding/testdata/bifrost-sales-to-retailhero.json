@@ -31,10 +31,20 @@
       "drop_unmapped": true,
       "mappings": [
         {
-          "type": "template",
-          "source": "",
+          "type": "lookup",
+          "source": "event_type",
           "target": "operationId",
-          "expression": "bifrost-sale-{event_id}-r1"
+          "required": true,
+          "values": {
+            "basket.sale-recorded": "bifrost-sale-{event_id}-r1",
+            "basket.return-recorded": "bifrost-return-{event_id}-r1"
+          }
+        },
+        {
+          "type": "to_string",
+          "source": "data.journal_sequence",
+          "target": "journalPosition",
+          "required": true
         },
         {
           "type": "copy",

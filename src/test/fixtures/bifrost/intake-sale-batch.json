@@ -6,6 +6,7 @@
   "entries": [
     {
       "operationId": "bifrost-sale-4f6b2d1e-8a3c-5b7d-9e0f-1a2b3c4d5e6f-r1",
+      "journalPosition": "42",
       "event": {
         "event_id": "4f6b2d1e-8a3c-5b7d-9e0f-1a2b3c4d5e6f",
         "event_type": "basket.sale-recorded",
@@ -32,6 +33,8 @@
             "value": "T07-000042"
           },
           "inbound_event_id": "019a0000-0000-7000-8000-000000000001",
+          "journal_series": "T07",
+          "journal_sequence": 42,
           "previous_status": "checkout_pending",
           "lines": [
             {
@@ -53,7 +56,23 @@
                 "amount": "900.00",
                 "currency": "NOK"
               },
-              "vat": "0.25"
+              "vat": "0.25",
+              "discount": {
+                "amount": "90.00",
+                "currency": "NOK"
+              },
+              "line_ex_vat": {
+                "amount": "810.00",
+                "currency": "NOK"
+              },
+              "line_vat": {
+                "amount": "202.50",
+                "currency": "NOK"
+              },
+              "line_inc_vat": {
+                "amount": "1012.50",
+                "currency": "NOK"
+              }
             }
           ],
           "removed_line_ids": [

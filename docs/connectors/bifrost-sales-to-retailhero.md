@@ -1,7 +1,7 @@
 # Bifrost sales → Retailhero (template)
 
 The onboarding template **POS sales → Retailhero (Bifrost Basket → Retailhero)**
-sends each sale a Bifrost till records to Retailhero's POS reconciliation
+sends each sale and return a Bifrost till records to Retailhero's POS reconciliation
 (C3), so Retailhero can reconcile what the tills sold against its own stock.
 It is a beta: the Retailhero side is a Proposed contract and its HTTP intake
 is not built yet (see [what is still open](#open-questions)).
@@ -19,7 +19,7 @@ Business Central. This template is a different road for a different purpose.
 
 | | till → BC (temporary) | this template |
 |---|---|---|
-| Starts at | the till's outbox, over a signed webhook | Basket's `basket.sale-recorded` event on the tenant JetStream |
+| Starts at | the till's outbox, over a signed webhook | Basket's `basket.sale-recorded` and `basket.return-recorded` events on the tenant JetStream |
 | Ends at | a draft sales invoice in Business Central | a staged sale in Retailhero C3 |
 | Purpose | accounting copy of the sale | stock and sales reconciliation |
 | Retired when | Basket posts to the ERP and the two till settings are removed | not affected by that switch |
@@ -33,13 +33,21 @@ nodes, and switching off the BC webhook does not touch this pipeline.
    Basket events to ([NATS connector](nats.md)). It uses a durable consumer
    with `deliver_policy: all`, so the first start reads what the stream still
    holds. That is safe because every sale carries a fixed operation ID (below).
-2. **Filter.** Only `basket.sale-recorded` events whose `source.kind` is `pos`
-   pass. Retailhero refuses a whole batch on an event type its profile does not
-   map (`basket.created`, `basket.priced`, ...), and on a sale-recorded that did
-   not come from a POS. `basket.completed` and `basket.cancelled` map to no
-   fact: Retailhero only reports them back as skipped. They are not sent.
+2. **Filter.** Only `basket.sale-recorded` and `basket.return-recorded`
+   events whose `source.kind` is `pos` pass (`event_type` *is one of* the two).
+   Retailhero refuses a whole batch on an event type its profile does not map
+   (`basket.created`, `basket.priced`, ...), and on an event that did not come
+   from a POS. `basket.completed` and `basket.cancelled` map to no fact:
+   Retailhero only reports them back as skipped. They are not sent.
 3. **Converter.** Wraps the event, unchanged, as the single entry of a
-   `BIFROST-BASKET-v1` batch (table below).
+   `BIFROST-BASKET-v1` batch (table below). An event without
+   `data.journal_sequence` is not converted: it is retried and then
+   dead-lettered with `X-Vrsky-Last-Error` naming the field, and nothing is
+   sent to Retailhero. A replay from the DLQ sends the same event and fails
+   the same way, so such an event has to be sent again by Bifrost with the
+   field, or discarded from the DLQ. The converter checks only that the field
+   is there; a value that is not a whole number from 1 goes out as written
+   and Retailhero judges it.
 4. **Producer.** POSTs the batch as JSON to the intake URL. A `5xx`, `429` or
    network error is retried and then dead-lettered. A `4xx` other than
    `401`/`403` is logged and dropped; see [HTTP failed deliveries](http.md#failed-deliveries).
@@ -49,10 +57,8 @@ nodes, and switching off the BC webhook does not touch this pipeline.
 Retailhero's profile
 ([`docs/contracts/pos-source-bifrost-profile.md`](https://github.com/ValueRetail/Retailhero/blob/main/docs/contracts/pos-source-bifrost-profile.md),
 Proposed 2026-11-10) takes the Bifrost event as it is and does the mapping to
-sale facts itself. That includes the money: net, tax and gross come from
-`unit_price`, `vat` and `quantity` exactly, with a refusal (`tax-not-exact`)
-instead of rounding. The converter cannot do that arithmetic, so it does not
-touch the lines. It builds the wrapper:
+sale facts itself, money included (below). The converter does not touch the
+lines. It builds the wrapper:
 
 | Batch member | From |
 |---|---|
@@ -60,11 +66,23 @@ touch the lines. It builds the wrapper:
 | `schemaVersion` | fixed `1` |
 | `sourceInstanceId` | the event's `source.instance_id` (the profile requires it to equal each event's) |
 | `journalId` | the wizard field "Retailhero journal ID" |
+| `entries[0].operationId` | `bifrost-sale-<event_id>-r1` for a sale, `bifrost-return-<event_id>-r1` for a return |
+| `entries[0].journalPosition` | the event's `data.journal_sequence` as a decimal string (`"42"`); required |
 | `entries[0].event` | the whole Basket event |
-| `entries[0].operationId` | `bifrost-sale-<event_id>-r1` |
 
 The wrapper is built with an `each` mapping whose source is `.` (the record
-itself) and a `copy` of `.`; see [Filters & converters](filters-converters.md).
+itself) and a `copy` of `.`. The operation ID is a `lookup` on `event_type`,
+and `journalPosition` is a `to_string` marked `required`; see
+[Filters & converters](filters-converters.md#lookup-and-required-fields).
+
+`journal_sequence` is the counter behind the receipt or credit note number
+(`42` for `T07-000042`), in the till's `journal_series`. Sales and returns
+share one series per till, so a position never repeats within it. The field
+is in Bifrost's events from ValueRetail/Bifrost#269 on, and the shapes here follow
+the contract pinned for this path on 2026-11-11 and Bifrost's samples
+(`basket/docs/events/basket-sale-recorded.v1.json` and
+`basket-return-recorded.v1.json`, ValueRetail/Bifrost#274). The fixtures in
+`src/test/fixtures/bifrost` are copied from those samples.
 
 What Retailhero then makes of a sale (`basket.sale-recorded` v1):
 
@@ -77,16 +95,26 @@ What Retailhero then makes of a sale (`basket.sale-recorded` v1):
 | line `sourceItemCode` | `product.gtin` |
 | line `enteredQuantity` | `quantity`, a whole count of base units |
 | line `legalOwnerRef` | `legal_entity_id` |
-| line net, tax, gross (NOK, scale 2) | `quantity × unit_price`, `× vat`, the sum |
+| line net, tax, gross (NOK, scale 2) | `line_ex_vat`, `line_vat`, `line_inc_vat` when present (exact, after `discount`); otherwise derived from `quantity × unit_price` and `vat` |
 
 `removed_line_ids` are lines that were not sold and are ignored.
 
-## One sale, one operation ID
+A return (`basket.return-recorded` v1) is mapped as Retailhero maps a till
+`return.completed`: a `monetary-observation`, a refund with negative gross.
+Its `data` is the till's completed return (`credit_note_number`,
+`original_receipt`, `lines`, the totals and `refund`) plus
+`return_reference` and `original_sale_reference`. Bifrost publishes only
+returns whose refund was approved. Totals are positive as refunded;
+Retailhero signs them.
 
-The operation ID is `bifrost-sale-<event_id>-r1`. `event_id` is the Basket
-event's ID, which stays the same on every delivery and is also the JetStream
-`Nats-Msg-Id`. The `r1` is the source revision: every Bifrost sale is revision 1
-today, because no Bifrost event amends or voids a sale. So:
+## One event, one operation ID
+
+The operation ID is `bifrost-sale-<event_id>-r1` for a sale and
+`bifrost-return-<event_id>-r1` for a return. `event_id` is the Basket event's
+ID, which stays the same on every delivery and is also the JetStream
+`Nats-Msg-Id`. The `r1` is the source revision. It is always 1: Bifrost never
+sends an amendment or a void, because a paid sale is corrected only by a
+return (kassasystemforskrifta § 2-7). So:
 
 - a redelivery from Bifrost's stream, a retry of the HTTP call, or a restart
   that reads the event again all send the same ID;
@@ -127,39 +155,39 @@ credential is fixed.
 The template is built against documents, not running systems. These are not
 guessed in the template; each one is a place where it will change.
 
-1. **Authentication.** Retailhero authenticates VRSky as a tenant workload with
-   a bearer credential (ValueRetail/Retailhero#2675, decision 3). The HTTP
-   producer can attach a bearer only from an OAuth grant, and a header typed
-   into `http.headers` is stored in plain text, so the template sends no
-   `Authorization` header. Until the producer takes a stored bearer secret, the
-   intake rejects every call with `401`, which the producer retries and then
-   dead-letters, so nothing is lost, only held. Whether a `{secret:<id>}` placeholder in a header already does this is being checked in #850.
-2. **Journal position** (#851). The profile needs a `journalPosition` per entry. Basket
-   events carry none (Bifrost#248 asks). The template sends none, and the
-   profile refuses such a batch (`missing-field`). Candidates: the stream
-   sequence of the Basket event, or the intake assigning it.
-3. **Where the operation ID goes.** The C3 contract says one operation ID per
-   source revision; the intake (Retailhero#2678) has not fixed the route, the
-   wire encoding, or whether the ID is an `operationId` on each entry (what the
-   template does) or something else. The profile today refuses unknown members
-   of an entry, so Retailhero has to accept it, or this mapping changes. The
-   route is also a two-step flow in the contract (`POST batches`, then
-   `POST reconciliations`); whether the intake folds both into one call is open.
-4. **What is on the stream.** The template assumes each message body is the
+1. **The intake route.** The C3 contract has a two-step flow
+   (`POST batches`, then `POST reconciliations`), and the intake
+   (Retailhero#2678) has not fixed the route or whether it folds both into one
+   call. Retailhero's profile accepts `operationId` as a member of an entry,
+   as this template sends it.
+2. **What is on the stream.** The template assumes each message body is the
    bare Basket event JSON, as in the examples in Bifrost's
    `basket/docs/events/`. Bifrost's ADR 0002 says events travel in a VRSky
    transport envelope on `VRSKY_DATA`. If the body is that envelope, the
    converter must read the event from its `payload`. The stream name, subjects
    and credentials for the tenant's JetStream are also not documented.
-5. **Revisions.** There is no amendment or void event, so every sale is
-   revision 1. When Bifrost publishes them (Bifrost#248), the revision in the
-   operation ID has to come from the event.
-6. **Returns** (#852). `return.completed` is not published as an event yet, so the
-   filter lets none through.
-7. **Fields Bifrost events do not carry**, as the profile lists them (and asks
+3. **Fields Bifrost events do not carry**, as the profile lists them (and asks
    Bifrost#248 for): the stock location apart from the store; the currency
-   scale and the currencies a store sells in (NOK only is accepted); whether
-   `unit_price` is ex VAT and the VAT rounding rule; the unit of `quantity`;
-   one time for the whole sale instead of one per line; and what a
-   `basket.cancelled` means for a sale already recorded. The template invents
-   none of them.
+   scale and the currencies a store sells in (NOK only is accepted); the unit
+   of `quantity`; one time for the whole sale instead of one per line; and
+   what a `basket.cancelled` means for a sale already recorded. The template
+   invents none of them.
+
+Pipelines deployed from this template before #851/#852 keep their old filter
+and converter: they send sales only, without `journalPosition`. Deploy the
+template again to get the new nodes.
+
+Settled, with the contract pinned for this path on 2026-11-11:
+
+- **Authentication** is a bearer credential from a stored secret (#850). Until
+  that is merged, the template sends no `Authorization` header and the intake
+  answers `401`, which is retried and dead-lettered, so nothing is lost.
+- **Journal position** (#851): `data.journal_sequence`, sent as
+  `journalPosition`. An event without it is dead-lettered with the reason.
+- **Revisions**: always `r1`. Bifrost never sends an amendment or a void; a
+  paid sale is corrected only by a return (kassasystemforskrifta § 2-7).
+- **Returns** (#852): `basket.return-recorded` passes the filter and goes out
+  with `bifrost-return-<event_id>-r1`.
+- **Money**: `unit_price` is the ex-VAT unit price before discount, and
+  Retailhero uses the exact `line_ex_vat`, `line_vat` and `line_inc_vat` when
+  the event has them.
