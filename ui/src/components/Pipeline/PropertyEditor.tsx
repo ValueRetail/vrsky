@@ -3505,9 +3505,31 @@ export default function PropertyEditor({
                   }
                   options={[
                     { value: 'none', label: 'None' },
+                    { value: 'bearer', label: 'Bearer token' },
                     { value: 'oauth', label: 'OAuth 2.0' },
                   ]}
                 />
+                {/* A static bearer token (#850). It is minted into the
+                    tenant's secrets on deploy (http.token_secret_id) and sent
+                    as Authorization: Bearer; the producer refuses one kept in
+                    the clear. */}
+                {(config.http as HttpCfg)?.auth_type === 'bearer' && (
+                  <div style={{ marginTop: '4px' }}>
+                    <SecretInput
+                      label="Bearer token"
+                      placeholder="The token the target expects"
+                      field="token"
+                      config={(config.http as Record<string, unknown>) || {}}
+                      defaultSecretName="http-bearer-token"
+                      onChange={(patch) =>
+                        setConfig({ ...config, http: { ...(config.http as HttpCfg), ...patch } })
+                      }
+                    />
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                      Sent as Authorization: Bearer on every request. Stored encrypted; it never shows in logs or errors.
+                    </p>
+                  </div>
+                )}
                 {(config.http as HttpCfg)?.auth_type === 'oauth' && (
                   <div style={{ marginTop: '4px' }}>
                     <OAuthGrantSelector

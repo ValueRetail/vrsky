@@ -123,3 +123,42 @@ func TestValidateNodeConfigs_HTTPProducerURL_DevFlag(t *testing.T) {
 		t.Fatalf("the operator's dev flag should allow a local mock: %v", err)
 	}
 }
+
+// #850: a bearer token goes in the secrets vault. A node holding it in the
+// clear, or auth_type bearer with no stored token, is refused at start, and
+// the error never quotes the token.
+func TestValidateNodeConfigs_HTTPProducerBearer(t *testing.T) {
+	const tok = "test-bearer-not-real-0123"
+	tests := []struct {
+		name    string
+		block   string
+		wantErr string // substring; empty = accepted
+	}{
+		{"stored token", `"auth_type":"bearer","token_secret_id":"00000000-0000-0000-0000-000000000850"`, ""},
+		{"no auth", ``, ""},
+		{"oauth", `"auth_type":"oauth","oauth_grant_id":"g-1"`, ""},
+		{"inline token", `"auth_type":"bearer","token":"` + tok + `"`, "http.token is written into the node"},
+		{"inline token without auth_type", `"token":"` + tok + `"`, "http.token is written into the node"},
+		{"bearer without a stored token", `"auth_type":"bearer"`, "http.token_secret_id is missing"},
+		{"bearer with an empty stored token", `"auth_type":"bearer","token_secret_id":""`, "http.token_secret_id is missing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := `"url":"https://example.com/ingest","method":"POST"`
+			if tt.block != "" {
+				block += "," + tt.block
+			}
+			err := NewValidator().ValidateNodeConfigs(pipeline(okFileSource, `{"type":"http","http":{`+block+`}}`))
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case tt.wantErr != "" && err == nil:
+				t.Fatalf("expected an error containing %q", tt.wantErr)
+			case tt.wantErr != "" && !strings.Contains(err.Error(), tt.wantErr):
+				t.Fatalf("error %q does not contain %q", err, tt.wantErr)
+			case err != nil && strings.Contains(err.Error(), tok):
+				t.Fatalf("the start error quotes the token: %q", err)
+			}
+		})
+	}
+}

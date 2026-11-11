@@ -229,6 +229,7 @@ func validateEdgeNodeConfig(node *Node) []string {
 	}
 	if configType == "http" && node.Type == "producer" {
 		errs = append(errs, validateHTTPProducerURL(node, raw)...)
+		errs = append(errs, validateHTTPProducerBearer(node, raw)...)
 	}
 	return errs
 }
@@ -288,6 +289,26 @@ func validateHTTPProducerURL(node *Node, raw map[string]json.RawMessage) []strin
 		return []string{fmt.Sprintf("node %s (http): %s (served by http-producer)", node.ID, err)}
 	}
 	return nil
+}
+
+// validateHTTPProducerBearer is the start-time form of the producer's own
+// refusal (#850): a bearer token written into the node (http.token) instead of
+// stored as a secret, and auth_type "bearer" without http.token_secret_id. The
+// editor mints http.token into the vault on deploy, so a plaintext token here
+// came in some other way. The error names the setting, never its value.
+func validateHTTPProducerBearer(node *Node, raw map[string]json.RawMessage) []string {
+	var block map[string]json.RawMessage
+	if json.Unmarshal(raw["http"], &block) != nil {
+		return nil
+	}
+	var errs []string
+	if stringField(block, "token") != "" {
+		errs = append(errs, fmt.Sprintf("node %s (http): http.token is written into the node; store the bearer token as a secret (http.token_secret_id) (served by http-producer)", node.ID))
+	}
+	if stringField(block, "auth_type") == "bearer" && stringField(block, "token_secret_id") == "" {
+		errs = append(errs, fmt.Sprintf("node %s (http): auth_type is bearer but http.token_secret_id is missing; store the bearer token as a secret (served by http-producer)", node.ID))
+	}
+	return errs
 }
 
 // validateSitooBaseURL refuses a base_url the Sitoo connectors would not call
