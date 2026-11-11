@@ -38,7 +38,11 @@ template.
    is `new`, so a start does not push the whole stream into the pipeline (see
    [NATS JetStream](nats.md)). A durable that is new or renamed therefore
    misses the catalogue as it stands and only gets the batches published
-   after it exists. In `delta` mode a full-kind batch is applied as an
+   after it exists. That holds for a durable VRSky creates. On a Retailhero
+   partner account the operator creates the durable and VRSky only binds it
+   (`create_durable: false`), so Retailhero's own policy applies, which is
+   `all` today (`ConsumerSpec::to_config` in its `messaging.rs`). In `delta`
+   mode a full-kind batch is applied as an
    upsert and removes nothing, so it does not replace the catalogue either.
    Loading a store from scratch is the full-list variant (#856).
 2. **Converter.** Takes the `rows` of one batch and returns
@@ -92,7 +96,9 @@ subject filter names its subject.
 ## What Retailhero publishes
 
 Checked against Retailhero's main branch on 2026-11-11, after
-ValueRetail/Retailhero#2680 closed (PRs #2692 and #2720).
+ValueRetail/Retailhero#2680 closed: PR #2692 built the partner accounts, and
+PR #2720 (for Retailhero#2714) made product, pricing and campaign publish
+through the relay.
 
 The per-tenant partner account exports exactly these subjects, one durable
 pull consumer per tenant and type:
@@ -136,7 +142,7 @@ one from them:
   `price.decision` event, which is not exported. Retailhero's ADR-0063 says
   the tills get the frozen publication content, never a price VRSky works out.
 - The VAT rate is frozen in the POS publication package (target A profile
-  1.3, Retailhero#2687), not carried on these events.
+  1.3, Proposed, Retailhero#2687), not carried on these events.
 
 The Bifrost batches come from Retailhero's Bifrost catalogue profile
 (`core/receiving/src/integration/pos_publication/bifrost_catalogue`, PR #2685,
