@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nkeys"
 
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
@@ -54,6 +56,23 @@ func TestValidate(t *testing.T) {
 		{"by start time, bad time", func(c *NATSConfig) { c.DeliverPolicy, c.OptStartTime = deliverByStartTime, "yesterday" }, false, "RFC 3339"},
 		{"start time without the policy", func(c *NATSConfig) { c.OptStartTime = "2026-11-01T00:00:00Z" }, false, "only used with"},
 		{"unknown deliver policy", func(c *NATSConfig) { c.DeliverPolicy = "last" }, false, "deliver_policy"},
+
+		{"nkey", func(c *NATSConfig) { c.AuthType, c.NKeySeed = authNKey, testUserSeed(t) }, false, ""},
+		{"nkey seed file with a newline", func(c *NATSConfig) { c.AuthType, c.NKeySeed = authNKey, testUserSeed(t)+"\n" }, false, ""},
+		{"nkey missing", func(c *NATSConfig) { c.AuthType = authNKey }, false, "stored NKey seed"},
+		{"nkey not a seed", func(c *NATSConfig) { c.AuthType, c.NKeySeed = authNKey, "secret-"+tPassword }, false, "not a NATS NKey seed"},
+		{"nkey an account seed", func(c *NATSConfig) { c.AuthType, c.NKeySeed = authNKey, testAccountSeed(t) }, false, "not a user seed"},
+		{"partner prefixes", func(c *NATSConfig) { c.APIPrefix, c.InboxPrefix = "JS.RH.API", "_INBOX_vrsky_t_a" }, false, ""},
+		{"api prefix with a wildcard", func(c *NATSConfig) { c.APIPrefix = "JS.*.API" }, false, "api_prefix"},
+		{"api prefix with an empty token", func(c *NATSConfig) { c.APIPrefix = "JS..API" }, false, "empty token"},
+		{"inbox prefix with a space", func(c *NATSConfig) { c.InboxPrefix = "_INBOX vrsky" }, false, "inbox_prefix"},
+		{"inbox prefix with >", func(c *NATSConfig) { c.InboxPrefix = "_INBOX.>" }, false, "inbox_prefix"},
+		{"max wait too long", func(c *NATSConfig) { c.MaxWaitSeconds = maxMaxWaitSeconds + 1 }, false, "max_wait_seconds"},
+		// Negative values are refused, as the start check refuses them;
+		// 0 (or absent) is the default.
+		{"negative batch", func(c *NATSConfig) { c.BatchSize = -1 }, false, "batch_size must be from 1 to 256"},
+		{"negative max wait", func(c *NATSConfig) { c.MaxWaitSeconds = -1 }, false, "max_wait_seconds must be from 1 to 30"},
+		{"batch and wait 0 mean the defaults", func(c *NATSConfig) { c.BatchSize, c.MaxWaitSeconds = 0, 0 }, false, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,6 +106,80 @@ func TestNormalise(t *testing.T) {
 	if cfg.AuthType != authNone || cfg.BatchSize != defaultBatchSize {
 		t.Errorf("defaults: auth %q batch %d", cfg.AuthType, cfg.BatchSize)
 	}
+	if cfg.maxWait() != defaultMaxWaitSeconds*time.Second || !cfg.mayCreate() {
+		t.Errorf("defaults: max wait %s, may create %v", cfg.maxWait(), cfg.mayCreate())
+	}
+	p := NATSConfig{APIPrefix: " JS.RH.API. ", InboxPrefix: "_INBOX_vrsky_t_a.", MaxWaitSeconds: 12}
+	p.normalise()
+	if p.APIPrefix != "JS.RH.API" || p.InboxPrefix != "_INBOX_vrsky_t_a" || p.maxWait() != 12*time.Second {
+		t.Errorf("prefixes and wait normalised = %q, %q, %s", p.APIPrefix, p.InboxPrefix, p.maxWait())
+	}
+	var off NATSConfig
+	if err := json.Unmarshal([]byte(`{"create_durable":false}`), &off); err != nil || off.mayCreate() {
+		t.Errorf("create_durable false: may create %v (%v)", off.mayCreate(), err)
+	}
+}
+
+// The tests' fetchWait wins when set; otherwise the config's max wait.
+func TestPullWait(t *testing.T) {
+	cfg := &NATSConfig{MaxWaitSeconds: 7}
+	if got := (&natsConsumer{}).pullWait(cfg); got != 7*time.Second {
+		t.Errorf("pullWait = %s, want 7s", got)
+	}
+	if got := (&natsConsumer{fetchWait: time.Second}).pullWait(cfg); got != time.Second {
+		t.Errorf("pullWait with the test override = %s, want 1s", got)
+	}
+}
+
+// A denied subject names the setting it points at.
+func TestPermissionHint(t *testing.T) {
+	tests := []struct{ msg, want string }{
+		{`nats: permissions violation: Permissions Violation for Publish to "$JS.API.CONSUMER.INFO.S.d"`, "api_prefix"},
+		{`nats: permissions violation: Permissions Violation for Subscription to "_INBOX.abc.*"`, "inbox_prefix"},
+		{`nats: permissions violation: Permissions Violation for Publish to "JS.RH.API.CONSUMER.INFO.S.other"`, ""},
+	}
+	for _, tt := range tests {
+		got := permissionHint(errors.New(tt.msg), &asyncErrs{})
+		if (tt.want == "") != (got == "") || !strings.Contains(got, tt.want) {
+			t.Errorf("%s: hint %q, want one naming %q", tt.msg, got, tt.want)
+		}
+		// A setting already made is not suggested again.
+		if got := permissionHint(errors.New(tt.msg), &asyncErrs{apiPrefix: true, inboxPrefix: true}); got != "" {
+			t.Errorf("%s: hint %q with both prefixes set", tt.msg, got)
+		}
+	}
+}
+
+func TestStreamMissing(t *testing.T) {
+	if !streamMissing(jetstream.ErrStreamNotFound) {
+		t.Error("ErrStreamNotFound")
+	}
+	if !streamMissing(&jetstream.APIError{Code: 404, ErrorCode: jetstream.JSErrCodeStreamNotFound}) {
+		t.Error("the API error code for stream not found")
+	}
+	if streamMissing(&jetstream.APIError{Code: 404, ErrorCode: jetstream.JSErrCodeConsumerNotFound}) {
+		t.Error("consumer not found taken for stream not found")
+	}
+}
+
+func testUserSeed(t *testing.T) string {
+	t.Helper()
+	kp, err := nkeys.CreateUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, _ := kp.Seed()
+	return string(seed)
+}
+
+func testAccountSeed(t *testing.T) string {
+	t.Helper()
+	kp, err := nkeys.CreateAccount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, _ := kp.Seed()
+	return string(seed)
 }
 
 // TLS is required unless the operator's dev switch is on; with it, a CA or a
@@ -125,6 +218,20 @@ func TestPlaintextCredentials(t *testing.T) {
 		{`{"password":""}`, ""},
 		{`{"password":"` + tPassword + `"}`, "password is stored in plaintext"},
 		{`{"creds":"-----BEGIN NATS USER JWT-----"}`, "creds is stored in plaintext"},
+		{`{"nkey_seed":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
+		{`{"nkey_seed_secret_id":"0b1c","ca_cert":"-----BEGIN CERTIFICATE-----"}`, ""},
+		// encoding/json reads these keys into the credential fields too
+		// (#859 review): every spelling is refused.
+		{`{"Auth_Type":"nkey","NKEY_SEED":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
+		{`{"auth_type":"nkey","nkey_seed_secret_id":"0b1c","Nkey_Seed":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
+		{`{"nkey_ſeed":"SU` + tPassword + `"}`, "nkey_seed is stored in plaintext"},
+		{`{"Password":"` + tPassword + `"}`, "password is stored in plaintext"},
+		{`{"Creds":"-----BEGIN NATS USER JWT-----"}`, "creds is stored in plaintext"},
+		// Two spellings: refused whichever comes last.
+		{`{"Password":"` + tPassword + `","password":""}`, "password is stored in plaintext"},
+		{`{"password":"","pAssword":"` + tPassword + `"}`, "password is stored in plaintext"},
+		{`{"Auth_Type":"nkey","nkey_seed_secret_id":"0b1c"}`, ""},
+		{`{"Auth_Type":"user_password","Username":"rh","password_secret_id":"0b1c","Password":""}`, ""},
 	}
 	for _, tt := range tests {
 		err := plaintextCredentials([]byte(tt.block))
@@ -147,7 +254,7 @@ func TestPlaintextCredentials(t *testing.T) {
 func TestConfigLogValue(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
-	cfg := &NATSConfig{Servers: []string{"tls://a.example.com"}, Password: tPassword, Creds: "SUAseed" + tPassword, Stream: tStream}
+	cfg := &NATSConfig{Servers: []string{"tls://a.example.com"}, Password: tPassword, Creds: "SUAseed" + tPassword, NKeySeed: "SU" + tPassword, Stream: tStream}
 	logger.Info("x", "nats", cfg)
 	logger.Info("y", "nats", *cfg)
 	if strings.Contains(buf.String(), tPassword) {
@@ -259,12 +366,13 @@ func TestClassifyJS(t *testing.T) {
 // Only the two credential references are resolved; any other *_secret_id is
 // dropped before resolving, so a secret cannot come back in a validation error.
 func TestOnlyCredentialSecrets(t *testing.T) {
-	in := []byte(`{"stream":"S","password_secret_id":"a","creds_secret_id":"b","auth_type_secret_id":"c","stream_secret_id":"d"}`)
+	in := []byte(`{"stream":"S","password_secret_id":"a","creds_secret_id":"b","auth_type_secret_id":"c","stream_secret_id":"d","nkey_seed_secret_id":"e","ca_cert_secret_id":"f","api_prefix_secret_id":"g"}`)
 	var out map[string]any
 	if err := json.Unmarshal(onlyCredentialSecrets(in), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out["password_secret_id"] != "a" || out["creds_secret_id"] != "b" || out["stream"] != "S" {
+	if out["password_secret_id"] != "a" || out["creds_secret_id"] != "b" || out["stream"] != "S" ||
+		out["nkey_seed_secret_id"] != "e" || out["ca_cert_secret_id"] != "f" {
 		t.Errorf("kept = %v", out)
 	}
 	if _, ok := out["auth_type_secret_id"]; ok {
@@ -272,6 +380,9 @@ func TestOnlyCredentialSecrets(t *testing.T) {
 	}
 	if _, ok := out["stream_secret_id"]; ok {
 		t.Errorf("stream_secret_id survived: %v", out)
+	}
+	if _, ok := out["api_prefix_secret_id"]; ok {
+		t.Errorf("api_prefix_secret_id survived: %v", out)
 	}
 	if got := onlyCredentialSecrets([]byte(`"x"`)); string(got) != `"x"` {
 		t.Errorf("a non-object changed: %s", got)

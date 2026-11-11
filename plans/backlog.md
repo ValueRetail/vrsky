@@ -1641,6 +1641,18 @@ Last updated 2026-10-28.
     text. Keep secret fields out of the saved canvas. Found in the review of
     #850.
 
+223. **The HTTP producer's inline-token check depends on key order.**
+    `hasInlineToken` and `validateHTTPProducerBearer` (#862) decode into a
+    struct, which keeps the last of two keys that differ only in case. The
+    check reads the stored JSONB (keys ordered by length, then bytes), the
+    producer reads the token after the secret resolver re-encodes the block
+    with Go's byte order. `ToKen` with a Kelvin-sign K (7 bytes) sorts after
+    `token` in one and before it in the other, so
+    `{"ToKen":"","token":"…"}` could pass
+    the check and still send the inline token. Reasoned from the code, not
+    reproduced against Postgres. Fix as the NATS source does (#859): refuse
+    a non-empty value under every spelling. Found in the review of #859.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource

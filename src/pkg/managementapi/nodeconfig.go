@@ -3,6 +3,8 @@ package managementapi
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -217,6 +219,9 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "cloud_storage" && node.Type == "consumer" {
 		errs = append(errs, validateCloudStorageConsumer(node, raw)...)
 	}
+	if configType == "nats" && node.Type == "consumer" {
+		errs = append(errs, validateNATSConsumer(node, raw)...)
+	}
 	if configType == "sitoo" {
 		errs = append(errs, validateSitooBaseURL(node, raw)...)
 	}
@@ -371,6 +376,96 @@ func validateCloudStorageConsumer(node *Node, raw map[string]json.RawMessage) []
 	return nil
 }
 
+// natsCredentialRefs maps each NATS auth_type to the stored secret it needs.
+// The connector reads the credential only from that reference.
+var natsCredentialRefs = map[string]string{
+	"none":          "",
+	"user_password": "password_secret_id",
+	"creds":         "creds_secret_id",
+	"nkey":          "nkey_seed_secret_id",
+}
+
+// validateNATSConsumer refuses what the nats-consumer would refuse at start
+// before it dials (#814): an unknown auth_type, a credential auth type
+// without its stored secret, a credential stored in plaintext, and an
+// api_prefix or inbox_prefix that is not a plain subject, and a batch_size
+// or max_wait_seconds out of the connector's range. Messages name the field,
+// never a value.
+//
+// The connector reads the block into a struct, and encoding/json matches keys
+// without regard to case: "NKEY_SEED" is the seed there and "Auth_Type" the
+// auth type, so they are read that way here too (foldedStrings). A plaintext
+// credential is refused under any spelling. auth_type or username spelled two
+// ways is refused: which spelling the connector reads depends on the order
+// the keys reach it, which this check cannot know. The *_secret_id references
+// are read by their exact key, because the connector resolves only those
+// (onlyCredentialSecrets keeps the exact names, and crypto resolves only the
+// lowercase _secret_id suffix).
+func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
+	var block map[string]json.RawMessage
+	if json.Unmarshal(raw["nats"], &block) != nil {
+		return nil
+	}
+	svc := nodeConfigRules[nodeKind{node.Type, "nats"}].service
+	var errs []string
+	for _, field := range []string{"password", "creds", "nkey_seed"} {
+		vals, _ := foldedStrings(block, field)
+		// Untrimmed, like the connector's own check: whitespace alone is
+		// still a value written into the node.
+		if slices.ContainsFunc(vals, func(v string) bool { return v != "" }) {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is stored in plaintext; store it as a secret (%s_secret_id) (served by %s)", node.ID, field, field, svc))
+		}
+	}
+	for _, field := range []string{"auth_type", "username"} {
+		if _, keys := foldedStrings(block, field); keys > 1 {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is set more than once, in keys that differ only in case (served by %s)", node.ID, field, svc))
+		}
+	}
+	authType := firstFolded(block, "auth_type")
+	if authType == "" {
+		authType = "none"
+	}
+	ref, known := natsCredentialRefs[authType]
+	switch {
+	case !known:
+		errs = append(errs, fmt.Sprintf("node %s (nats): nats.auth_type must be one of none, creds, user_password, nkey (served by %s)", node.ID, svc))
+	case ref != "" && stringField(block, ref) == "":
+		errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s is required for auth_type %s (served by %s)", node.ID, ref, authType, svc))
+	}
+	if authType == "user_password" && firstFolded(block, "username") == "" {
+		errs = append(errs, fmt.Sprintf("node %s (nats): nats.username is required for auth_type user_password (served by %s)", node.ID, svc))
+	}
+	for _, field := range []string{"api_prefix", "inbox_prefix"} {
+		p := strings.TrimSuffix(stringField(block, field), ".")
+		if p == "" {
+			continue
+		}
+		bad := len(p) > 255 || strings.ContainsAny(p, " \t\r\n*>")
+		for _, tok := range strings.Split(p, ".") {
+			bad = bad || tok == ""
+		}
+		if bad {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s must be a subject without spaces, wildcards or empty tokens, at most 255 characters (served by %s)", node.ID, field, svc))
+		}
+	}
+	// The connector's limits (nats-consumer config.go). Absent or 0 means
+	// the default; a fraction would not even parse there.
+	for _, lim := range []struct {
+		field string
+		max   float64
+	}{{"batch_size", 256}, {"max_wait_seconds", 30}} {
+		v, ok := block[lim.field]
+		if !ok || isEmptyJSON(v) {
+			continue
+		}
+		var n float64
+		if json.Unmarshal(v, &n) != nil || n != math.Trunc(n) || n < 0 || n > lim.max {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s must be a whole number from 1 to %d (served by %s)", node.ID, lim.field, int(lim.max), svc))
+		}
+	}
+	return errs
+}
+
 // validateRemoteAgentTarget: a remote_agent node names either one agent
 // (agent_id) or a group (target "group" + group), never neither.
 func validateRemoteAgentTarget(node *Node, raw map[string]json.RawMessage) []string {
@@ -443,6 +538,35 @@ func stringField(raw map[string]json.RawMessage, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+// foldedStrings returns, untrimmed, the string value of every key in raw that
+// encoding/json would decode into a struct field tagged name: the key itself
+// and any spelling that differs only in case (strings.EqualFold is the rule
+// encoding/json applies). keys counts the matching keys, string-valued or not.
+func foldedStrings(raw map[string]json.RawMessage, name string) (vals []string, keys int) {
+	for k, v := range raw {
+		if !strings.EqualFold(k, name) {
+			continue
+		}
+		keys++
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			vals = append(vals, s)
+		}
+	}
+	return vals, keys
+}
+
+// firstFolded is the trimmed string value of a key spelled like name in any
+// case, or "" when there is none. With two spellings it returns either; a
+// caller that cares refuses that first (foldedStrings).
+func firstFolded(raw map[string]json.RawMessage, name string) string {
+	vals, _ := foldedStrings(raw, name)
+	if len(vals) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(vals[0])
 }
 
 // hasNonEmpty reports whether a dotted path within the config resolves to a

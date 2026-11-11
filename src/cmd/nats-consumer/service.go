@@ -23,9 +23,6 @@ import (
 )
 
 const (
-	// fetchWait is how long one pull waits for messages before it asks again,
-	// and so how long a stop can take to hand back what the pull delivers.
-	fetchWait = 5 * time.Second
 	// ackTimeout bounds the double ack to the source.
 	ackTimeout = 5 * time.Second
 	// publishTimeout bounds one publish into the pipeline, so a VRSky stream
@@ -71,8 +68,9 @@ type natsConsumer struct {
 	// The redial schedule and the wait after a failed publish; tests
 	// shorten them.
 	minBackoff, maxBackoff, retryDelay time.Duration
-	// apiTimeout bounds binding the durable, fetchWait one waiting pull,
-	// publishTimeout one publish into the pipeline; tests shorten them.
+	// apiTimeout bounds binding the durable, publishTimeout one publish into
+	// the pipeline; tests shorten them. fetchWait, when set (tests only),
+	// replaces the config's max_wait_seconds for a waiting pull.
 	apiTimeout, fetchWait, publishTimeout time.Duration
 
 	active map[string]*activeConn
@@ -129,9 +127,6 @@ func (c *natsConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	}
 	if c.apiTimeout == 0 {
 		c.apiTimeout = apiTimeout
-	}
-	if c.fetchWait == 0 {
-		c.fetchWait = fetchWait
 	}
 	if c.publishTimeout == 0 {
 		c.publishTimeout = publishTimeout
@@ -315,11 +310,11 @@ func (c *natsConsumer) fail(own *activeConn, connectionID, tenantID string, caus
 func (c *natsConsumer) consumeLoop(ctx context.Context, own *activeConn, connID, tenantID string, cfg *NATSConfig, mayCreate bool, logger *slog.Logger) {
 	backoff := c.minBackoff
 	// create: a start command may create a missing durable, until the loop
-	// has bound it once. A durable that is gone after that, or at a restore,
-	// was deleted on the server; creating it again would replay the stream
-	// from deliver_policy, older than VRSky's dedup window, so that is left
-	// to a deliberate new start.
-	create := mayCreate
+	// has bound it once, unless create_durable is false. A durable that is
+	// gone after that, or at a restore, was deleted on the server; creating
+	// it again would replay the stream from deliver_policy, older than
+	// VRSky's dedup window, so that is left to a deliberate new start.
+	create := mayCreate && cfg.mayCreate()
 	for ctx.Err() == nil {
 		s, err := open(ctx, cfg, openOpts{allowPrivate: c.allowPrivate, create: create, apiWait: c.apiTimeout, dialWait: dialTimeout})
 		if err == nil {
@@ -336,7 +331,7 @@ func (c *natsConsumer) consumeLoop(ctx context.Context, own *activeConn, connID,
 			return
 		}
 		if errors.Is(err, errDurableMissing) {
-			err = sdk.Permanent(fmt.Errorf("durable %q no longer exists on the NATS server; stop and start the pipeline to create it anew, which delivers from deliver_policy (%s) again", cfg.Durable, cfg.DeliverPolicy))
+			err = durableMissingError(cfg)
 		}
 		if sdk.IsPermanent(err) {
 			c.fail(own, connID, tenantID, err, logger)
@@ -348,6 +343,23 @@ func (c *natsConsumer) consumeLoop(ctx context.Context, own *activeConn, connID,
 		}
 		backoff = min(2*backoff, c.maxBackoff)
 	}
+}
+
+// durableMissingError is the reason for a durable the loop may not create.
+func durableMissingError(cfg *NATSConfig) error {
+	if !cfg.mayCreate() {
+		return sdk.Permanent(fmt.Errorf("durable %q does not exist on stream %q, and create_durable is off; have it created on the NATS server, then start the pipeline again", cfg.Durable, cfg.Stream))
+	}
+	return sdk.Permanent(fmt.Errorf("durable %q no longer exists on the NATS server; stop and start the pipeline to create it anew, which delivers from deliver_policy (%s) again", cfg.Durable, cfg.DeliverPolicy))
+}
+
+// pullWait is how long a waiting pull lasts: max_wait_seconds, or the
+// tests' shorter fetchWait.
+func (c *natsConsumer) pullWait(cfg *NATSConfig) time.Duration {
+	if c.fetchWait > 0 {
+		return c.fetchWait
+	}
+	return cfg.maxWait()
 }
 
 // drain pulls messages and forwards them in order, acking each on the source
@@ -363,9 +375,17 @@ func (c *natsConsumer) drain(ctx context.Context, connID, tenantID string, cfg *
 		if s.nc.IsClosed() || s.done.Err() != nil {
 			return sdk.Retriable(errors.New("the connection to the NATS server closed"))
 		}
-		msgs, err := pull(s, c.fetchWait)
+		msgs, err := pull(s, c.pullWait(cfg))
 		if err != nil {
 			return classifyJS(err, s.async, "pull from durable "+cfg.Durable)
+		}
+		if len(msgs) == 0 {
+			// A pull the user may not send is not answered at all: it looks
+			// like an empty stream. The server's permission violation is
+			// the only sign, and it makes the connection end.
+			if v := s.async.takePermission(); v != nil {
+				return sdk.Permanent(fmt.Errorf("pull from durable %s: the NATS user may not do this%s: %w", cfg.Durable, permissionHint(v, s.async), v))
+			}
 		}
 		for i, m := range msgs {
 			if ctx.Err() != nil {

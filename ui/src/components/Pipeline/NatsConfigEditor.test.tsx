@@ -29,7 +29,7 @@ describe('NatsConfigEditor', () => {
     fireEvent.change(screen.getByLabelText(/server urls/i), { target: { value: 'tls://a.example.com:4222\ntls://b.example.com:4222' } })
     expect(last().servers).toEqual(['tls://a.example.com:4222', 'tls://b.example.com:4222'])
     fireEvent.change(screen.getByLabelText(/^stream$/i), { target: { value: 'RH_EVENTS' } })
-    fireEvent.change(screen.getByLabelText(/durable/i), { target: { value: 'vrsky' } })
+    fireEvent.change(screen.getByLabelText(/durable consumer name/i), { target: { value: 'vrsky' } })
     fireEvent.change(screen.getByLabelText(/subject filter/i), { target: { value: 'rh.evt.v1.acme.>' } })
     expect(last()).toMatchObject({ stream: 'RH_EVENTS', durable: 'vrsky', filter_subject: 'rh.evt.v1.acme.>' })
   })
@@ -82,6 +82,43 @@ describe('NatsConfigEditor', () => {
     expect(last().deliver_policy).toBe('new')
     expect(last().opt_start_time).toBeUndefined()
     expect(screen.queryByLabelText(/start time/i)).toBeNull()
+  })
+
+  it('asks for an NKey seed as a secret for nkey authentication', () => {
+    const { last } = renderEditor()
+    expect(screen.queryByPlaceholderText('SU…')).toBeNull()
+    fireEvent.change(screen.getByLabelText(/authentication/i), { target: { value: 'nkey' } })
+    expect(last().auth_type).toBe('nkey')
+    fireEvent.change(screen.getByPlaceholderText('SU…'), { target: { value: 'SUAEXAMPLE' } })
+    expect(last().nkey_seed).toBe('SUAEXAMPLE')
+  })
+
+  it('stores the partner account settings: prefixes, create switch, batch and wait', () => {
+    const { last } = renderEditor()
+    fireEvent.change(screen.getByLabelText(/jetstream api prefix/i), { target: { value: 'JS.RH.API' } })
+    fireEvent.change(screen.getByLabelText(/inbox prefix/i), { target: { value: '_INBOX_vrsky_t_a' } })
+    expect(last()).toMatchObject({ api_prefix: 'JS.RH.API', inbox_prefix: '_INBOX_vrsky_t_a' })
+
+    const create = screen.getByLabelText(/create the durable/i) as HTMLInputElement
+    expect(create.checked).toBe(true)
+    fireEvent.click(create)
+    expect(last().create_durable).toBe(false)
+    expect(create.checked).toBe(false)
+
+    fireEvent.change(screen.getByLabelText(/batch size/i), { target: { value: '50' } })
+    fireEvent.change(screen.getByLabelText(/pull wait/i), { target: { value: '10' } })
+    expect(last()).toMatchObject({ batch_size: 50, max_wait_seconds: 10 })
+    fireEvent.change(screen.getByLabelText(/pull wait/i), { target: { value: '1.5' } })
+    expect(last().max_wait_seconds).toBe(1)
+    fireEvent.change(screen.getByLabelText(/pull wait/i), { target: { value: '' } })
+    expect(last().max_wait_seconds).toBeUndefined()
+  })
+
+  it('hides the deliver policy when VRSky may not create the durable', () => {
+    renderEditor({ create_durable: false })
+    expect(screen.queryByLabelText(/first start reads/i)).toBeNull()
+    fireEvent.click(screen.getByLabelText(/create the durable/i))
+    expect(screen.getByLabelText(/first start reads/i)).toBeTruthy()
   })
 
   it('stores a CA certificate', () => {

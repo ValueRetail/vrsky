@@ -246,20 +246,18 @@ func TestPullLimitsTable(t *testing.T) {
 		name       string
 		want       int
 		maxPayload int64
-		streamMax  int32
 		info       *jetstream.ConsumerInfo
 		batch      int
 		wait       time.Duration
 	}{
-		{"default server, 1 MB", 10, 1 << 20, 0, nil, 10, 0},
-		{"256 at 1 MB is cut to the 32 MiB budget", 256, 1 << 20, 0, nil, 32, 0},
-		{"64 MB server: one at a time", 256, 64 << 20, 0, nil, 1, 0},
-		{"stream limit below the server's", 256, 64 << 20, 64 << 10, nil, 256, 0},
-		{"durable MaxRequestBatch", 10, 1 << 20, 0, info(3, 0), 3, 0},
-		{"durable MaxRequestExpires", 10, 1 << 20, 0, info(0, time.Second), 10, time.Second},
+		{"default server, 1 MB", 10, 1 << 20, nil, 10, 0},
+		{"256 at 1 MB is cut to the 32 MiB budget", 256, 1 << 20, nil, 32, 0},
+		{"64 MB server: one at a time", 256, 64 << 20, nil, 1, 0},
+		{"durable MaxRequestBatch", 10, 1 << 20, info(3, 0), 3, 0},
+		{"durable MaxRequestExpires", 10, 1 << 20, info(0, time.Second), 10, time.Second},
 	}
 	for _, tt := range tests {
-		b, w := pullLimits(tt.want, tt.maxPayload, tt.streamMax, tt.info)
+		b, w := pullLimits(tt.want, tt.maxPayload, tt.info)
 		if b != tt.batch || w != tt.wait {
 			t.Errorf("%s: got %d, %s; want %d, %s", tt.name, b, w, tt.batch, tt.wait)
 		}

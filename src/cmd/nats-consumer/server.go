@@ -47,9 +47,10 @@ func writeTestJSON(w http.ResponseWriter, status int, body map[string]interface{
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// handleTestConnection connects with the draft config, looks up the stream and
-// the durable, and disconnects. It creates nothing: a missing durable is
-// reported as fine, since the first start creates it.
+// handleTestConnection connects with the draft config, looks up the durable
+// (consumer info only, no stream info), and disconnects. It creates nothing:
+// a missing durable is reported as fine when the first start may create it,
+// and as an error when create_durable is off.
 //
 // The body is the nats block, plus tenant_id. With a tenant, *_secret_id
 // references are resolved, so a saved node can be tested again. A draft typed
@@ -94,7 +95,11 @@ func (c *natsConsumer) handleTestConnection() http.HandlerFunc {
 		defer cancel()
 		s, err := open(ctx, &cfg, openOpts{allowPrivate: c.allowPrivate, apiWait: testAPIWait, dialWait: testDialWait})
 		if errors.Is(err, errDurableMissing) {
-			writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "note": "the durable does not exist yet; the first start creates it"})
+			if !cfg.mayCreate() {
+				writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": durableMissingError(&cfg).Error()})
+				return
+			}
+			writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "note": "the durable does not exist yet; the first start creates it (whether the account may create it is not checked here)"})
 			return
 		}
 		if err != nil {

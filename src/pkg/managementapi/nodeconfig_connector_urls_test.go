@@ -265,6 +265,52 @@ func TestNATSConsumerStartChecks(t *testing.T) {
 		{name: "no stream", block: map[string]any{"servers": []string{"tls://nats.example.com"}, "durable": "d"}, sides: []string{"consumer"}, wantErr: "nats.stream is required"},
 		{name: "no durable", block: map[string]any{"servers": []string{"tls://nats.example.com"}, "stream": "S"}, sides: []string{"consumer"}, wantErr: "nats.durable is required"},
 	})
+	with := func(kv ...any) map[string]any {
+		m := ok([]string{"tls://nats.example.com:4222"})
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1]
+		}
+		return m
+	}
+	runConnectorURLCases(t, "nats", []connectorURLCase{
+		{name: "retailhero partner account", sides: []string{"consumer"}, block: with(
+			"auth_type", "nkey", "nkey_seed_secret_id", "s1", "api_prefix", "JS.RH.API", "inbox_prefix", "_INBOX_vrsky_t_a", "create_durable", false)},
+		{name: "creds", sides: []string{"consumer"}, block: with("auth_type", "creds", "creds_secret_id", "s1")},
+		{name: "user and password", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "password_secret_id", "s1")},
+		{name: "unknown auth type", sides: []string{"consumer"}, block: with("auth_type", "token"), wantErr: "nats.auth_type must be one of"},
+		{name: "nkey without its secret", sides: []string{"consumer"}, block: with("auth_type", "nkey"), wantErr: "nats.nkey_seed_secret_id is required"},
+		{name: "creds without its secret", sides: []string{"consumer"}, block: with("auth_type", "creds"), wantErr: "nats.creds_secret_id is required"},
+		{name: "user without a name", sides: []string{"consumer"}, block: with("auth_type", "user_password", "password_secret_id", "s1"), wantErr: "nats.username is required"},
+		{name: "plaintext seed", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext password", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "password", urlSecret), wantErr: "nats.password is stored in plaintext"},
+		// encoding/json reads a key in any case into the connector's
+		// struct, so the check does too (#859 review).
+		{name: "plaintext seed as NKEY_SEED", sides: []string{"consumer"}, block: with("Auth_Type", "nkey", "NKEY_SEED", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext seed as Nkey_Seed", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed_secret_id", "s1", "Nkey_Seed", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext seed with a long s", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed_secret_id", "s1", "nkey_ſeed", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext seed next to an empty one", sides: []string{"consumer"}, block: with("auth_type", "nkey", "nkey_seed_secret_id", "s1", "nkey_seed", "", "NKEY_SEED", "SU"+urlSecret), wantErr: "nats.nkey_seed is stored in plaintext"},
+		{name: "plaintext Password", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "password_secret_id", "s1", "Password", urlSecret), wantErr: "nats.password is stored in plaintext"},
+		{name: "plaintext Creds", sides: []string{"consumer"}, block: with("auth_type", "creds", "creds_secret_id", "s1", "Creds", "-----BEGIN NATS USER JWT-----"+urlSecret), wantErr: "nats.creds is stored in plaintext"},
+		{name: "Auth_Type nkey without a secret", sides: []string{"consumer"}, block: with("Auth_Type", "nkey"), wantErr: "nats.nkey_seed_secret_id is required"},
+		{name: "Auth_Type nkey with its secret", sides: []string{"consumer"}, block: with("Auth_Type", "nkey", "nkey_seed_secret_id", "s1")},
+		{name: "AUTH_TYPE unknown", sides: []string{"consumer"}, block: with("AUTH_TYPE", "token"), wantErr: "nats.auth_type must be one of"},
+		{name: "Auth_Type user_password with Username", sides: []string{"consumer"}, block: with("Auth_Type", "user_password", "Username", "rh", "password_secret_id", "s1")},
+		{name: "auth_type spelled twice", sides: []string{"consumer"}, block: with("auth_type", "none", "Auth_Type", "nkey", "nkey_seed_secret_id", "s1"), wantErr: "nats.auth_type is set more than once"},
+		{name: "username spelled twice", sides: []string{"consumer"}, block: with("auth_type", "user_password", "username", "rh", "UserName", "", "password_secret_id", "s1"), wantErr: "nats.username is set more than once"},
+		// The connector resolves only the exact reference names, so a
+		// differently cased one does not count as the stored secret.
+		{name: "secret id in capitals", sides: []string{"consumer"}, block: with("auth_type", "nkey", "NKEY_SEED_SECRET_ID", "s1"), wantErr: "nats.nkey_seed_secret_id is required"},
+		{name: "api prefix with a wildcard", sides: []string{"consumer"}, block: with("api_prefix", "JS.*.API"), wantErr: "nats.api_prefix must be a subject"},
+		{name: "inbox prefix with an empty token", sides: []string{"consumer"}, block: with("inbox_prefix", "_INBOX..x"), wantErr: "nats.inbox_prefix must be a subject"},
+		{name: "prefix with a trailing dot", sides: []string{"consumer"}, block: with("api_prefix", "JS.RH.API.")},
+		{name: "prefix too long", sides: []string{"consumer"}, block: with("inbox_prefix", strings.Repeat("a", 256)), wantErr: "nats.inbox_prefix must be a subject"},
+		{name: "batch and wait in range", sides: []string{"consumer"}, block: with("batch_size", 256, "max_wait_seconds", 30)},
+		{name: "batch too big", sides: []string{"consumer"}, block: with("batch_size", 257), wantErr: "nats.batch_size must be a whole number from 1 to 256"},
+		{name: "wait too long", sides: []string{"consumer"}, block: with("max_wait_seconds", 31), wantErr: "nats.max_wait_seconds must be a whole number from 1 to 30"},
+		{name: "fractional wait", sides: []string{"consumer"}, block: with("max_wait_seconds", 1.5), wantErr: "nats.max_wait_seconds must be a whole number"},
+		{name: "wait as text", sides: []string{"consumer"}, block: with("max_wait_seconds", "5"), wantErr: "nats.max_wait_seconds must be a whole number"},
+		{name: "negative batch", sides: []string{"consumer"}, block: with("batch_size", -1), wantErr: "nats.batch_size must be a whole number"},
+	})
 	// There is no NATS destination.
 	if err := startOn("producer", nodeCfg(t, "nats", ok([]string{"tls://nats.example.com"}))); err == nil {
 		t.Error("a nats destination was accepted")

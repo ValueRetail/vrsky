@@ -28,8 +28,10 @@ export const SECRET_FIELDS = new Set([
   'subscription_key',
   'client_secret',
   'staff_token',
-  // NATS source (#814): the .creds file (user JWT + NKey seed).
+  // NATS source (#814): the .creds file (user JWT + NKey seed) and a bare
+  // NKey seed (Retailhero partner accounts).
   'creds',
+  'nkey_seed',
 ])
 
 /**
