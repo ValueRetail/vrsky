@@ -10,7 +10,9 @@ rh.evt.v1.<tenant>.…  ─►  nats source ─► converter ─► bifrost_cata
 ```
 
 It is marked **beta**. It deploys, and its converter and producer are tested
-against Retailhero's fixtures, but it cannot run end to end yet (see
+against Retailhero's fixtures, but it cannot run end to end yet: Retailhero
+does not publish the Bifrost batches (see
+[What Retailhero publishes](#what-retailhero-publishes) and
 [What blocks it](#what-blocks-it)).
 
 ## Who is master
@@ -36,7 +38,11 @@ template.
    is `new`, so a start does not push the whole stream into the pipeline (see
    [NATS JetStream](nats.md)). A durable that is new or renamed therefore
    misses the catalogue as it stands and only gets the batches published
-   after it exists. In `delta` mode a full-kind batch is applied as an
+   after it exists. That holds for a durable VRSky creates. On a Retailhero
+   partner account the operator creates the durable and VRSky only binds it
+   (`create_durable: false`), so Retailhero's own policy applies, which is
+   `all` today (`ConsumerSpec::to_config` in its `messaging.rs`). In `delta`
+   mode a full-kind batch is applied as an
    upsert and removes nothing, so it does not replace the catalogue either.
    Loading a store from scratch is the full-list variant (#856).
 2. **Converter.** Takes the `rows` of one batch and returns
@@ -79,13 +85,71 @@ in an import (the last duplicate wins). A full package gives the same article
 several rows with different `effective_from`; they sit in different batches,
 and sent as one message the earlier prices would be lost.
 
-!!! warning "This shape is an assumption"
-    Retailhero's profile is a pure mapping function. How its output is wrapped
-    in a `rh.evt.v1` event, and on which subject, is not decided yet (the
-    partner export is ValueRetail/Retailhero#2680). The fixtures in
-    `src/test/fixtures/retailhero` are the profile's own expected output, cut
-    into one message per batch. If the event looks different, change the
-    converter's `rows` / `importItem` paths.
+This is what VRSky needs, not something Retailhero publishes today. The
+fixtures in `src/test/fixtures/retailhero` are the profile's own expected
+output (Retailhero `tests/fixtures/pos-publication/bifrost-catalogue/v1`), cut
+into one message per batch. When Retailhero publishes the batches, the
+converter's `rows` / `importItem` paths follow wherever that event puts them
+(inside `fact`, if it is built like Retailhero's other events), and the
+subject filter names its subject.
+
+## What Retailhero publishes
+
+Checked against Retailhero's main branch on 2026-11-11, after
+ValueRetail/Retailhero#2680 closed: PR #2692 built the partner accounts, and
+PR #2720 (for Retailhero#2714) made product, pricing and campaign publish
+through the relay.
+
+The per-tenant partner account exports exactly these subjects, one durable
+pull consumer per tenant and type:
+
+| Subject | Stream | Durable for tenant `T-A` |
+|---|---|---|
+| `rh.evt.v1.<tenant>.product.product.version` | `RH_EVT_V1_PRODUCT` | `vrsky_product-version_T-A` |
+| `rh.evt.v1.<tenant>.product.pack.version` | `RH_EVT_V1_PRODUCT` | `vrsky_pack-version_T-A` |
+| `rh.evt.v1.<tenant>.product.gtin.version` | `RH_EVT_V1_PRODUCT` | `vrsky_gtin-version_T-A` |
+| `rh.evt.v1.<tenant>.pricing.price.version` | `RH_EVT_V1_PRICING` | `vrsky_price-version_T-A` |
+| `rh.evt.v1.<tenant>.campaign.campaign.version` | `RH_EVT_V1_CAMPAIGN` | `vrsky_campaign-version_T-A` |
+
+- The list lives in `infrastructure/local/receiving/config/nats/streams.json`
+  (`partners`) and is described in `docs/operations/local-receiving.md`,
+  "VRSky partner accounts".
+- The message body is the owner's outbox row, published unchanged by the
+  relay with `Nats-Msg-Id` set to the event id. Its shape is the event
+  contract (`contracts/events/master-data/v1.schema.json`,
+  `contracts/events/pricing/v1.1.schema.json`): top-level `contractVersion`,
+  `eventType`, `event` (tenant, producer, id), `stream` (the object, its
+  per-object `sequence`, the previous event), `recordedAt` (RFC 3339, UTC),
+  `correlationId` and `fact` (the version itself).
+- Events arrive in dependency order, not version order across types.
+  Retailhero asks consumers to be idempotent on the event id and not to drop
+  an event because its version is lower than one already seen.
+- The account signs in with an NKey seed (no JWT), has no JetStream of its
+  own, uses the API prefix `JS.RH.API` and the inbox prefix
+  `_INBOX_vrsky_t_<x>`, and may not ask for stream info. Retailhero's operator
+  creates the durables; the account may create only those same durables. The
+  `nats` source reads such an account once PR #859 is merged
+  ([NATS JetStream](nats.md)).
+
+None of these events is a Bifrost import batch, and the template cannot build
+one from them:
+
+- A Bifrost item needs fields from several events (SKU and name from
+  `product.version`, the barcode from `gtin.version`, the price from
+  `price.version`). A converter maps one message at a time and can't join
+  them.
+- `price.version` is an authored version. Its approval is a separate
+  `price.decision` event, which is not exported. Retailhero's ADR-0063 says
+  the tills get the frozen publication content, never a price VRSky works out.
+- The VAT rate is frozen in the POS publication package (target A profile
+  1.3, Proposed, Retailhero#2687), not carried on these events.
+
+The Bifrost batches come from Retailhero's Bifrost catalogue profile
+(`core/receiving/src/integration/pos_publication/bifrost_catalogue`, PR #2685,
+contract `docs/contracts/pos-publication-bifrost-catalogue.md`, Proposed). It
+is a pure function from a frozen package to batches and refusals, with no
+transport: dispatch is outside Retailhero#2676. Nothing publishes its output
+on NATS yet.
 
 A message of another shape (a campaign or a product event that the filter lets
 through) leaves the converter without `items` and is dropped by the producer
@@ -140,11 +204,18 @@ the profile reads it from there and nothing changes here.
 
 ## Setting it up
 
-The wizard asks for the Retailhero NATS server, the partner account's user and
-password, the stream, a durable name, the subject filter, and the Bifrost
-address and API key. An account that signs in with a `.creds` file needs the
-pipeline builder instead, which has a box for the whole file (the wizard's
-secret field is one line).
+The wizard asks for the Retailhero NATS server, a user and password, the
+stream, a durable name, the subject filter, and the Bifrost address and API
+key. An account that signs in with a `.creds` file needs the pipeline builder
+instead, which has a box for the whole file (the wizard's secret field is one
+line).
+
+Retailhero's partner account signs in with an NKey seed instead, and needs the
+API prefix `JS.RH.API`, its inbox prefix and `create_durable: false` (see
+[What Retailhero publishes](#what-retailhero-publishes)). The wizard can't set
+those yet. Once PR #859 is merged, set them on the source in the pipeline
+builder. Use the stream, durable and subject Retailhero names for the batch
+event; each durable is filtered to exactly one subject.
 
 ## What blocks it
 
@@ -153,10 +224,14 @@ secret field is one line).
   Whether it also keeps `vat_code` or switches to `vat_rate` next to the
   inclusive price is for that change to settle; if it takes `vat_rate`, the
   converter maps `importItem.vat_code` to `catalogueItem.vat_rate` instead.
-- **Retailhero must publish the batches** on the partner account (#2680) in a
-  shape the converter reads, one batch per message. Open: whether Bifrost's
-  per-item `effective_from` later than the import start is kept inside a full
-  import.
+- **Retailhero must publish the batches.** The partner account (#2680) carries
+  product, pack, GTIN, price and campaign events, which the template can't use
+  (see [What Retailhero publishes](#what-retailhero-publishes)). The batches
+  need a dispatch on Retailhero's side that runs the Bifrost profile and
+  publishes each batch as its own event on a subject exported to the partner
+  account. No Retailhero issue for that was found on 2026-11-11. Also open:
+  whether Bifrost keeps a per-item `effective_from` later than the import
+  start inside a full import.
 - **Removals and full lists.** A delta cannot remove an article or withdraw a
   price. Retailhero's profile refuses delistings and retirements for that
   reason. The first load and a clean-up need a full import, which needs the
