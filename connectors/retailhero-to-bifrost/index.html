@@ -2925,9 +2925,9 @@ as "not a list of items", with a log line. Narrow the subject filter to the
 batches to keep that quiet.</p>
 <h2 id="mapping">Mapping<a class="headerlink" href="#mapping" title="Permanent link">&para;</a></h2>
 <p>The converter renames each field of <code>importItem</code> into the item, field for
-field, and drops everything else (<code>sourceItemId</code>, the batch header, the
-profile's <code>catalogueItem</code> copy). A field the row does not have stays absent; it
-does not become <code>null</code>.</p>
+field, and drops everything else (<code>sourceItemId</code>, the rest of the batch
+header, the profile's <code>catalogueItem</code> copy). A field the row does not have
+stays absent; it does not become <code>null</code>.</p>
 <table>
 <thead>
 <tr>
@@ -2989,6 +2989,13 @@ does not become <code>null</code>.</p>
 </tr>
 </tbody>
 </table>
+<p>Beside the items, the batch's <code>recordedAt</code> (the time every Retailhero event
+carries) is passed through as <code>sequence</code>. The producer sends it to Bifrost in
+milliseconds, and Bifrost refuses an older batch that arrives after a newer
+one (see <a href="../bifrost-catalogue/#sequence">Sequence</a>). It has to grow from one
+batch to the next, in milliseconds: two batches with the same <code>recordedAt</code>
+count as one delivery, and the second is dropped with its rows. A batch
+without <code>recordedAt</code> is sent unnumbered.</p>
 <p>The mapping lives in <code>ui/src/onboarding/templates.ts</code> and is the same file the
 Go test reads (<code>ui/src/onboarding/testdata/retailhero-to-bifrost.json</code>).</p>
 <h3 id="prices-are-strings">Prices are strings<a class="headerlink" href="#prices-are-strings" title="Permanent link">&para;</a></h3>
@@ -3043,10 +3050,16 @@ event; each durable is filtered to exactly one subject.</p>
 <li><strong>Campaigns and member prices</strong> have no place in Bifrost's catalogue yet
   (ValueRetail/Bifrost#247). The campaign price itself flows as an ordinary
   price.</li>
-<li><strong>Order.</strong> A retried message can commit after a newer one. See "Retries are
-  safe" in <a href="../bifrost-catalogue/">Bifrost catalogue</a>. Bifrost now has a
-  <code>sequence</code> guard on begin (Bifrost#253); the producer doesn't send it yet
-  (#858).</li>
+<li><strong>Order.</strong> The template passes <code>recordedAt</code> through as Bifrost's <code>sequence</code>
+  (#858), so a retried older batch is dropped instead of overwriting a newer
+  one. Before go-live, Retailhero has to confirm that every batch carries a
+  <code>recordedAt</code> that grows by at least a millisecond per batch, including the
+  several batches one package is cut into, or send a per-batch counter
+  instead. Retailhero's <code>recordedAt</code> is today the writing transaction's start
+  time, so batches written in one transaction would share it, and every batch
+  after the first would be dropped. Also, a delta that is retried after a
+  newer one committed is dropped even when the newer one held other articles
+  (see <a href="../bifrost-catalogue/#retries-are-safe">What the guard costs</a>).</li>
 </ul>
 <h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3055,8 +3068,9 @@ event; each durable is filtered to exactly one subject.</p>
   compares with the item lists in <code>src/test/fixtures/retailhero</code>.</li>
 <li><code>src/cmd/bifrost-catalogue-producer/retailhero_template_test.go</code> sends those
   lists through the producer in <code>delta</code> mode to the stubbed catalogue-api and
-  checks that every field, the price strings included, arrives as written and
-  that articles the batches don't mention stay.</li>
+  checks that every field, the price strings included, arrives as written,
+  that articles the batches don't mention stay, and that an older batch
+  retried after a newer one is dropped.</li>
 <li><code>ui/src/onboarding/templates.test.ts</code> keeps the template in step with the
   Go test's config and with the connectors' keys.</li>
 </ul>
