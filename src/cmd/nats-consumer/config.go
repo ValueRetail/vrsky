@@ -21,6 +21,7 @@ const (
 	authNone         = "none"
 	authCreds        = "creds"
 	authUserPassword = "user_password"
+	authNKey         = "nkey"
 
 	defaultBatchSize = 10
 	maxBatchSize     = 256
@@ -28,22 +29,41 @@ const (
 	deliverAll         = "all"
 	deliverNew         = "new"
 	deliverByStartTime = "by_start_time"
+
+	// defaultMaxWaitSeconds and maxMaxWaitSeconds bound how long one waiting
+	// pull lasts; a stop can take that long to hand back what it delivers.
+	defaultMaxWaitSeconds = 5
+	maxMaxWaitSeconds     = 30
 )
 
-// NATSConfig is the per-node configuration (config.nats). Password and Creds
-// are filled in from password_secret_id and creds_secret_id; a stored config
-// that carries them in plaintext is refused (plaintextCredentials).
+// NATSConfig is the per-node configuration (config.nats). Password, Creds and
+// NKeySeed are filled in from password_secret_id, creds_secret_id and
+// nkey_seed_secret_id; a stored config that carries them in plaintext is
+// refused (plaintextCredentials).
 type NATSConfig struct {
-	Servers       []string `json:"servers"`   // nats://host:4222 or tls://host:4222
-	AuthType      string   `json:"auth_type"` // none | creds | user_password
-	Username      string   `json:"username"`
-	Password      string   `json:"password"` // resolved from password_secret_id
-	Creds         string   `json:"creds"`    // .creds file (user JWT + NKey seed), resolved from creds_secret_id
-	CACert        string   `json:"ca_cert"`  // PEM, optional: trust this CA for the server certificate
-	Stream        string   `json:"stream"`
-	Durable       string   `json:"durable"`
-	FilterSubject string   `json:"filter_subject"` // optional; used only when VRSky creates the durable, checked otherwise
-	BatchSize     int      `json:"batch_size"`     // most messages per pull, default 10; see pullBatch
+	Servers  []string `json:"servers"`   // nats://host:4222 or tls://host:4222
+	AuthType string   `json:"auth_type"` // none | creds | user_password | nkey
+	Username string   `json:"username"`
+	Password string   `json:"password"`  // resolved from password_secret_id
+	Creds    string   `json:"creds"`     // .creds file (user JWT + NKey seed), resolved from creds_secret_id
+	NKeySeed string   `json:"nkey_seed"` // user NKey seed (SU…), resolved from nkey_seed_secret_id
+	CACert   string   `json:"ca_cert"`   // PEM, optional: trust this CA for the server certificate; or ca_cert_secret_id
+	// APIPrefix replaces $JS.API for an account that imports the JetStream
+	// API from another account (a Retailhero partner account: JS.RH.API).
+	APIPrefix string `json:"api_prefix"`
+	// InboxPrefix replaces _INBOX for every reply subject, for a user that
+	// may subscribe only to its own inboxes (_INBOX_vrsky_t_a).
+	InboxPrefix string `json:"inbox_prefix"`
+	// CreateDurable lets a start command create a missing durable; nil
+	// (unset) means true, as before the setting existed. False binds only.
+	CreateDurable *bool `json:"create_durable,omitempty"`
+	// MaxWaitSeconds is how long a pull waits for a message when there is
+	// none, default 5.
+	MaxWaitSeconds int    `json:"max_wait_seconds"`
+	Stream         string `json:"stream"`
+	Durable        string `json:"durable"`
+	FilterSubject  string `json:"filter_subject"` // optional; used only when VRSky creates the durable, checked otherwise
+	BatchSize      int    `json:"batch_size"`     // most messages per pull, default 10; see pullBatch
 	// DeliverPolicy is where a durable VRSky creates starts: all (default,
 	// the whole stream), new (only what arrives after it exists) or
 	// by_start_time (from OptStartTime, RFC 3339). Ignored for an existing
@@ -75,7 +95,20 @@ func (c NATSConfig) LogValue() slog.Value {
 		slog.String("durable", c.Durable),
 		slog.String("filter_subject", c.FilterSubject),
 		slog.String("deliver_policy", c.DeliverPolicy),
+		slog.String("api_prefix", c.APIPrefix),
+		slog.String("inbox_prefix", c.InboxPrefix),
+		slog.Bool("create_durable", c.mayCreate()),
 	)
+}
+
+// mayCreate reports whether a start command may create a missing durable.
+func (c *NATSConfig) mayCreate() bool {
+	return c.CreateDurable == nil || *c.CreateDurable
+}
+
+// maxWait is the longest a waiting pull lasts.
+func (c *NATSConfig) maxWait() time.Duration {
+	return time.Duration(c.MaxWaitSeconds) * time.Second
 }
 
 // normalise trims what an editor tends to leave around values and fills the
@@ -104,6 +137,12 @@ func (c *NATSConfig) normalise() {
 		c.DeliverPolicy = deliverAll
 	}
 	c.OptStartTime = strings.TrimSpace(c.OptStartTime)
+	// nats.go adds the dot itself; one typed in would make an empty token.
+	c.APIPrefix = strings.TrimSuffix(strings.TrimSpace(c.APIPrefix), ".")
+	c.InboxPrefix = strings.TrimSuffix(strings.TrimSpace(c.InboxPrefix), ".")
+	if c.MaxWaitSeconds <= 0 {
+		c.MaxWaitSeconds = defaultMaxWaitSeconds
+	}
 }
 
 // validate checks the config from its values alone. Every error it returns is
@@ -124,6 +163,15 @@ func (c *NATSConfig) validate(allowPrivate bool) error {
 	}
 	if c.BatchSize > maxBatchSize {
 		return fmt.Errorf("batch_size must be at most %d", maxBatchSize)
+	}
+	if c.MaxWaitSeconds > maxMaxWaitSeconds {
+		return fmt.Errorf("max_wait_seconds must be at most %d", maxMaxWaitSeconds)
+	}
+	if err := checkPrefix("api_prefix", c.APIPrefix); err != nil {
+		return err
+	}
+	if err := checkPrefix("inbox_prefix", c.InboxPrefix); err != nil {
+		return err
 	}
 	switch c.DeliverPolicy {
 	case deliverAll, deliverNew:
@@ -160,8 +208,17 @@ func (c *NATSConfig) validate(allowPrivate bool) error {
 			return errors.New("the stored credentials are not a NATS .creds file (no NKey seed found)")
 		}
 		kp.Wipe()
+	case authNKey:
+		if c.NKeySeed == "" {
+			return errors.New("nkey authentication needs a stored NKey seed")
+		}
+		kp, err := userKeyPair(c.NKeySeed)
+		if err != nil {
+			return err
+		}
+		kp.Wipe()
 	default:
-		return fmt.Errorf("auth_type %q is not one of none, creds, user_password", c.AuthType)
+		return fmt.Errorf("auth_type %q is not one of none, creds, user_password, nkey", c.AuthType)
 	}
 	if _, err := c.tlsConfig(allowPrivate); err != nil {
 		return err
@@ -178,6 +235,39 @@ func checkName(field, name string) error {
 	}
 	if len(name) > 255 || strings.ContainsAny(name, " \t\r\n.*>/\\") {
 		return fmt.Errorf("%s %q is not a valid JetStream name (no spaces, dots, wildcards or slashes)", field, name)
+	}
+	return nil
+}
+
+// userKeyPair parses a user NKey seed, raw ("SU…") or in a decorated block.
+// Its errors never quote the input.
+func userKeyPair(seed string) (nkeys.KeyPair, error) {
+	kp, err := nkeys.ParseDecoratedNKey([]byte(seed))
+	if err != nil {
+		return nil, errors.New("the stored NKey seed is not a NATS NKey seed")
+	}
+	pub, err := kp.PublicKey()
+	if err != nil || !nkeys.IsValidPublicUserKey(pub) {
+		kp.Wipe()
+		return nil, errors.New("the stored NKey seed is not a user seed (it must start with SU)")
+	}
+	return kp, nil
+}
+
+// checkPrefix refuses an API or inbox prefix that is not a plain subject: a
+// wildcard would make nats.go or the server address something else, and an
+// empty token is not a subject.
+func checkPrefix(field, prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+	if len(prefix) > 255 || strings.ContainsAny(prefix, " \t\r\n*>") {
+		return fmt.Errorf("%s %q must be a subject without spaces or wildcards", field, prefix)
+	}
+	for _, tok := range strings.Split(prefix, ".") {
+		if tok == "" {
+			return fmt.Errorf("%s %q has an empty token", field, prefix)
+		}
 	}
 	return nil
 }
@@ -216,7 +306,7 @@ func plaintextCredentials(block json.RawMessage) error {
 	if err := json.Unmarshal(block, &raw); err != nil {
 		return nil // not an object: the typed parse reports it
 	}
-	for _, field := range []string{"password", "creds"} {
+	for _, field := range []string{"password", "creds", "nkey_seed"} {
 		var s string
 		if v, ok := raw[field]; ok && json.Unmarshal(v, &s) == nil && s != "" {
 			return fmt.Errorf("%s is stored in plaintext; store it as a secret (%s_secret_id)", field, field)
@@ -226,13 +316,15 @@ func plaintextCredentials(block json.RawMessage) error {
 }
 
 // credentialSecretIDs are the only stored-secret references a nats block may
-// carry. Any other *_secret_id would resolve into a setting whose value can
-// come back in an error ("auth_type %q is not one of …"), and secrets are
-// write-only.
-var credentialSecretIDs = map[string]bool{"password_secret_id": true, "creds_secret_id": true}
+// carry: the three credentials and the CA. Any other *_secret_id would
+// resolve into a setting whose value can come back in an error ("auth_type %q
+// is not one of …"), and secrets are write-only.
+var credentialSecretIDs = map[string]bool{
+	"password_secret_id": true, "creds_secret_id": true, "nkey_seed_secret_id": true, "ca_cert_secret_id": true,
+}
 
-// onlyCredentialSecrets drops every *_secret_id key from block except the two
-// credential ones. A block that is not an object is returned as it is.
+// onlyCredentialSecrets drops every *_secret_id key from block except the
+// credential and CA ones. A block that is not an object is returned as it is.
 func onlyCredentialSecrets(block json.RawMessage) json.RawMessage {
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(block, &raw) != nil || raw == nil {

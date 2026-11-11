@@ -33,9 +33,8 @@ const (
 
 // session is one live connection to the external server, bound to the durable.
 type session struct {
-	nc     *nats.Conn
-	stream jetstream.Stream
-	cons   jetstream.Consumer
+	nc   *nats.Conn
+	cons jetstream.Consumer
 	// done is cancelled when the connection closes (NoReconnect: any drop
 	// closes it), so a fetch in flight ends at once instead of at its expiry.
 	// It does not follow the loop's context: on a stop, the pull runs out
@@ -57,14 +56,13 @@ type session struct {
 const pullBytesBudget = 32 << 20
 
 // pullLimits fits the configured batch to the memory budget, the server's
-// and the stream's largest message, and a limit the durable sets on pull
-// requests. A pull above a durable's MaxRequestBatch or MaxRequestExpires is
-// refused with a 409 that retrying would only repeat.
-func pullLimits(want int, maxPayload int64, streamMaxMsg int32, info *jetstream.ConsumerInfo) (batch int, maxWait time.Duration) {
+// largest message, and a limit the durable sets on pull requests. A pull
+// above a durable's MaxRequestBatch or MaxRequestExpires is refused with a
+// 409 that retrying would only repeat. The stream's own MaxMsgSize is not
+// used: reading it takes stream info, which a partner account may not ask
+// for, and the server's max_payload bounds every message anyway.
+func pullLimits(want int, maxPayload int64, info *jetstream.ConsumerInfo) (batch int, maxWait time.Duration) {
 	largest := maxPayload
-	if streamMaxMsg > 0 && int64(streamMaxMsg) < largest {
-		largest = int64(streamMaxMsg)
-	}
 	batch = want
 	if largest > 0 {
 		batch = min(batch, max(1, int(pullBytesBudget/largest)))
@@ -156,6 +154,18 @@ func connect(cfg *NATSConfig, o openOpts) (*session, error) {
 		opts = append(opts, nats.UserCredentialBytes([]byte(cfg.Creds)))
 	case authUserPassword:
 		opts = append(opts, nats.UserInfo(cfg.Username, cfg.Password))
+	case authNKey:
+		opt, err := nkeyOption(cfg.NKeySeed)
+		if err != nil {
+			cancel()
+			return nil, sdk.Permanent(err)
+		}
+		opts = append(opts, opt)
+	}
+	if cfg.InboxPrefix != "" {
+		// Every reply subject (API requests and pulls) starts with it, for a
+		// user that may subscribe only to its own inboxes.
+		opts = append(opts, nats.CustomInboxPrefix(cfg.InboxPrefix))
 	}
 
 	// The list stays a list: joined with commas, a comma inside one URL
@@ -174,6 +184,29 @@ func connect(cfg *NATSConfig, o openOpts) (*session, error) {
 		return nil, classifyConnect(err)
 	}
 	return &session{nc: nc, done: sctx, cancel: cancel, async: async}, nil
+}
+
+// nkeyOption authenticates with a bare user NKey: the server sends a nonce,
+// the seed signs it. The seed is parsed for each signature and wiped after,
+// so the key pair is not kept in memory for the life of the connection.
+func nkeyOption(seed string) (nats.Option, error) {
+	kp, err := userKeyPair(seed)
+	if err != nil {
+		return nil, err
+	}
+	pub, err := kp.PublicKey()
+	kp.Wipe()
+	if err != nil {
+		return nil, errors.New("the stored NKey seed is not a NATS NKey seed")
+	}
+	return nats.Nkey(pub, func(nonce []byte) ([]byte, error) {
+		kp, err := userKeyPair(seed)
+		if err != nil {
+			return nil, err
+		}
+		defer kp.Wipe()
+		return kp.Sign(nonce)
+	}), nil
 }
 
 // classifyConnect sorts a connect error into permanent and retriable.
@@ -207,37 +240,40 @@ func classifyConnect(err error) error {
 
 // open connects and binds the durable. With o.create, a missing durable is
 // created; without, it is reported as errDurableMissing.
+//
+// The durable is bound by name through consumer info alone: no stream info
+// is asked for, since a partner account may be granted the consumer API of
+// its own durables and nothing on the stream.
 func open(ctx context.Context, cfg *NATSConfig, o openOpts) (*session, error) {
 	s, err := connect(cfg, o)
 	if err != nil {
 		return nil, err
 	}
-	js, err := jetstream.New(s.nc)
+	var js jetstream.JetStream
+	if cfg.APIPrefix != "" {
+		js, err = jetstream.NewWithAPIPrefix(s.nc, cfg.APIPrefix)
+	} else {
+		js, err = jetstream.New(s.nc)
+	}
 	if err != nil {
 		s.close()
-		return nil, sdk.Retriable(err)
+		return nil, sdk.Permanent(fmt.Errorf("api_prefix: %w", err))
 	}
 	actx, cancel := context.WithTimeout(ctx, o.apiWait)
 	defer cancel()
 
-	s.stream, err = js.Stream(actx, cfg.Stream)
+	s.cons, err = bindConsumer(actx, js, cfg, o.create)
 	if err != nil {
 		s.close()
-		if errors.Is(err, jetstream.ErrStreamNotFound) {
+		if errors.Is(err, errDurableMissing) {
+			return nil, err
+		}
+		if streamMissing(err) {
 			return nil, sdk.Permanent(fmt.Errorf("stream %q does not exist on the NATS server", cfg.Stream))
 		}
-		return nil, classifyJS(err, s.async, "look up stream "+cfg.Stream)
-	}
-	s.cons, err = bindConsumer(actx, s.stream, cfg, o.create)
-	if err != nil {
-		s.close()
 		return nil, classifyJS(err, s.async, "bind durable "+cfg.Durable)
 	}
-	var streamMax int32
-	if si := s.stream.CachedInfo(); si != nil {
-		streamMax = si.Config.MaxMsgSize
-	}
-	s.batch, s.maxWait = pullLimits(cfg.BatchSize, s.nc.MaxPayload(), streamMax, s.cons.CachedInfo())
+	s.batch, s.maxWait = pullLimits(cfg.BatchSize, s.nc.MaxPayload(), s.cons.CachedInfo())
 	if info := s.cons.CachedInfo(); info != nil && info.Config.MaxDeliver > 0 {
 		s.warnings = append(s.warnings, fmt.Sprintf("durable %q gives up on a message after %d deliveries; a connection loss or crash counts as one, so set MaxDeliver -1", cfg.Durable, info.Config.MaxDeliver))
 	}
@@ -248,17 +284,30 @@ func open(ctx context.Context, cfg *NATSConfig, o openOpts) (*session, error) {
 // first start will create.
 var errDurableMissing = errors.New("durable missing")
 
+// streamMissing reports the server's "stream not found", which consumer info
+// and consumer create give for a stream that does not exist.
+func streamMissing(err error) bool {
+	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		return true
+	}
+	var apiErr *jetstream.APIError
+	return errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamNotFound
+}
+
 // bindConsumer returns the durable, creating it when it is missing. An
 // existing durable is used as it is and never updated: it may belong to the
 // partner, and one that does not fit is a configuration error.
-func bindConsumer(ctx context.Context, stream jetstream.Stream, cfg *NATSConfig, create bool) (jetstream.Consumer, error) {
-	cons, err := stream.Consumer(ctx, cfg.Durable)
+func bindConsumer(ctx context.Context, js jetstream.JetStream, cfg *NATSConfig, create bool) (jetstream.Consumer, error) {
+	cons, err := js.Consumer(ctx, cfg.Stream, cfg.Durable)
 	if errors.Is(err, jetstream.ErrConsumerNotFound) {
 		if !create {
 			return nil, errDurableMissing
 		}
 		policy, start := cfg.consumerDeliver()
-		return stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
+		// With a filter, nats.go sends the create to
+		// CONSUMER.CREATE.<stream>.<durable>.<filter>, the one subject a
+		// partner account's create grant names.
+		return js.CreateConsumer(ctx, cfg.Stream, jetstream.ConsumerConfig{
 			Durable:       cfg.Durable,
 			FilterSubject: cfg.FilterSubject,
 			AckPolicy:     jetstream.AckExplicitPolicy,
@@ -310,6 +359,20 @@ func durableFits(info *jetstream.ConsumerInfo, cfg *NATSConfig) error {
 	return fmt.Errorf("durable %q filters on %q, not %q; VRSky does not change an existing durable", cfg.Durable, have, cfg.FilterSubject)
 }
 
+// permissionHint names the setting a denied subject most likely points at:
+// the JetStream API under its default name (api_prefix) or the default reply
+// inbox (inbox_prefix), the two a partner account renames.
+func permissionHint(v error) string {
+	msg := v.Error()
+	switch {
+	case strings.Contains(msg, `Publish to "$JS.API.`):
+		return " (an account that imports the JetStream API from another account needs api_prefix)"
+	case strings.Contains(msg, `Subscription to "_INBOX.`):
+		return " (a user limited to its own reply inboxes needs inbox_prefix)"
+	}
+	return ""
+}
+
 // classifyJS sorts a JetStream API or fetch error into permanent and
 // retriable. what names the step for the reason.
 func classifyJS(err error, async *asyncErrs, what string) error {
@@ -317,7 +380,7 @@ func classifyJS(err error, async *asyncErrs, what string) error {
 		return err
 	}
 	if v := async.takePermission(); v != nil {
-		return sdk.Permanent(fmt.Errorf("%s: the NATS user may not do this: %w", what, v))
+		return sdk.Permanent(fmt.Errorf("%s: the NATS user may not do this%s: %w", what, permissionHint(v), v))
 	}
 	// A pull the durable's limits refuse (a 409) is refused again on retry.
 	// pullLimits keeps within them; this catches a limit changed under us.
@@ -326,7 +389,7 @@ func classifyJS(err error, async *asyncErrs, what string) error {
 	}
 	switch {
 	case errors.Is(err, jetstream.ErrJetStreamNotEnabled), errors.Is(err, jetstream.ErrJetStreamNotEnabledForAccount):
-		return sdk.Permanent(fmt.Errorf("%s: JetStream is not enabled for this account on the NATS server", what))
+		return sdk.Permanent(fmt.Errorf("%s: JetStream is not enabled for this account on the NATS server (an account that imports the JetStream API from another account needs api_prefix)", what))
 	case errors.Is(err, jetstream.ErrConsumerNotFound), errors.Is(err, jetstream.ErrConsumerDeleted):
 		// Deleted under us: the next open recreates it or reports why not.
 		return sdk.Retriable(fmt.Errorf("%s: %w", what, err))
