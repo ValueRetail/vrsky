@@ -1,0 +1,70 @@
+{
+  "event_id": "4cd196df-f270-5c29-b5ed-506059330c21",
+  "event_type": "basket.return-recorded",
+  "schema_version": 1,
+  "tenant_id": "demo",
+  "source": {
+    "kind": "pos",
+    "provider": "bifrost-till",
+    "instance_id": "till-07",
+    "location_id": "store-01"
+  },
+  "occurred_at": "2026-09-23T09:15:05Z",
+  "correlation_id": "019a0000-0000-7000-8000-000000000002",
+  "causation_id": "019a0000-0000-7000-8000-000000000002",
+  "actor": {
+    "kind": "service",
+    "id": "basket-sales-01"
+  },
+  "data": {
+    "inbound_event_id": "019a0000-0000-7000-8000-000000000002",
+    "return_reference": {
+      "namespace": "bifrost-till.credit-note",
+      "value": "T07-000043"
+    },
+    "original_sale_reference": {
+      "namespace": "bifrost-till.receipt",
+      "value": "T07-000001"
+    },
+    "completed_at": "2026-09-23T09:15:00Z",
+    "credit_note_number": "T07-000043",
+    "journal_sequence": 43,
+    "journal_series": "T07",
+    "lines": [
+      {
+        "article_no": "4711",
+        "gtin": "7038010012341",
+        "name": "Melk 1 l",
+        "original_line_id": "line-1",
+        "quantity": "1",
+        "refund_inc_vat": "21.90",
+        "unit_price_ex_vat": "19.04",
+        "vat_rate": "0.15"
+      }
+    ],
+    "original_receipt": "T07-000001",
+    "refund": {
+      "at": "2026-09-23T09:15:00Z",
+      "authorization_code": "AUTH-0043",
+      "outcome": "approved"
+    },
+    "return_id": "019a0000-0000-7000-8000-00000000r001",
+    "store": {
+      "banner_id": "demo",
+      "legal_entity_id": "entity-01",
+      "store_id": "store-01"
+    },
+    "total_ex_vat": {
+      "amount": "19.04",
+      "currency": "NOK"
+    },
+    "total_inc_vat": {
+      "amount": "21.90",
+      "currency": "NOK"
+    },
+    "total_vat": {
+      "amount": "2.86",
+      "currency": "NOK"
+    }
+  }
+}

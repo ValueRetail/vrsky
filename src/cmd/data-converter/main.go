@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -38,7 +39,7 @@ type Config struct {
 type FieldMapping struct {
 	Source     string      `json:"source"`               // source field path (e.g. "name")
 	Target     string      `json:"target"`               // target field name (e.g. "full_name")
-	Type       string      `json:"type,omitempty"`       // "rename", "copy", "static", "remove", "template", "to_string", "to_number", "each"
+	Type       string      `json:"type,omitempty"`       // "rename", "copy", "static", "remove", "template", "to_string", "to_number", "each", "lookup"
 	Value      interface{} `json:"value,omitempty"`      // for static type
 	Expression string      `json:"expression,omitempty"` // for template type
 
@@ -49,6 +50,19 @@ type FieldMapping struct {
 	// salesInvoiceLines); see plans/issue-435-sitoo-bc-mapping.md.
 	Mappings     []FieldMapping `json:"mappings,omitempty"`
 	DropUnmapped bool           `json:"drop_unmapped,omitempty"`
+
+	// For "lookup": the text to write for each value of Source (formatted as
+	// to_string would). The chosen text is filled in like a "template"
+	// expression, so "bifrost-sale-{event_id}-r1" works. A value with no
+	// entry writes nothing.
+	Values map[string]string `json:"values,omitempty"`
+
+	// Required: a record whose Source is missing, null or "" (or, for
+	// "lookup", has no entry in Values) is not converted. The message fails,
+	// is retried and then dead-lettered with the field named, so it can be
+	// replayed once the source is fixed (#851). Inside "each" the path is
+	// relative to the element.
+	Required bool `json:"required,omitempty"`
 }
 
 // ConverterNodeConfig is what the UI stores in the node config
@@ -320,6 +334,7 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 	}
 
 	// Process ALL matching entries (not just the first) for branching pipelines
+	var matched []*ConverterEntry
 	for _, entry := range info.Entries {
 		if entry.PredIsConsumer && lastProcessedBy != "" {
 			continue
@@ -327,7 +342,29 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 		if !entry.PredIsConsumer && entry.PredecessorID != "" && lastProcessedBy != entry.PredecessorID {
 			continue
 		}
+		matched = append(matched, entry)
+	}
 
+	// A record without a required field fails the whole message before any
+	// entry publishes: otherwise a sibling branch would publish again on every
+	// retry and on a replay from the DLQ. A streamed payload (over the
+	// rehydrate cap) is checked record by record as it streams instead, so
+	// there a sibling branch may publish before the failure (documented in
+	// docs/connectors/filters-converters.md).
+	for _, entry := range matched {
+		if env.PayloadRef != "" || envelope.IsMedia(env.ContentType) || !hasRequired(entry.Config.Mappings) {
+			continue
+		}
+		data, perr := parsePayload(entry.Config, &env)
+		if perr != nil {
+			continue // processEntry reports it
+		}
+		if rerr := s.requiredPresent(connectionID, &env, entry, data); rerr != nil {
+			return rerr
+		}
+	}
+
+	for _, entry := range matched {
 		// An infrastructure failure in any entry NAKs the whole message.
 		// Redelivery reprocesses every entry (at-least-once; downstream sees
 		// fresh envelope IDs), matching the SDK's semantics for connectors.
@@ -338,10 +375,27 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 	return err
 }
 
+// requiredPresent checks every record of data against the node's "required"
+// mappings. A record that fails is not converted: the error goes back as the
+// message's failure, so it is retried and dead-lettered with the field named
+// in X-Vrsky-Last-Error (#851). Nothing is published for the message.
+func (s *ConverterService) requiredPresent(connectionID string, env *envelope.Envelope, entry *ConverterEntry, data interface{}) error {
+	err := recordsMissingRequired(data, entry.Config.Mappings)
+	if err == nil {
+		return nil
+	}
+	err = fmt.Errorf("converter node %s: %w", entry.NodeID, err)
+	s.logger.Warn("Record lacks a required field; not converted, the message will be retried and dead-lettered",
+		"connection_id", connectionID, "envelope_id", env.ID, "node_id", entry.NodeID, "error", err)
+	s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: err.Error(), Time: now()})
+	return err
+}
+
 // processEntry applies one converter node and republishes the result. It
-// returns an error only for infrastructure failures (offload, publish) — the
-// caller NAKs those; transform-logic failures emit a UI event and ack, exactly
-// as before.
+// returns an error for infrastructure failures (offload, publish) and for a
+// record without a required field — the caller NAKs those, so they are
+// retried and then dead-lettered; other transform-logic failures emit a UI
+// event and ack, exactly as before.
 func (s *ConverterService) processEntry(ctx context.Context, connectionID, subject string, origEnv *envelope.Envelope, entry *ConverterEntry) error {
 	// A media file cannot be parsed into records. It used to fail here with
 	// "Payload parse failed" and be acked — dropped. It now goes on, unchanged.
@@ -384,6 +438,9 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	var transformed interface{} = data
 	var fieldCount int
 	if hasMapping {
+		if err := s.requiredPresent(connectionID, origEnv, entry, data); err != nil {
+			return err
+		}
 		switch d := data.(type) {
 		case []interface{}:
 			result := make([]interface{}, 0, len(d))
@@ -562,12 +619,17 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 		case "template":
 			// Template: simple string interpolation using {field} syntax
 			if m.Expression != "" {
-				value := m.Expression
-				for k, v := range obj {
-					value = strings.ReplaceAll(value, "{"+k+"}", fmt.Sprintf("%v", v))
-				}
-				setNestedField(result, m.Target, value)
+				setNestedField(result, m.Target, interpolate(m.Expression, obj))
 				applied++
+			}
+		case "lookup":
+			// Lookup: pick a text by the source's value, then fill it in
+			// like a template. No entry for the value: nothing is written.
+			if val, ok := getNestedField(obj, m.Source); ok && val != nil {
+				if text, found := m.Values[toString(val)]; found {
+					setNestedField(result, m.Target, interpolate(text, obj))
+					applied++
+				}
 			}
 		case "to_string":
 			if val, ok := getNestedField(obj, m.Source); ok {
@@ -619,6 +681,109 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 	}
 
 	return result, applied
+}
+
+// interpolate replaces each {field} in expr with the record's top-level field,
+// as the "template" mapping does.
+func interpolate(expr string, obj map[string]interface{}) string {
+	for k, v := range obj {
+		expr = strings.ReplaceAll(expr, "{"+k+"}", fmt.Sprintf("%v", v))
+	}
+	return expr
+}
+
+// errRequiredMissing marks a record that lacks a field a "required" mapping
+// reads.
+var errRequiredMissing = errors.New("required field missing")
+
+// checkRequired returns an error naming the first "required" mapping whose
+// source the record lacks (missing, null or ""), walking into "each" the way
+// applyMappings does. A "lookup" also fails when Values has no entry for the
+// value. Nil when every required source is there.
+func checkRequired(obj map[string]interface{}, mappings []FieldMapping) error {
+	for _, m := range mappings {
+		if m.Type == "each" {
+			val, ok := getSourceField(obj, m.Source)
+			if !ok {
+				continue
+			}
+			arr, isArr := val.([]interface{})
+			if m.Source == "." {
+				arr, isArr = []interface{}{obj}, true
+			}
+			if !isArr {
+				continue
+			}
+			for i, el := range arr {
+				if eo, isObj := el.(map[string]interface{}); isObj {
+					if err := checkRequired(eo, m.Mappings); err != nil {
+						if m.Source == "." {
+							return err
+						}
+						return fmt.Errorf("%s[%d]: %w", m.Source, i, err)
+					}
+				}
+			}
+			continue
+		}
+		if !m.Required || !requiredApplies(m.Type) {
+			continue
+		}
+		// Read the source as the mapping itself reads it: only copy takes
+		// "." for the record.
+		val, ok := getNestedField(obj, m.Source)
+		if m.Type == "copy" {
+			val, ok = getSourceField(obj, m.Source)
+		}
+		if !ok || val == nil || val == "" {
+			return fmt.Errorf("%w: %q (mapped to %q) is missing", errRequiredMissing, m.Source, m.Target)
+		}
+		if m.Type == "lookup" {
+			if _, found := m.Values[toString(val)]; !found {
+				return fmt.Errorf("%w: %q is %q, which has no entry (mapped to %q)", errRequiredMissing, m.Source, toString(val), m.Target)
+			}
+		}
+	}
+	return nil
+}
+
+// requiredApplies reports whether "required" means anything for a mapping
+// type: the ones that read one source field. On static, template, remove or
+// each it is ignored (the editor can leave it behind on a type change).
+func requiredApplies(typ string) bool {
+	switch typ {
+	case "", "rename", "copy", "to_string", "to_number", "lookup":
+		return true
+	}
+	return false
+}
+
+// recordsMissingRequired runs checkRequired on every object record of data (a
+// record, or an array of them) and names the first that fails.
+func recordsMissingRequired(data interface{}, mappings []FieldMapping) error {
+	switch d := data.(type) {
+	case []interface{}:
+		for i, item := range d {
+			if obj, ok := item.(map[string]interface{}); ok {
+				if err := checkRequired(obj, mappings); err != nil {
+					return fmt.Errorf("record %d: %w", i+1, err)
+				}
+			}
+		}
+	case map[string]interface{}:
+		return checkRequired(d, mappings)
+	}
+	return nil
+}
+
+// hasRequired reports whether any mapping, nested ones included, is required.
+func hasRequired(mappings []FieldMapping) bool {
+	for _, m := range mappings {
+		if (m.Required && requiredApplies(m.Type)) || hasRequired(m.Mappings) {
+			return true
+		}
+	}
+	return false
 }
 
 // getSourceField is getNestedField for the mappings that may name the record
@@ -1111,82 +1276,7 @@ func startHTTPServer(port string, service *ConverterService, logger *slog.Logger
 	mux.HandleFunc("/readyz", readiness)
 
 	// Preview endpoint: test transformations without deploying
-	mux.HandleFunc("/preview/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		var req struct {
-			Mappings     []FieldMapping `json:"mappings"`
-			DropUnmapped bool           `json:"drop_unmapped"`
-			SampleData   interface{}    `json:"sample_data"` // can be JSON object/array or string containing JSON
-			OutputFormat string         `json:"output_format"`
-			CsvDelimiter string         `json:"csv_delimiter"`
-			CsvHeaders   *bool          `json:"csv_headers"`
-			TextTemplate string         `json:"text_template"`
-			XmlRootTag   string         `json:"xml_root_tag"`
-			XmlRowTag    string         `json:"xml_row_tag"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Parse sample_data — it might be a string containing JSON
-		var data interface{} = req.SampleData
-		if s, ok := req.SampleData.(string); ok {
-			if err := json.Unmarshal([]byte(s), &data); err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				resp, _ := json.Marshal(map[string]interface{}{"ok": false, "error": "Sample data is not valid JSON: " + err.Error()})
-				_, _ = w.Write(resp)
-				return
-			}
-		}
-
-		cfg := &ConverterNodeConfig{
-			Mappings: req.Mappings, DropUnmapped: req.DropUnmapped,
-			OutputFormat: req.OutputFormat, CsvDelimiter: req.CsvDelimiter,
-			CsvHeaders: req.CsvHeaders, TextTemplate: req.TextTemplate,
-			XmlRootTag: req.XmlRootTag, XmlRowTag: req.XmlRowTag,
-		}
-
-		// Step 1: Apply field mappings
-		var transformed interface{} = data
-		if len(cfg.Mappings) > 0 {
-			switch d := data.(type) {
-			case []interface{}:
-				arr := make([]interface{}, 0, len(d))
-				for _, item := range d {
-					if obj, ok := item.(map[string]interface{}); ok {
-						mapped, _ := applyMappings(obj, cfg)
-						arr = append(arr, mapped)
-					} else {
-						arr = append(arr, item)
-					}
-				}
-				transformed = arr
-			case map[string]interface{}:
-				mapped, _ := applyMappings(d, cfg)
-				transformed = mapped
-			}
-		}
-
-		// Step 2: Apply format conversion
-		w.Header().Set("Content-Type", "application/json")
-		if cfg.OutputFormat != "" {
-			rows := toRows(transformed)
-			formatted, _, _ := convertFormat(rows, cfg)
-			resp, _ := json.Marshal(map[string]interface{}{"ok": true, "result_text": formatted})
-			_, _ = w.Write(resp)
-		} else {
-			resp, _ := json.MarshalIndent(map[string]interface{}{"ok": true, "result": transformed}, "", "  ")
-			_, _ = w.Write(resp)
-		}
-	})
+	mux.HandleFunc("/preview/", handlePreview)
 
 	mux.HandleFunc("/events/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1296,4 +1386,92 @@ func (s *ConverterService) passThrough(ctx context.Context, connectionID string,
 	}
 	s.emitEvent(connectionID, ConvertEvent{Type: "info", Message: "Passed through unchanged: " + name, Time: now()})
 	return nil
+}
+
+// handlePreview is the editor's Test Transform: it runs the mappings and the
+// output format on sample data and returns the result.
+func handlePreview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	var req struct {
+		Mappings     []FieldMapping `json:"mappings"`
+		DropUnmapped bool           `json:"drop_unmapped"`
+		SampleData   interface{}    `json:"sample_data"` // can be JSON object/array or string containing JSON
+		OutputFormat string         `json:"output_format"`
+		CsvDelimiter string         `json:"csv_delimiter"`
+		CsvHeaders   *bool          `json:"csv_headers"`
+		TextTemplate string         `json:"text_template"`
+		XmlRootTag   string         `json:"xml_root_tag"`
+		XmlRowTag    string         `json:"xml_row_tag"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Parse sample_data — it might be a string containing JSON
+	var data interface{} = req.SampleData
+	if s, ok := req.SampleData.(string); ok {
+		if err := json.Unmarshal([]byte(s), &data); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			resp, _ := json.Marshal(map[string]interface{}{"ok": false, "error": "Sample data is not valid JSON: " + err.Error()})
+			_, _ = w.Write(resp)
+			return
+		}
+	}
+
+	cfg := &ConverterNodeConfig{
+		Mappings: req.Mappings, DropUnmapped: req.DropUnmapped,
+		OutputFormat: req.OutputFormat, CsvDelimiter: req.CsvDelimiter,
+		CsvHeaders: req.CsvHeaders, TextTemplate: req.TextTemplate,
+		XmlRootTag: req.XmlRootTag, XmlRowTag: req.XmlRowTag,
+	}
+
+	// The live converter dead-letters a record without a required field;
+	// the preview says so instead of showing a result.
+	if rerr := recordsMissingRequired(data, cfg.Mappings); rerr != nil {
+		w.Header().Set("Content-Type", "application/json")
+		resp, _ := json.Marshal(map[string]interface{}{"ok": false, "error": "Not converted, the message would be dead-lettered: " + rerr.Error()})
+		_, _ = w.Write(resp)
+		return
+	}
+
+	// Step 1: Apply field mappings
+	var transformed interface{} = data
+	if len(cfg.Mappings) > 0 {
+		switch d := data.(type) {
+		case []interface{}:
+			arr := make([]interface{}, 0, len(d))
+			for _, item := range d {
+				if obj, ok := item.(map[string]interface{}); ok {
+					mapped, _ := applyMappings(obj, cfg)
+					arr = append(arr, mapped)
+				} else {
+					arr = append(arr, item)
+				}
+			}
+			transformed = arr
+		case map[string]interface{}:
+			mapped, _ := applyMappings(d, cfg)
+			transformed = mapped
+		}
+	}
+
+	// Step 2: Apply format conversion
+	w.Header().Set("Content-Type", "application/json")
+	if cfg.OutputFormat != "" {
+		rows := toRows(transformed)
+		formatted, _, _ := convertFormat(rows, cfg)
+		resp, _ := json.Marshal(map[string]interface{}{"ok": true, "result_text": formatted})
+		_, _ = w.Write(resp)
+	} else {
+		resp, _ := json.MarshalIndent(map[string]interface{}{"ok": true, "result": transformed}, "", "  ")
+		_, _ = w.Write(resp)
+	}
 }

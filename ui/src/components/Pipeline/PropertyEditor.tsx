@@ -1205,6 +1205,7 @@ const FILTER_OPERATORS: Array<{ value: string; label: string }> = [
   { value: 'not_contains', label: 'Not Contains' },
   { value: 'starts_with', label: 'Starts With' },
   { value: 'ends_with', label: 'Ends With' },
+  { value: 'in', label: 'Is One Of (comma-separated)' },
   { value: 'gt', label: 'Greater Than' },
   { value: 'gte', label: 'Greater or Equal' },
   { value: 'lt', label: 'Less Than' },

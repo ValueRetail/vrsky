@@ -22,7 +22,7 @@ func readJSONFile(t *testing.T, parts ...string) []byte {
 	return raw
 }
 
-func TestBifrostSalesFilter_OnlyATillSalePasses(t *testing.T) {
+func TestBifrostSalesFilter_OnlyATillSaleOrReturnPasses(t *testing.T) {
 	var cfg FilterNodeConfig
 	if err := json.Unmarshal(readJSONFile(t, "..", "..", "..", "ui", "src", "onboarding", "testdata", "bifrost-sales-filter.json"), &cfg); err != nil {
 		t.Fatalf("filter config: %v", err)
@@ -34,6 +34,9 @@ func TestBifrostSalesFilter_OnlyATillSalePasses(t *testing.T) {
 		}
 		return m
 	}
+
+	webReturn := fixture("basket-return-recorded.v1.json")
+	webReturn["source"] = map[string]interface{}{"kind": "ecommerce", "instance_id": "web-no", "location_id": "web"}
 
 	webSale := fixture("basket-sale-recorded.v1.json")
 	webSale["source"] = map[string]interface{}{"kind": "ecommerce", "instance_id": "web-no", "location_id": "web"}
@@ -49,6 +52,10 @@ func TestBifrostSalesFilter_OnlyATillSalePasses(t *testing.T) {
 		want bool
 	}{
 		{"sale-recorded from a till", fixture("basket-sale-recorded.v1.json"), true},
+		{"return-recorded from a till", fixture("basket-return-recorded.v1.json"), true},
+		{"return-recorded from the web shop", webReturn, false},
+		{"another -recorded type", map[string]interface{}{"event_id": "e1", "event_type": "basket.payment-recorded", "source": map[string]interface{}{"kind": "pos"}}, false},
+		{"a type that only contains a listed one", map[string]interface{}{"event_id": "e1", "event_type": "basket.sale-recorded.v2", "source": map[string]interface{}{"kind": "pos"}}, false},
 		{"sale-recorded from the web shop", webSale, false},
 		{"sale-recorded without an event_id", noID, false},
 		{"sale-recorded with an empty event_id", emptyID, false},
@@ -60,5 +67,30 @@ func TestBifrostSalesFilter_OnlyATillSalePasses(t *testing.T) {
 		if got := evaluateRules(c.obj, cfg.Rules, cfg.Logic); got != c.want {
 			t.Errorf("%s: passes = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// "in" passes a field that equals one entry of a comma-separated list, exactly.
+func TestEvaluateRule_In(t *testing.T) {
+	rule := FilterRule{Field: "t", Operator: "in", Value: "a, b ,c"}
+	cases := []struct {
+		obj  map[string]interface{}
+		want bool
+	}{
+		{map[string]interface{}{"t": "a"}, true},
+		{map[string]interface{}{"t": "b"}, true},
+		{map[string]interface{}{"t": "c"}, true},
+		{map[string]interface{}{"t": "ab"}, false},
+		{map[string]interface{}{"t": ""}, false},
+		{map[string]interface{}{"t": nil}, false},
+		{map[string]interface{}{}, false},
+	}
+	for _, c := range cases {
+		if got := evaluateRule(c.obj, rule); got != c.want {
+			t.Errorf("%v in %q = %v, want %v", c.obj, rule.Value, got, c.want)
+		}
+	}
+	if evaluateRule(map[string]interface{}{"t": ""}, FilterRule{Field: "t", Operator: "in", Value: "a,,b"}) {
+		t.Error("an empty entry in the list let an empty value through")
 	}
 }

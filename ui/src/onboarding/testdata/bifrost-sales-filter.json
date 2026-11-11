@@ -3,8 +3,8 @@
   "rules": [
     {
       "field": "event_type",
-      "operator": "equals",
-      "value": "basket.sale-recorded"
+      "operator": "in",
+      "value": "basket.sale-recorded,basket.return-recorded"
     },
     {
       "field": "source.kind",

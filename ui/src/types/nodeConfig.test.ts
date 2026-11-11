@@ -111,7 +111,7 @@ describe('converterMappingWarnings: mappings the converter skips or mis-writes',
 describe('converter mapping types', () => {
   it('lists every type the converter runs, each included', () => {
     expect([...CONVERTER_MAPPING_TYPES].sort()).toEqual(
-      ['copy', 'each', 'remove', 'rename', 'static', 'template', 'to_number', 'to_string'],
+      ['copy', 'each', 'lookup', 'remove', 'rename', 'static', 'template', 'to_number', 'to_string'],
     )
   })
 
