@@ -1,0 +1,37 @@
+{
+  "event_id": "019a0000-0000-7000-8000-000000000105",
+  "event_type": "basket.completed",
+  "schema_version": 1,
+  "tenant_id": "demo",
+  "source": {
+    "kind": "pos",
+    "provider": "bifrost-till",
+    "instance_id": "till-07",
+    "location_id": "store-01"
+  },
+  "basket_id": "basket-01",
+  "basket_version": 10,
+  "occurred_at": "2026-09-22T12:06:30Z",
+  "correlation_id": "checkout-01",
+  "causation_id": "cmd-6d3f2e1c8b4069d7ae2c3f5071920a4368cd7ef904a23b5c6d7e8f9012345678",
+  "actor": {
+    "kind": "client",
+    "id": "bifrost-till-07"
+  },
+  "data": {
+    "order_reference": {
+      "namespace": "bifrost-till.sale",
+      "value": "sale-2026-09-22-0007"
+    },
+    "payment_references": [
+      {
+        "namespace": "bifrost-till.payment",
+        "value": "payment-0007-1"
+      }
+    ],
+    "paid": {
+      "snapshot_hash": "60e432438ea4f0cacc09f35943c19220224c3741ebbc8f76bf8ea72fc32d491d",
+      "amount": {"amount": "1039.39", "currency": "NOK"}
+    }
+  }
+}

@@ -13,6 +13,8 @@ import { connectorKeysFor, CONVERTER_MAPPING_TYPES } from '../types/nodeConfig'
 import { TEMPLATES, type PipelineTemplate } from './templates'
 import sitooToBusinessCentral from './testdata/sitoo-to-business-central.json'
 import businessCentralToSitoo from './testdata/business-central-to-sitoo.json'
+import bifrostSalesConverter from './testdata/bifrost-sales-to-retailhero.json'
+import bifrostSalesFilter from './testdata/bifrost-sales-filter.json'
 
 // Walks a dot-path without creating anything, mirroring the wizard's readObj.
 function at(root: Record<string, unknown>, path: string): unknown {
@@ -67,8 +69,9 @@ describe('every template is a deployable pipeline', () => {
     expect(t.edges.length).toBeGreaterThanOrEqual(1)
     for (const n of t.nodes) {
       // Sources and destinations name their connector; a converter is the
-      // data-converter by its node type and keeps its settings flat.
-      if (n.type === 'converter') continue
+      // data-converter (or data-filter) by its node type and keeps its
+      // settings flat.
+      if (n.type === 'converter' || n.type === 'filter') continue
       expect(typeof n.config.type, `node ${n.id} has no connector type`).toBe('string')
     }
   })
@@ -307,5 +310,68 @@ describe('the retail templates', () => {
     // republishes a whole page on redelivery: without this BC gets duplicates.
     const dst = TEMPLATES.find((t) => t.id === 'sitoo-to-business-central')!.nodes.find((n) => n.id === 'dst')!
     expect((dst.config.business_central as Record<string, unknown>).dedupe_fields).toEqual(['externalDocumentNumber'])
+  })
+})
+
+describe('Bifrost sales → Retailhero (#817)', () => {
+  const t = () => TEMPLATES.find((t) => t.id === 'bifrost-sales-to-retailhero')!
+  const node = (id: string) => t().nodes.find((n) => n.id === id)!
+
+  it('deploys the converter and filter the Go tests check', () => {
+    // src/cmd/data-converter/bifrost_sales_test.go and
+    // src/cmd/data-filter/bifrost_sales_test.go read these files.
+    expect(node('conv').config).toEqual(bifrostSalesConverter)
+    expect(node('flt').config).toEqual(bifrostSalesFilter)
+  })
+
+  it('runs source, filter, converter, destination in that order', () => {
+    expect(t().nodes.map((n) => `${n.id}:${n.type}`)).toEqual(['src:consumer', 'flt:filter', 'conv:converter', 'dst:producer'])
+    expect(t().edges).toEqual([
+      { source: 'src', target: 'flt' },
+      { source: 'flt', target: 'conv' },
+      { source: 'conv', target: 'dst' },
+    ])
+  })
+
+  it('reads the NATS source and posts JSON over HTTP', () => {
+    expect(node('src').config.type).toBe('nats')
+    expect(node('dst').config).toMatchObject({ type: 'http', http: { method: 'POST', headers: { 'Content-Type': 'application/json' } } })
+  })
+
+  it('forwards only till sales, because Retailhero refuses a batch on any other event type', () => {
+    const rules = (node('flt').config.rules as { field: string; operator: string; value: string }[])
+    expect(rules).toContainEqual({ field: 'event_type', operator: 'equals', value: 'basket.sale-recorded' })
+    expect(rules).toContainEqual({ field: 'source.kind', operator: 'equals', value: 'pos' })
+    expect(rules).toContainEqual({ field: 'event_id', operator: 'is_not_empty', value: '' })
+    expect(node('flt').config.logic).toBe('and')
+  })
+
+  it('reads the whole stream on first start, which the operation ID makes safe', () => {
+    expect((node('src').config.nats as Record<string, unknown>).deliver_policy).toBe('all')
+  })
+
+  it('derives the operation ID from the Basket event ID and revision 1, with no random part', () => {
+    const entries = (node('conv').config.mappings as Mapping[]).find((m) => m.type === 'each')!
+    const op = (entries.mappings as { target?: string; expression?: string }[]).find((m) => m.target === 'operationId')!
+    expect(op.expression).toBe('bifrost-sale-{event_id}-r1')
+  })
+
+  it('asks for the journal ID on the static journalId mapping, never ships one', () => {
+    const f = t().fields.find((f) => f.label === 'Retailhero journal ID')!
+    expect(f.nodeId).toBe('conv')
+    const m = at(node('conv').config, f.objectPath) as { target?: string; value?: unknown }
+    expect(m.target).toBe('journalId')
+    expect(m.value).toBe('')
+  })
+
+  it('ships no Authorization header, because a bearer in a header would be stored in plain text', () => {
+    // The intake credential is a tenant-workload bearer token; the HTTP
+    // producer has no stored-secret bearer option (docs/connectors/bifrost-sales-to-retailhero.md).
+    const headers = (node('dst').config.http as { headers: Record<string, string> }).headers
+    expect(Object.keys(headers).map((k) => k.toLowerCase())).not.toContain('authorization')
+  })
+
+  it('says it is beta', () => {
+    expect(t().summary).toMatch(/^Beta:/)
   })
 })
