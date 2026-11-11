@@ -77,6 +77,17 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     required: ['account_id', 'site_id', 'api_id', 'api_password'],
     numeric: ['account_id', 'site_id'],
   },
+  // nats-consumer (NATSConfig in src/cmd/nats-consumer/config.go). password is
+  // replaced by password_secret_id and creds by creds_secret_id at deploy.
+  'consumer/nats': {
+    block: 'nats',
+    keys: [
+      'servers', 'auth_type', 'username', 'password', 'creds', 'ca_cert', 'stream', 'durable',
+      'filter_subject', 'batch_size', 'deliver_policy', 'opt_start_time',
+    ],
+    required: ['servers', 'stream', 'durable'],
+    numeric: ['batch_size'],
+  },
   // bifrost-catalogue-producer (CatalogueConfig in src/cmd/bifrost-catalogue-producer/service.go).
   // token is replaced by token_secret_id at deploy.
   'producer/bifrost_catalogue': {
@@ -105,17 +116,6 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     ],
     required: ['aad_tenant_id', 'company_id', 'client_id', 'client_secret'],
     numeric: [],
-  },
-  // nats-consumer (src/cmd/nats-consumer/config.go): an external JetStream.
-  // password and creds are replaced by *_secret_id at deploy; servers is a list.
-  'consumer/nats': {
-    block: 'nats',
-    keys: [
-      'servers', 'auth_type', 'username', 'password', 'creds', 'ca_cert', 'stream', 'durable',
-      'filter_subject', 'batch_size', 'deliver_policy', 'opt_start_time',
-    ],
-    required: ['servers', 'stream', 'durable'],
-    numeric: ['batch_size'],
   },
   // data-filter (FilterNodeConfig in src/cmd/data-filter/main.go)
   filter: {

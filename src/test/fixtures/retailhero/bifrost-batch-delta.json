@@ -1,0 +1,32 @@
+{
+  "kind": "delta",
+  "effectiveFrom": "2026-12-15T23:00:00Z",
+  "rows": [
+    {
+      "catalogueItem": {
+        "article_no": "B-200",
+        "gtin": "7000000000039",
+        "name": "Vare B",
+        "price_incl_vat": "25.00",
+        "vat_rate": "0.15",
+        "unit": "pcs",
+        "category": "Mat",
+        "min_age": null,
+        "alcohol": false,
+        "effective_from": "2026-12-15T23:00:00Z"
+      },
+      "importItem": {
+        "article_no": "B-200",
+        "gtin": "7000000000039",
+        "name": "Vare B",
+        "price_incl_vat": "25.00",
+        "vat_code": "F",
+        "unit": "pcs",
+        "category": "Mat",
+        "alcohol": false,
+        "effective_from": "2026-12-15T23:00:00Z"
+      },
+      "sourceItemId": "S-B2"
+    }
+  ]
+}

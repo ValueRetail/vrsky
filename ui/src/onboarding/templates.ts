@@ -571,6 +571,121 @@ export const TEMPLATES: PipelineTemplate[] = [
       },
     ],
   },
+  // --- Retail: Retailhero (master) → Bifrost tills (#816) ------------------
+  {
+    id: 'retailhero-to-bifrost',
+    name: 'Articles and prices → tills (Retailhero → Bifrost)',
+    summary:
+      'Beta: cannot run end to end yet (needs Bifrost price_incl_vat and an agreed Retailhero message). Reads Retailhero price and article batches from its NATS partner account and sends them to the Bifrost catalogue-api as a delta. One master per store: switch the Business Central price path off for these stores.',
+    icon: '🏷️',
+    sourceLabel: 'Retailhero (NATS partner account)',
+    destLabel: 'Bifrost (tills)',
+    nodes: [
+      {
+        id: 'src',
+        type: 'consumer',
+        // deliver_policy "new": the default "all" would push the whole stream
+        // through on the first start. The first catalogue load is a full
+        // package Retailhero publishes on purpose.
+        config: {
+          type: 'nats',
+          nats: {
+            servers: [''],
+            auth_type: 'user_password',
+            username: '',
+            stream: '',
+            durable: '',
+            filter_subject: '',
+            deliver_policy: 'new',
+          },
+        },
+      },
+      {
+        id: 'conv',
+        type: 'converter',
+        // One message in is one Bifrost import batch from Retailhero's profile
+        // (rows[].importItem); out comes {"items": [...]} with each importItem
+        // renamed field for field, so prices stay the strings Retailhero
+        // wrote (no to_number: that goes through a float). Mapping table:
+        // docs/connectors/retailhero-to-bifrost.md. Tested against Retailhero's
+        // fixtures in src/cmd/data-converter/retailhero_template_test.go.
+        config: {
+          drop_unmapped: true,
+          mappings: [
+            {
+              type: 'each',
+              source: 'rows',
+              target: 'items',
+              drop_unmapped: true,
+              mappings: [
+                { type: 'rename', source: 'importItem.article_no', target: 'article_no' },
+                { type: 'rename', source: 'importItem.gtin', target: 'gtin' },
+                { type: 'rename', source: 'importItem.name', target: 'name' },
+                { type: 'rename', source: 'importItem.price_incl_vat', target: 'price_incl_vat' },
+                { type: 'rename', source: 'importItem.vat_code', target: 'vat_code' },
+                { type: 'rename', source: 'importItem.unit', target: 'unit' },
+                { type: 'rename', source: 'importItem.category', target: 'category' },
+                { type: 'rename', source: 'importItem.min_age', target: 'min_age' },
+                { type: 'rename', source: 'importItem.alcohol', target: 'alcohol' },
+                { type: 'rename', source: 'importItem.effective_from', target: 'effective_from' },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'dst',
+        type: 'producer',
+        // delta: upsert. "full" needs the whole catalogue in one message
+        // (#841), and a Retailhero batch is not that.
+        config: { type: 'bifrost_catalogue', bifrost_catalogue: { base_url: '', mode: 'delta' } },
+      },
+    ],
+    edges: [
+      { source: 'src', target: 'conv' },
+      { source: 'conv', target: 'dst' },
+    ],
+    fields: [
+      {
+        nodeId: 'src', objectPath: 'nats.servers', key: '0', label: 'Retailhero NATS server',
+        help: 'The partner-account server Retailhero gives you, as tls://host:4222.',
+        placeholder: 'tls://nats.retailhero.example:4222',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'username', label: 'NATS user',
+        help: 'The user of your per-tenant partner account.',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'password', label: 'NATS password',
+        help: 'Stored encrypted. An account that signs in with a .creds file is set up in the pipeline builder instead, which has a box for the whole file.',
+        secret: true, placeholder: 'password',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'stream', label: 'JetStream stream',
+        help: 'The stream the partner account exports. Retailhero tells you the name.', placeholder: 'RH_EVENTS',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'durable', label: 'Durable consumer name',
+        help: 'Keep it unique per pipeline: two pipelines on one durable split the messages between them.',
+        placeholder: 'vrsky-bifrost-prices',
+      },
+      {
+        nodeId: 'src', objectPath: 'nats', key: 'filter_subject', label: 'Subject filter',
+        help: 'Only the subjects that carry the Bifrost article and price batches, e.g. rh.evt.v1.<your tenant>.… Retailhero lists them.',
+        placeholder: 'rh.evt.v1.acme.>',
+      },
+      {
+        nodeId: 'dst', objectPath: 'bifrost_catalogue', key: 'base_url', label: 'Bifrost catalogue-api address',
+        help: 'The https origin of the catalogue-api (Bifrost itself has no TLS, so it sits behind a proxy).',
+        placeholder: 'https://catalogue.example.com',
+      },
+      {
+        nodeId: 'dst', objectPath: 'bifrost_catalogue', key: 'token', label: 'Bifrost API key',
+        help: 'Stored encrypted. The tenant key needs the permission catalogue.import.',
+        secret: true, placeholder: 'API key',
+      },
+    ],
+  },
 ]
 
 export function templateById(id: string): PipelineTemplate | undefined {
