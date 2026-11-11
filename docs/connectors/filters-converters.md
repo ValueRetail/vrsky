@@ -133,7 +133,10 @@ Added for the Bifrost sales template (#851, #852).
   record that really lacks the field has to come again from the source.
   Inside an `each` the path is relative to the element, and the error names
   the element (`lines[1]: …`). In a pipeline with several branches the
-  message fails before any branch publishes. The **Test Transform** preview
+  message fails before any branch publishes, except for a payload over the
+  rehydrate cap (128 MB), which is checked record by record as it streams:
+  there a sibling branch may already have published, and does again on each
+  retry. The **Test Transform** preview
   reports the missing field instead of a result. Use it for a field the destination
   refuses a whole batch without, so the message waits in the DLQ instead of
   being refused there.

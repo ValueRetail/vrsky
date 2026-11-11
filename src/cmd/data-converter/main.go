@@ -348,7 +348,9 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 	// A record without a required field fails the whole message before any
 	// entry publishes: otherwise a sibling branch would publish again on every
 	// retry and on a replay from the DLQ. A streamed payload (over the
-	// rehydrate cap) is checked record by record as it streams instead.
+	// rehydrate cap) is checked record by record as it streams instead, so
+	// there a sibling branch may publish before the failure (documented in
+	// docs/connectors/filters-converters.md).
 	for _, entry := range matched {
 		if env.PayloadRef != "" || envelope.IsMedia(env.ContentType) || !hasRequired(entry.Config.Mappings) {
 			continue
