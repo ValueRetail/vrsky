@@ -46,7 +46,12 @@ export default function NatsConfigEditor({
   const credsSaved = Boolean(nats.creds_secret_id) && !nats.creds
   // Unset means VRSky may create the durable, as before the switch existed.
   const createDurable = nats.create_durable !== false
-  const numberOrUndefined = (v: string) => (v.trim() === '' ? undefined : Number(v))
+  // Whole numbers only: the connector reads these as integers, and a
+  // fraction would fail the whole block.
+  const numberOrUndefined = (v: string) => {
+    const n = Number.parseInt(v, 10)
+    return Number.isNaN(n) ? undefined : n
+  }
 
   return (
     <div className="space-y-3">
@@ -91,28 +96,33 @@ export default function NatsConfigEditor({
         Create the durable on the first start if it is missing
       </label>
 
-      <StyledSelect
-        label="First start reads"
-        value={deliverPolicy}
-        onChange={(v) => update({ deliver_policy: v, opt_start_time: v === 'by_start_time' ? nats.opt_start_time : undefined })}
-        options={[
-          { value: 'all', label: 'The whole stream' },
-          { value: 'new', label: 'Only new messages' },
-          { value: 'by_start_time', label: 'From a point in time' },
-        ]}
-      />
-      {deliverPolicy === 'by_start_time' && (
-        <StyledInput
-          label="Start time (RFC 3339)"
-          placeholder="2026-11-01T00:00:00Z"
-          value={(nats.opt_start_time as string) || ''}
-          onChange={(v) => update({ opt_start_time: v })}
-        />
+      {/* deliver_policy only shapes a durable VRSky creates. */}
+      {createDurable && (
+        <>
+          <StyledSelect
+            label="First start reads"
+            value={deliverPolicy}
+            onChange={(v) => update({ deliver_policy: v, opt_start_time: v === 'by_start_time' ? nats.opt_start_time : undefined })}
+            options={[
+              { value: 'all', label: 'The whole stream' },
+              { value: 'new', label: 'Only new messages' },
+              { value: 'by_start_time', label: 'From a point in time' },
+            ]}
+          />
+          {deliverPolicy === 'by_start_time' && (
+            <StyledInput
+              label="Start time (RFC 3339)"
+              placeholder="2026-11-01T00:00:00Z"
+              value={(nats.opt_start_time as string) || ''}
+              onChange={(v) => update({ opt_start_time: v })}
+            />
+          )}
+          <div style={{ ...hintStyle, marginTop: '-8px', marginBottom: '12px' }}>
+            Applies only when VRSky creates the durable. &quot;The whole stream&quot; sends every message the stream
+            holds into the pipeline on the first start.
+          </div>
+        </>
       )}
-      <div style={{ ...hintStyle, marginTop: '-8px', marginBottom: '12px' }}>
-        Applies only when VRSky creates the durable. &quot;The whole stream&quot; sends every message the stream
-        holds into the pipeline on the first start.
-      </div>
 
       <StyledSelect
         label="Authentication"
@@ -197,6 +207,7 @@ export default function NatsConfigEditor({
         type="number"
         min={1}
         max={256}
+        step={1}
         placeholder="10"
         value={nats.batch_size === undefined ? '' : String(nats.batch_size)}
         onChange={(v) => update({ batch_size: numberOrUndefined(v) })}
@@ -206,6 +217,7 @@ export default function NatsConfigEditor({
         type="number"
         min={1}
         max={30}
+        step={1}
         placeholder="5"
         value={nats.max_wait_seconds === undefined ? '' : String(nats.max_wait_seconds)}
         onChange={(v) => update({ max_wait_seconds: numberOrUndefined(v) })}

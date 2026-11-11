@@ -108,8 +108,17 @@ describe('NatsConfigEditor', () => {
     fireEvent.change(screen.getByLabelText(/batch size/i), { target: { value: '50' } })
     fireEvent.change(screen.getByLabelText(/pull wait/i), { target: { value: '10' } })
     expect(last()).toMatchObject({ batch_size: 50, max_wait_seconds: 10 })
+    fireEvent.change(screen.getByLabelText(/pull wait/i), { target: { value: '1.5' } })
+    expect(last().max_wait_seconds).toBe(1)
     fireEvent.change(screen.getByLabelText(/pull wait/i), { target: { value: '' } })
     expect(last().max_wait_seconds).toBeUndefined()
+  })
+
+  it('hides the deliver policy when VRSky may not create the durable', () => {
+    renderEditor({ create_durable: false })
+    expect(screen.queryByLabelText(/first start reads/i)).toBeNull()
+    fireEvent.click(screen.getByLabelText(/create the durable/i))
+    expect(screen.getByLabelText(/first start reads/i)).toBeTruthy()
   })
 
   it('stores a CA certificate', () => {

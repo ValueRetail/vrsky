@@ -59,6 +59,13 @@ type partnerServer struct {
 // startPartnerServer renders the two-account configuration and starts it.
 func startPartnerServer(t *testing.T) *partnerServer {
 	t.Helper()
+	return startPartnerServerGrants(t, true)
+}
+
+// startPartnerServerGrants is startPartnerServer; withNext false leaves the
+// pull (CONSUMER.MSG.NEXT) out of the partner user's publish permissions.
+func startPartnerServerGrants(t *testing.T, withNext bool) *partnerServer {
+	t.Helper()
 	dir := t.TempDir()
 	caPEM, certFile, keyFile, pool := testPKI(t, dir)
 
@@ -69,6 +76,33 @@ func startPartnerServer(t *testing.T) *partnerServer {
 	upk, _ := ukp.PublicKey()
 	seed, _ := ukp.Seed()
 
+	conf := partnerConf("host: 127.0.0.1\nport: -1", certFile, keyFile, filepath.Join(dir, "js"), upk, withNext)
+	path := filepath.Join(dir, "nats.conf")
+	if err := os.WriteFile(path, []byte(conf), 0o600); err != nil {
+		t.Fatalf("write server config: %v", err)
+	}
+	opts, err := natsserver.ProcessConfigFile(path)
+	if err != nil {
+		t.Fatalf("server config: %v", err)
+	}
+	opts.NoLog, opts.NoSigs = true, true
+	srv, err := natsserver.NewServer(opts)
+	if err != nil {
+		t.Fatalf("partner server: %v", err)
+	}
+	go srv.Start()
+	if !srv.ReadyForConnections(5 * time.Second) {
+		t.Fatal("partner server did not come up")
+	}
+	t.Cleanup(srv.Shutdown)
+	return &partnerServer{srv: srv, caPEM: caPEM, seed: string(seed), rootCA: pool}
+}
+
+// partnerConf renders the server configuration with Retailhero's grants for
+// one tenant (nats-partner.py); listen holds the address lines. withNext
+// false leaves the pull (CONSUMER.MSG.NEXT) out of the partner user's
+// permissions.
+func partnerConf(listen, certFile, keyFile, storeDir, userPub string, withNext bool) string {
 	api := map[string]string{
 		"create": fmt.Sprintf("$JS.API.CONSUMER.CREATE.%s.%s.%s", pStream, pDurable, pSubject),
 		"info":   fmt.Sprintf("$JS.API.CONSUMER.INFO.%s.%s", pStream, pDurable),
@@ -76,10 +110,13 @@ func startPartnerServer(t *testing.T) *partnerServer {
 	}
 	ack := fmt.Sprintf("$JS.ACK.%s.%s.>", pStream, pDurable)
 	inside := func(s string) string { return pAPIPrefix + "." + strings.TrimPrefix(s, "$JS.API.") }
+	nextGrant := inside(api["next"])
+	if !withNext {
+		nextGrant = "vrsky.test.no-pull-grant"
+	}
 
-	conf := fmt.Sprintf(`
-host: 127.0.0.1
-port: -1
+	return fmt.Sprintf(`
+%s
 tls {
   cert_file: %q
   key_file: %q
@@ -119,36 +156,16 @@ accounts {
     ]
   }
 }
-`, certFile, keyFile, filepath.Join(dir, "js"), pAdminPass,
+`, listen, certFile, keyFile, storeDir, pAdminPass,
 		pSubject, api["create"], api["info"], api["next"], ack,
-		upk,
-		inside(api["create"]), inside(api["info"]), inside(api["next"]), ack,
+		userPub,
+		inside(api["create"]), inside(api["info"]), nextGrant, ack,
 		pInbox+".>", pSubject,
 		pSubject,
 		api["create"], inside(api["create"]),
 		api["info"], inside(api["info"]),
 		api["next"], inside(api["next"]),
 		ack)
-
-	path := filepath.Join(dir, "nats.conf")
-	if err := os.WriteFile(path, []byte(conf), 0o600); err != nil {
-		t.Fatalf("write server config: %v", err)
-	}
-	opts, err := natsserver.ProcessConfigFile(path)
-	if err != nil {
-		t.Fatalf("server config: %v", err)
-	}
-	opts.NoLog, opts.NoSigs = true, true
-	srv, err := natsserver.NewServer(opts)
-	if err != nil {
-		t.Fatalf("partner server: %v", err)
-	}
-	go srv.Start()
-	if !srv.ReadyForConnections(5 * time.Second) {
-		t.Fatal("partner server did not come up")
-	}
-	t.Cleanup(srv.Shutdown)
-	return &partnerServer{srv: srv, caPEM: caPEM, seed: string(seed), rootCA: pool}
 }
 
 func (p *partnerServer) url() string {
@@ -227,6 +244,8 @@ func TestPartner_ReadsAndAcksWithoutStreamInfo(t *testing.T) {
 
 	v := startVRSky(t)
 	c := newTestConsumer(v.publish)
+	logs := &lockedBuf{}
+	c.logger = slog.New(slog.NewTextHandler(logs, nil))
 	rec := withStatusDB(t, c)
 	cancel, done := c.runLoop(ps.partnerConfig(ps.url()))
 	defer stop(t, cancel, done)
@@ -244,6 +263,11 @@ func TestPartner_ReadsAndAcksWithoutStreamInfo(t *testing.T) {
 	}
 	if reason, ok := rec.errorWrite(); ok {
 		t.Fatalf("the connection ended: %s", reason)
+	}
+	// The double ack's confirmation comes back across the account boundary
+	// (through the imported $JS.ACK service and the custom inbox).
+	if strings.Contains(logs.String(), "Ack to the NATS server failed") {
+		t.Fatalf("a double ack got no confirmation: %s", logs.String())
 	}
 }
 
@@ -414,19 +438,23 @@ func TestPartner_PermanentErrors(t *testing.T) {
 		name      string
 		mut       func(*NATSConfig)
 		noDurable bool
+		noPull    bool
 		want      string
 	}{
-		{"seed the server does not know", func(c *NATSConfig) { c.NKeySeed = string(otherSeed) }, false, "refused the credentials"},
-		{"no API prefix", func(c *NATSConfig) { c.APIPrefix = "" }, false, "needs api_prefix"},
-		{"no inbox prefix", func(c *NATSConfig) { c.InboxPrefix = "" }, false, "needs inbox_prefix"},
+		{"seed the server does not know", func(c *NATSConfig) { c.NKeySeed = string(otherSeed) }, false, false, "refused the credentials"},
+		{"no API prefix", func(c *NATSConfig) { c.APIPrefix = "" }, false, false, "set api_prefix"},
+		{"no inbox prefix", func(c *NATSConfig) { c.InboxPrefix = "" }, false, false, "set inbox_prefix"},
 		// The granted durable is not created yet (the owner has no relay).
-		{"durable missing, creation off", keep, true, "create_durable is off"},
-		{"a durable the account has no grant for", func(c *NATSConfig) { c.Durable = "vrsky_other" }, false, "may not do this"},
-		{"untrusted certificate", func(c *NATSConfig) { c.CACert = "" }, false, "could not be verified"},
+		{"durable missing, creation off", keep, true, false, "create_durable is off"},
+		{"a durable the account has no grant for", func(c *NATSConfig) { c.Durable = "vrsky_other" }, false, false, "may not do this"},
+		{"untrusted certificate", func(c *NATSConfig) { c.CACert = "" }, false, false, "could not be verified"},
+		// A denied pull gets no answer at all; it must not look like an
+		// empty stream forever.
+		{"may not pull", keep, false, true, "pull from durable " + pDurable + ": the NATS user may not do this"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ps := startPartnerServer(t)
+			ps := startPartnerServerGrants(t, !tt.noPull)
 			js := ps.admin(t)
 			if !tt.noDurable {
 				addPartnerDurable(t, js, 30*time.Second)

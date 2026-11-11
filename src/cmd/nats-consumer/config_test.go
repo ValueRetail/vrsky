@@ -134,9 +134,13 @@ func TestPermissionHint(t *testing.T) {
 		{`nats: permissions violation: Permissions Violation for Publish to "JS.RH.API.CONSUMER.INFO.S.other"`, ""},
 	}
 	for _, tt := range tests {
-		got := permissionHint(errors.New(tt.msg))
+		got := permissionHint(errors.New(tt.msg), &asyncErrs{})
 		if (tt.want == "") != (got == "") || !strings.Contains(got, tt.want) {
 			t.Errorf("%s: hint %q, want one naming %q", tt.msg, got, tt.want)
+		}
+		// A setting already made is not suggested again.
+		if got := permissionHint(errors.New(tt.msg), &asyncErrs{apiPrefix: true, inboxPrefix: true}); got != "" {
+			t.Errorf("%s: hint %q with both prefixes set", tt.msg, got)
 		}
 	}
 }

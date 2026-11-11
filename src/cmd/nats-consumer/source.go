@@ -101,6 +101,9 @@ func (s *session) close() {
 type asyncErrs struct {
 	mu        sync.Mutex
 	violation error
+	// apiPrefix and inboxPrefix tell whether the config set them, so a
+	// denied subject only suggests a setting that is still unset.
+	apiPrefix, inboxPrefix bool
 }
 
 func (a *asyncErrs) handler(_ *nats.Conn, _ *nats.Subscription, err error) {
@@ -129,7 +132,7 @@ func connect(cfg *NATSConfig, o openOpts) (*session, error) {
 		return nil, sdk.Permanent(err)
 	}
 	sctx, cancel := context.WithCancel(context.Background())
-	async := &asyncErrs{}
+	async := &asyncErrs{apiPrefix: cfg.APIPrefix != "", inboxPrefix: cfg.InboxPrefix != ""}
 	opts := []nats.Option{
 		nats.Name("vrsky-nats-consumer"),
 		nats.Timeout(o.dialWait),
@@ -187,8 +190,9 @@ func connect(cfg *NATSConfig, o openOpts) (*session, error) {
 }
 
 // nkeyOption authenticates with a bare user NKey: the server sends a nonce,
-// the seed signs it. The seed is parsed for each signature and wiped after,
-// so the key pair is not kept in memory for the life of the connection.
+// the seed signs it. The parsed key pair is wiped after each signature; the
+// seed string itself stays in memory (here and in the config) while the loop
+// runs, since every redial signs again.
 func nkeyOption(seed string) (nats.Option, error) {
 	kp, err := userKeyPair(seed)
 	if err != nil {
@@ -257,7 +261,10 @@ func open(ctx context.Context, cfg *NATSConfig, o openOpts) (*session, error) {
 	}
 	if err != nil {
 		s.close()
-		return nil, sdk.Permanent(fmt.Errorf("api_prefix: %w", err))
+		if cfg.APIPrefix != "" {
+			return nil, sdk.Permanent(fmt.Errorf("api_prefix: %w", err))
+		}
+		return nil, sdk.Retriable(err)
 	}
 	actx, cancel := context.WithTimeout(ctx, o.apiWait)
 	defer cancel()
@@ -361,14 +368,15 @@ func durableFits(info *jetstream.ConsumerInfo, cfg *NATSConfig) error {
 
 // permissionHint names the setting a denied subject most likely points at:
 // the JetStream API under its default name (api_prefix) or the default reply
-// inbox (inbox_prefix), the two a partner account renames.
-func permissionHint(v error) string {
+// inbox (inbox_prefix), the two a partner account renames. Only a setting
+// the config leaves unset is suggested.
+func permissionHint(v error, a *asyncErrs) string {
 	msg := v.Error()
 	switch {
-	case strings.Contains(msg, `Publish to "$JS.API.`):
-		return " (an account that imports the JetStream API from another account needs api_prefix)"
-	case strings.Contains(msg, `Subscription to "_INBOX.`):
-		return " (a user limited to its own reply inboxes needs inbox_prefix)"
+	case !a.apiPrefix && strings.Contains(msg, `Publish to "$JS.API.`):
+		return " (if the account imports the JetStream API from another account, set api_prefix)"
+	case !a.inboxPrefix && strings.Contains(msg, `Subscription to "_INBOX.`):
+		return " (if the user may subscribe only to its own reply inboxes, set inbox_prefix)"
 	}
 	return ""
 }
@@ -380,7 +388,7 @@ func classifyJS(err error, async *asyncErrs, what string) error {
 		return err
 	}
 	if v := async.takePermission(); v != nil {
-		return sdk.Permanent(fmt.Errorf("%s: the NATS user may not do this%s: %w", what, permissionHint(v), v))
+		return sdk.Permanent(fmt.Errorf("%s: the NATS user may not do this%s: %w", what, permissionHint(v, async), v))
 	}
 	// A pull the durable's limits refuse (a 409) is refused again on retry.
 	// pullLimits keeps within them; this catches a limit changed under us.
@@ -389,7 +397,11 @@ func classifyJS(err error, async *asyncErrs, what string) error {
 	}
 	switch {
 	case errors.Is(err, jetstream.ErrJetStreamNotEnabled), errors.Is(err, jetstream.ErrJetStreamNotEnabledForAccount):
-		return sdk.Permanent(fmt.Errorf("%s: JetStream is not enabled for this account on the NATS server (an account that imports the JetStream API from another account needs api_prefix)", what))
+		hint := ""
+		if !async.apiPrefix {
+			hint = " (if the account imports the JetStream API from another account, set api_prefix)"
+		}
+		return sdk.Permanent(fmt.Errorf("%s: JetStream is not enabled for this account on the NATS server%s", what, hint))
 	case errors.Is(err, jetstream.ErrConsumerNotFound), errors.Is(err, jetstream.ErrConsumerDeleted):
 		// Deleted under us: the next open recreates it or reports why not.
 		return sdk.Retriable(fmt.Errorf("%s: %w", what, err))

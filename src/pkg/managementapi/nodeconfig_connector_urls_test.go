@@ -286,6 +286,13 @@ func TestNATSConsumerStartChecks(t *testing.T) {
 		{name: "api prefix with a wildcard", sides: []string{"consumer"}, block: with("api_prefix", "JS.*.API"), wantErr: "nats.api_prefix must be a subject"},
 		{name: "inbox prefix with an empty token", sides: []string{"consumer"}, block: with("inbox_prefix", "_INBOX..x"), wantErr: "nats.inbox_prefix must be a subject"},
 		{name: "prefix with a trailing dot", sides: []string{"consumer"}, block: with("api_prefix", "JS.RH.API.")},
+		{name: "prefix too long", sides: []string{"consumer"}, block: with("inbox_prefix", strings.Repeat("a", 256)), wantErr: "nats.inbox_prefix must be a subject"},
+		{name: "batch and wait in range", sides: []string{"consumer"}, block: with("batch_size", 256, "max_wait_seconds", 30)},
+		{name: "batch too big", sides: []string{"consumer"}, block: with("batch_size", 257), wantErr: "nats.batch_size must be a whole number from 1 to 256"},
+		{name: "wait too long", sides: []string{"consumer"}, block: with("max_wait_seconds", 31), wantErr: "nats.max_wait_seconds must be a whole number from 1 to 30"},
+		{name: "fractional wait", sides: []string{"consumer"}, block: with("max_wait_seconds", 1.5), wantErr: "nats.max_wait_seconds must be a whole number"},
+		{name: "wait as text", sides: []string{"consumer"}, block: with("max_wait_seconds", "5"), wantErr: "nats.max_wait_seconds must be a whole number"},
+		{name: "negative batch", sides: []string{"consumer"}, block: with("batch_size", -1), wantErr: "nats.batch_size must be a whole number"},
 	})
 	// There is no NATS destination.
 	if err := startOn("producer", nodeCfg(t, "nats", ok([]string{"tls://nats.example.com"}))); err == nil {

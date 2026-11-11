@@ -99,7 +99,7 @@ func (c *natsConsumer) handleTestConnection() http.HandlerFunc {
 				writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": durableMissingError(&cfg).Error()})
 				return
 			}
-			writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "note": "the durable does not exist yet; the first start creates it"})
+			writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "note": "the durable does not exist yet; the first start creates it (whether the account may create it is not checked here)"})
 			return
 		}
 		if err != nil {

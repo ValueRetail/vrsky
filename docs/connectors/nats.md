@@ -191,7 +191,8 @@ one tenant and one event type:
   `ALLOW_PRIVATE_UPSTREAMS` switch lifts both rules for local development.
 - **Test connection.** The button connects, looks up the durable, and
   disconnects. It creates nothing. A missing durable is fine when the first
-  start may create it, and an error when `create_durable` is `false`. A
+  start may create it (whether the account has the create permission is not
+  checked), and an error when `create_durable` is `false`. A
   server it cannot reach is reported without its address.
 - **Permissions.** The NATS user needs `$JS.API.CONSUMER.INFO.<stream>.<durable>`
   and `$JS.API.CONSUMER.MSG.NEXT.<stream>.<durable>` (under `api_prefix`

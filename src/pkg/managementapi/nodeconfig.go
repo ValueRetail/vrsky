@@ -3,6 +3,7 @@ package managementapi
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -347,8 +348,9 @@ var natsCredentialRefs = map[string]string{
 // validateNATSConsumer refuses what the nats-consumer would refuse at start
 // before it dials (#814): an unknown auth_type, a credential auth type
 // without its stored secret, a credential stored in plaintext, and an
-// api_prefix or inbox_prefix that is not a plain subject. Messages name the
-// field, never a value.
+// api_prefix or inbox_prefix that is not a plain subject, and a batch_size
+// or max_wait_seconds out of the connector's range. Messages name the field,
+// never a value.
 func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
 	var block map[string]json.RawMessage
 	if json.Unmarshal(raw["nats"], &block) != nil {
@@ -380,12 +382,27 @@ func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
 		if p == "" {
 			continue
 		}
-		bad := strings.ContainsAny(p, " \t\r\n*>")
+		bad := len(p) > 255 || strings.ContainsAny(p, " \t\r\n*>")
 		for _, tok := range strings.Split(p, ".") {
 			bad = bad || tok == ""
 		}
 		if bad {
-			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s must be a subject without spaces, wildcards or empty tokens (served by %s)", node.ID, field, svc))
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s must be a subject without spaces, wildcards or empty tokens, at most 255 characters (served by %s)", node.ID, field, svc))
+		}
+	}
+	// The connector's limits (nats-consumer config.go). Absent or 0 means
+	// the default; a fraction would not even parse there.
+	for _, lim := range []struct {
+		field string
+		max   float64
+	}{{"batch_size", 256}, {"max_wait_seconds", 30}} {
+		v, ok := block[lim.field]
+		if !ok || isEmptyJSON(v) {
+			continue
+		}
+		var n float64
+		if json.Unmarshal(v, &n) != nil || n != math.Trunc(n) || n < 0 || n > lim.max {
+			errs = append(errs, fmt.Sprintf("node %s (nats): nats.%s must be a whole number from 1 to %d (served by %s)", node.ID, lim.field, int(lim.max), svc))
 		}
 	}
 	return errs

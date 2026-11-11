@@ -379,6 +379,14 @@ func (c *natsConsumer) drain(ctx context.Context, connID, tenantID string, cfg *
 		if err != nil {
 			return classifyJS(err, s.async, "pull from durable "+cfg.Durable)
 		}
+		if len(msgs) == 0 {
+			// A pull the user may not send is not answered at all: it looks
+			// like an empty stream. The server's permission violation is
+			// the only sign, and it makes the connection end.
+			if v := s.async.takePermission(); v != nil {
+				return sdk.Permanent(fmt.Errorf("pull from durable %s: the NATS user may not do this%s: %w", cfg.Durable, permissionHint(v, s.async), v))
+			}
+		}
 		for i, m := range msgs {
 			if ctx.Err() != nil {
 				// Stopping: no publish attempt for what is still held.
