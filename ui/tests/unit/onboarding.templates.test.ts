@@ -39,9 +39,9 @@ describe('onboarding templates', () => {
       }
       // Every source and destination declares a connector "type". A converter
       // is the data-converter by its node type and keeps its settings flat
-      // (plans/template-fields.md).
+      // (plans/template-fields.md); a filter is the data-filter the same way.
       for (const n of t.nodes) {
-        if (n.type === 'converter') continue
+        if (n.type === 'converter' || n.type === 'filter') continue
         expect(typeof n.config.type).toBe('string')
       }
     }

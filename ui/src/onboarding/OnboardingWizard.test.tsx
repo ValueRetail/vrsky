@@ -179,7 +179,7 @@ describe('deploying', () => {
     fireEvent.click(deployButton())
     await waitFor(() => expect(post).toHaveBeenCalled())
 
-    const nodes = post.mock.calls[0][1].nodes as { id: string; type: string; config: Record<string, any> }[]
+    const nodes = post.mock.calls[0][1].nodes as { id: string; type: string; config: { nats: { servers: unknown[]; password?: unknown; password_secret_id?: unknown }; mappings: { value: unknown }[] } }[]
     expect(nodes.map((n) => n.type)).toEqual(['consumer', 'filter', 'converter', 'producer'])
     expect(nodes[0].config.nats.servers).toHaveLength(1)
     expect(typeof nodes[0].config.nats.servers[0]).toBe('string')
