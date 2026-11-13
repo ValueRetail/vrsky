@@ -29,8 +29,9 @@ Connector configs hold references — never plaintext:
 }
 ```
 
-A setting that is a longer string with a credential inside, like a header
-value, can carry the secret inline as a placeholder instead:
+An HTTP header value, the one setting that is a longer string with a
+credential inside and goes only to the target, can carry the secret inline
+as a placeholder instead:
 
 ```
 "Authorization": "Bearer {secret:f0e0a3c2-…}"
@@ -72,8 +73,7 @@ item. Keys match in any case, the way the connectors read them.
 | `sftp` | `sftp.password`, `sftp.private_key` | no |
 | `kafka` | `kafka.password`, `kafka.client_cert`, `kafka.client_key` | no |
 | `rabbitmq` | `rabbitmq.password` | no |
-| `cloud_storage` | `cloud_storage.connection_string` | yes |
-| | `cloud_storage.secret_access_key`, `cloud_storage.account_key`, `cloud_storage.credentials_json` | no |
+| `cloud_storage` | `cloud_storage.secret_access_key`, `cloud_storage.account_key`, `cloud_storage.connection_string`, `cloud_storage.credentials_json` | no |
 | `sitoo` | `sitoo.api_password` | no |
 | `front_systems` | `front_systems.subscription_key`, `front_systems.api_key` | no |
 | `business_central` | `business_central.client_secret` | no |
@@ -83,14 +83,21 @@ item. Keys match in any case, the way the connectors read them.
 | `nats` | `nats.password`, `nats.creds`, `nats.nkey_seed`, `nats.ca_cert` | no |
 | `bifrost_catalogue` | `bifrost_catalogue.token` | no |
 
+The Azure connection string takes only a reference: its `AccountName`,
+`BlobEndpoint` and `EndpointSuffix` become the service URL, and transport
+and DNS errors quote that URL, so an inline placeholder there would come
+back in the error. Kafka's `ca_cert` is not on the list on purpose: it is a
+public PEM certificate and the editor stores it as typed.
+
 Other types (file, remote agent, Salesforce, tenant) have no credential
 settings. The list lives in `src/pkg/crypto/secretfields.go`; keep this
 table in step with it.
 
 What this does not stop: an editor can still point a credential setting at
-a host they control (a header on an HTTP destination, a database host) and
-receive any of the workspace's secrets there. Secrets belong to the
-workspace, not to one connection.
+a host they control (a header on an HTTP destination, a database host), or
+a header at any public service that echoes requests, and receive any of the
+workspace's secrets there. Secrets belong to the workspace, not to one
+connection (#869).
 
 ### Tenant isolation
 

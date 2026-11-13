@@ -25,10 +25,19 @@ encoding/json uses), `*` matches any one key or array index.
   bifrost-catalogue-producer (#840) already do, and it leaves a config
   stored before this change with a stray, unread reference working.
 - A `{secret:` placeholder is expanded only where the list marks the path
-  as taking one inline: header values and the Azure connection string, the
-  two settings that are a longer string with a credential inside. On every
-  other path, credential or not, it is refused. Credential settings take
-  the `_secret_id` form, which is what the editor writes.
+  as taking one inline: HTTP header values only, which go to the target and
+  nowhere else. On every other path, credential or not, it is refused.
+  Credential settings take the `_secret_id` form, which is what the editor
+  writes.
+- The Azure connection string was inline in the first version. Review of
+  #868 showed it is not all credential: `AccountName`, `BlobEndpoint` and
+  `EndpointSuffix` become the service URL, and azblob transport and DNS
+  errors quote it (`Get "http://127.0.0.1:1/<value>/b?…": connection
+  refused` through schema discovery, `last_error`, `X-Vrsky-Last-Error`).
+  It takes a reference only now; the editor writes
+  `connection_string_secret_id`, and the docs never showed the inline form.
+- Kafka's `ca_cert` is not on the list: a public PEM certificate, and the
+  editor never writes a `_secret_id` for it.
 - The node's type is read from the config itself. No `type`, a non-string
   one, or two keys that differ only in case (the connector could read
   either) means an empty list: every placeholder refused, every reference
@@ -55,8 +64,7 @@ Also from the issue's first comment: a missing secret now reads
 | `sftp` | `sftp.password`, `sftp.private_key` | no |
 | `kafka` | `kafka.password`, `kafka.client_cert`, `kafka.client_key` | no |
 | `rabbitmq` | `rabbitmq.password` | no |
-| `cloud_storage` | `cloud_storage.connection_string` | yes |
-| | `cloud_storage.secret_access_key`, `cloud_storage.account_key`, `cloud_storage.credentials_json` | no |
+| `cloud_storage` | `cloud_storage.secret_access_key`, `cloud_storage.account_key`, `cloud_storage.connection_string`, `cloud_storage.credentials_json` | no |
 | `sitoo` | `sitoo.api_password` | no |
 | `front_systems` | `front_systems.subscription_key`, `front_systems.api_key` | no |
 | `business_central` | `business_central.client_secret` | no |
@@ -137,7 +145,7 @@ stored. No error or log in the connectors quotes a credential field
 - Residual, not fixed here: an editor can still point a credential setting
   at a host they control (an HTTP header, a DB host) and receive any of the
   tenant's secrets there. Secrets are tenant-wide, not bound to a
-  connection. Added to `plans/backlog.md`.
+  connection. Added to `plans/backlog.md`, filed as #869.
 
 ## Verification
 

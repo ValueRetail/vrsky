@@ -16,9 +16,11 @@ import "strings"
 // fills a struct), and "*" matches any one key or array index.
 //
 // Every path takes a "<field>_secret_id" reference, the form the editor
-// writes (ui/src/utils/secrets.ts). inline marks the few that also take a
-// "{secret:<uuid>}" placeholder inside the value: settings that are a longer
-// string with a credential in it.
+// writes (ui/src/utils/secrets.ts). inline marks the one kind that also
+// takes a "{secret:<uuid>}" placeholder inside the value: HTTP header values,
+// which go only to the target (net/http's errors name the header, not its
+// value). A setting whose other parts end up in an error text (a URL, a
+// connection string) must not be inline.
 //
 // Keep it in step with the connectors: a field a connector fills from a
 // "_secret_id" reference belongs here, and docs/SECURITY.md lists the same.
@@ -43,10 +45,14 @@ var secretFields = map[string][]secretField{
 		field("kafka.client_key", false),
 	},
 	"rabbitmq": {field("rabbitmq.password", false)},
+	// connection_string takes a reference only: it is not all credential.
+	// Its AccountName, BlobEndpoint and EndpointSuffix become the service
+	// URL, which transport and DNS errors quote, so an inline placeholder
+	// there would come back in the error text.
 	"cloud_storage": {
 		field("cloud_storage.secret_access_key", false),
 		field("cloud_storage.account_key", false),
-		field("cloud_storage.connection_string", true),
+		field("cloud_storage.connection_string", false),
 		field("cloud_storage.credentials_json", false),
 	},
 	"sitoo": {field("sitoo.api_password", false)},

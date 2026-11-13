@@ -36,7 +36,8 @@ func TestValidateSecretPlaceholders(t *testing.T) {
 		{"credential reference", `{"type":"sftp","sftp":{"host":"h","password_secret_id":"x"}}`, ""},
 		{"stray reference is dropped, not refused", `{"type":"sftp","sftp":{"host":"h","mode_secret_id":"x"}}`, ""},
 		{"header placeholder", `{"type":"http","http":{"url":"https://example.com","headers":{"X-Key":"k ` + ph + `"}}}`, ""},
-		{"Azure connection string placeholder", `{"type":"cloud_storage","cloud_storage":{"provider":"azure","bucket":"b","connection_string":"AccountKey=` + ph + `"}}`, ""},
+		{"Azure connection string reference", `{"type":"cloud_storage","cloud_storage":{"provider":"azure","bucket":"b","connection_string_secret_id":"x"}}`, ""},
+		{"Azure connection string placeholder", `{"type":"cloud_storage","cloud_storage":{"provider":"azure","bucket":"b","connection_string":"BlobEndpoint=http://127.0.0.1:1/` + ph + `;SharedAccessSignature=sv=x"}}`, "cloud_storage.connection_string holds a {secret:…} placeholder; reference the stored secret as cloud_storage.connection_string_secret_id instead"},
 		{"http method", `{"type":"http","http":{"url":"https://example.com","method":"` + ph + `"}}`, "node dst: http.method holds a {secret:…} placeholder"},
 		{"database table", `{"type":"database","database":{"host":"h","table":"` + ph + `"}}`, "database.table holds"},
 		{"kafka auth type, other case", `{"type":"kafka","kafka":{"Auth_Type":"` + ph + `"}}`, "kafka.Auth_Type holds"},
@@ -148,5 +149,16 @@ func TestDiscoverSchema_PlaceholderRefused(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "sftp.remote_dir holds") {
 		t.Fatalf("status %d body %s", rr.Code, rr.Body.String())
+	}
+
+	// The #868 review's case: the endpoint part of an Azure connection
+	// string becomes the URL a transport error quotes.
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/schema-discovery/cloud_storage",
+		bytes.NewReader([]byte(`{"provider":"azure","bucket":"b","connection_string":"BlobEndpoint=http://127.0.0.1:1/`+placeholder()+`;SharedAccessSignature=sv=x"}`)))
+	req = req.WithContext(ContextWithTenantID(req.Context(), "tenant-a"))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "cloud_storage.connection_string holds") {
+		t.Fatalf("connection string: status %d body %s", rr.Code, rr.Body.String())
 	}
 }

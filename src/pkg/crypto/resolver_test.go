@@ -121,9 +121,17 @@ func TestResolveNodeSecrets(t *testing.T) {
 			want:   map[string]any{"http.headers.X-Api-Key": secretA},
 		},
 		{
-			name:   "connection string placeholder expands inline",
-			config: `{"type":"cloud_storage","cloud_storage":{"connection_string":"AccountName=a;AccountKey={secret:` + idA + `};"}}`,
-			want:   map[string]any{"cloud_storage.connection_string": "AccountName=a;AccountKey=" + secretA + ";"},
+			// Its endpoint parts become the service URL, which transport
+			// errors quote (#868 review).
+			name:    "connection string placeholder is refused",
+			config:  `{"type":"cloud_storage","cloud_storage":{"connection_string":"BlobEndpoint=http://127.0.0.1:1/{secret:` + idA + `};SharedAccessSignature=sv=x"}}`,
+			wantErr: "cloud_storage.connection_string holds a {secret:…} placeholder; reference the stored secret as cloud_storage.connection_string_secret_id instead",
+			reads:   []string{},
+		},
+		{
+			name:   "connection string reference resolves",
+			config: `{"type":"cloud_storage","cloud_storage":{"connection_string_secret_id":"` + idA + `"}}`,
+			want:   map[string]any{"cloud_storage.connection_string": secretA},
 		},
 		{
 			name:   "key spelled in another case still matches its credential",
@@ -401,8 +409,27 @@ func TestCheckSecrets(t *testing.T) {
 		!strings.Contains(err.Error(), "cloud_storage.bucket holds") {
 		t.Errorf("block check: err = %v", err)
 	}
-	if err := CheckBlockSecrets("cloud_storage", json.RawMessage(`{"connection_string":"k={secret:`+idA+`}"}`)); err != nil {
-		t.Errorf("block check of an inline credential: %v", err)
+	if err := CheckBlockSecrets("cloud_storage", json.RawMessage(`{"connection_string":"AccountName={secret:`+idA+`}"}`)); err == nil ||
+		!strings.Contains(err.Error(), "cloud_storage.connection_string holds") {
+		t.Errorf("block check of a connection string placeholder: err = %v", err)
+	}
+	if err := CheckBlockSecrets("cloud_storage", json.RawMessage(`{"connection_string_secret_id":"`+idA+`"}`)); err != nil {
+		t.Errorf("block check of a connection string reference: %v", err)
+	}
+	// Header values are the only inline settings left.
+	inline := 0
+	for _, fields := range secretFields {
+		for _, f := range fields {
+			if f.inline {
+				inline++
+				if strings.Join(f.path, ".") != "http.headers.*" {
+					t.Errorf("%s takes a placeholder inline", strings.Join(f.path, "."))
+				}
+			}
+		}
+	}
+	if inline != 1 {
+		t.Errorf("%d inline settings, want 1 (http.headers.*)", inline)
 	}
 	if err := CheckNodeSecrets(json.RawMessage(`{"type":`)); err == nil {
 		t.Error("broken JSON passed the check")
