@@ -414,9 +414,25 @@ describe('the Retailhero → Bifrost template', () => {
     expect((dst.config.bifrost_catalogue as Record<string, unknown>).mode).toBe('delta')
   })
 
-  it('starts the NATS durable at new messages, not the whole stream', () => {
-    const src = t().nodes.find((n) => n.id === 'src')!
-    expect((src.config.nats as Record<string, unknown>).deliver_policy).toBe('new')
+  it("binds Retailhero's partner durable for the batch event, one batch at a time", () => {
+    const nats = t().nodes.find((n) => n.id === 'src')!.config.nats as Record<string, unknown>
+    // Retailhero's operator creates the durable; the partner account imports
+    // the JetStream API under JS.RH.API (#859).
+    expect(nats).toMatchObject({ auth_type: 'nkey', api_prefix: 'JS.RH.API', create_durable: false, stream: 'RH_EVT_V1_POS_PUBLICATION' })
+    // One batch forwarded and acked before the next is fetched: a later batch
+    // that overtook an earlier one would make Bifrost refuse the earlier one
+    // with 409, and its rows would be lost.
+    expect(nats.batch_size).toBe(1)
+    expect(t().fields.map((f) => f.key)).toEqual(expect.arrayContaining(['nkey_seed', 'inbox_prefix', 'durable', 'filter_subject']))
+    expect(t().fields.find((f) => f.key === 'nkey_seed')?.secret).toBe(true)
+  })
+
+  it("numbers each import with Retailhero's fact.sequence, never a timestamp", () => {
+    const conv = t().nodes.find((n) => n.id === 'conv')!
+    const top = conv.config.mappings as { type: string; source?: string; target?: string; required?: boolean }[]
+    expect(top.find((m) => m.target === 'sequence')).toEqual({ type: 'rename', source: 'fact.sequence', target: 'sequence', required: true })
+    expect(top.find((m) => m.type === 'each')?.source).toBe('fact.rows')
+    expect(JSON.stringify(conv.config)).not.toContain('recordedAt')
   })
 
   it('never turns a price into a number', () => {

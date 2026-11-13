@@ -77,16 +77,17 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     required: ['account_id', 'site_id', 'api_id', 'api_password'],
     numeric: ['account_id', 'site_id'],
   },
-  // nats-consumer (NATSConfig in src/cmd/nats-consumer/config.go). password is
-  // replaced by password_secret_id and creds by creds_secret_id at deploy.
+  // nats-consumer (NATSConfig in src/cmd/nats-consumer/config.go). password,
+  // creds and nkey_seed are replaced by their *_secret_id at deploy.
   'consumer/nats': {
     block: 'nats',
     keys: [
-      'servers', 'auth_type', 'username', 'password', 'creds', 'ca_cert', 'stream', 'durable',
+      'servers', 'auth_type', 'username', 'password', 'creds', 'nkey_seed', 'ca_cert', 'api_prefix',
+      'inbox_prefix', 'create_durable', 'max_wait_seconds', 'stream', 'durable',
       'filter_subject', 'batch_size', 'deliver_policy', 'opt_start_time',
     ],
     required: ['servers', 'stream', 'durable'],
-    numeric: ['batch_size'],
+    numeric: ['batch_size', 'max_wait_seconds'],
   },
   // bifrost-catalogue-producer (CatalogueConfig in src/cmd/bifrost-catalogue-producer/service.go).
   // token is replaced by token_secret_id at deploy.

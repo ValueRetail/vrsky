@@ -592,12 +592,12 @@ export const TEMPLATES: PipelineTemplate[] = [
       },
     ],
   },
-  // --- Retail: Retailhero (master) → Bifrost tills (#816) ------------------
+  // --- Retail: Retailhero (master) → Bifrost tills (#816, #855) -----------
   {
     id: 'retailhero-to-bifrost',
     name: 'Articles and prices → tills (Retailhero → Bifrost)',
     summary:
-      'Beta: cannot run end to end yet (needs Bifrost price_incl_vat, and Retailhero does not publish the Bifrost batches yet). Reads Retailhero price and article batches from its NATS partner account and sends them to the Bifrost catalogue-api as a delta. One master per store: switch the Business Central price path off for these stores.',
+      "Beta: Retailhero's batch dispatch is not merged yet, and production can't reach Bifrost yet. Reads Retailhero's Bifrost catalogue batches from its NATS partner account one at a time and sends each to the Bifrost catalogue-api as a delta numbered with Retailhero's batch sequence. For a Retailhero tenant with one store. One master per store: switch the Business Central price path off for that store.",
     icon: '🏷️',
     sourceLabel: 'Retailhero (NATS partner account)',
     destLabel: 'Bifrost (tills)',
@@ -605,37 +605,45 @@ export const TEMPLATES: PipelineTemplate[] = [
       {
         id: 'src',
         type: 'consumer',
-        // deliver_policy "new": the default "all" would push the whole stream
-        // through on the first start. The first catalogue load is a full
-        // package Retailhero publishes on purpose.
+        // A Retailhero partner account (#859): NKey seed, the imported
+        // JetStream API under JS.RH.API, and a durable Retailhero's operator
+        // creates, so VRSky only binds it. batch_size 1: one batch is fetched,
+        // forwarded and acked before the next, so the batches enter the
+        // pipeline in fact.sequence order (Bifrost refuses a lower one with
+        // 409, docs/connectors/retailhero-to-bifrost.md#order).
         config: {
           type: 'nats',
           nats: {
             servers: [''],
-            auth_type: 'user_password',
-            username: '',
-            stream: '',
+            auth_type: 'nkey',
+            api_prefix: 'JS.RH.API',
+            inbox_prefix: '',
+            stream: 'RH_EVT_V1_POS_PUBLICATION',
             durable: '',
             filter_subject: '',
-            deliver_policy: 'new',
+            create_durable: false,
+            batch_size: 1,
           },
         },
       },
       {
         id: 'conv',
         type: 'converter',
-        // One message in is one Bifrost import batch from Retailhero's profile
-        // (rows[].importItem); out comes {"items": [...]} with each importItem
-        // renamed field for field, so prices stay the strings Retailhero
-        // wrote (no to_number: that goes through a float). Mapping table:
-        // docs/connectors/retailhero-to-bifrost.md. Tested against Retailhero's
-        // fixtures in src/cmd/data-converter/retailhero_template_test.go.
+        // One message in is one bifrost-catalogue.batch event (Retailhero
+        // PR #2746): fact.rows[].importItem becomes {"items": [...]}, renamed
+        // field for field, so prices stay the strings Retailhero wrote (no
+        // to_number: that goes through a float). fact.sequence, Retailhero's
+        // batch counter per store, becomes Bifrost's ordering sequence; an
+        // event without it fails rather than go out unnumbered. Mapping
+        // table: docs/connectors/retailhero-to-bifrost.md. Tested against
+        // Retailhero's sample event in
+        // src/cmd/data-converter/retailhero_template_test.go.
         config: {
           drop_unmapped: true,
           mappings: [
             {
               type: 'each',
-              source: 'rows',
+              source: 'fact.rows',
               target: 'items',
               drop_unmapped: true,
               mappings: [
@@ -651,10 +659,7 @@ export const TEMPLATES: PipelineTemplate[] = [
                 { type: 'rename', source: 'importItem.effective_from', target: 'effective_from' },
               ],
             },
-            // The event's own time becomes Bifrost's ordering sequence: the
-            // producer sends it on begin in milliseconds, and Bifrost refuses
-            // an older batch that arrives after a newer one (#858).
-            { type: 'rename', source: 'recordedAt', target: 'sequence' },
+            { type: 'rename', source: 'fact.sequence', target: 'sequence', required: true },
           ],
         },
       },
@@ -673,31 +678,28 @@ export const TEMPLATES: PipelineTemplate[] = [
     fields: [
       {
         nodeId: 'src', objectPath: 'nats.servers', key: '0', label: 'Retailhero NATS server',
-        help: 'The partner-account server Retailhero gives you, as tls://host:4222.',
+        help: 'The partner-account server Retailhero gives you, as tls://host:4222. A server whose certificate is signed by Retailhero\'s own CA needs that CA on the source, set in the pipeline builder.',
         placeholder: 'tls://nats.retailhero.example:4222',
       },
       {
-        nodeId: 'src', objectPath: 'nats', key: 'username', label: 'NATS user',
-        help: 'The user of your per-tenant partner account.',
+        nodeId: 'src', objectPath: 'nats', key: 'nkey_seed', label: 'NKey seed',
+        help: 'The seed of your partner-account user, from the .nk file Retailhero hands over (vrsky_t_a.nk for tenant T-A); it starts with SU. Stored encrypted.',
+        secret: true, placeholder: 'SU…',
       },
       {
-        nodeId: 'src', objectPath: 'nats', key: 'password', label: 'NATS password',
-        help: 'Stored encrypted. An account that signs in with a .creds file is set up in the pipeline builder instead, which has a box for the whole file.',
-        secret: true, placeholder: 'password',
-      },
-      {
-        nodeId: 'src', objectPath: 'nats', key: 'stream', label: 'JetStream stream',
-        help: 'The Retailhero stream that holds the batch event, RH_EVT_V1_<owner>. Retailhero tells you the name.', placeholder: 'RH_EVT_V1_…',
+        nodeId: 'src', objectPath: 'nats', key: 'inbox_prefix', label: 'Inbox prefix',
+        help: 'The reply prefix your partner user may subscribe to: _INBOX_vrsky_ and the tenant in lower case with - as _ (_INBOX_vrsky_t_a for tenant T-A).',
+        placeholder: '_INBOX_vrsky_<tenant>',
       },
       {
         nodeId: 'src', objectPath: 'nats', key: 'durable', label: 'Durable consumer name',
-        help: "Retailhero's operator creates it, named vrsky_<event type with dots as hyphens>_<tenant>. Keep it unique per pipeline: two pipelines on one durable split the messages between them.",
-        placeholder: 'vrsky_<event-type>_<tenant>',
+        help: "Retailhero's operator creates it. Keep it unique per pipeline: two pipelines on one durable split the batches between them.",
+        placeholder: 'vrsky_bifrost-catalogue-batch_<tenant>',
       },
       {
         nodeId: 'src', objectPath: 'nats', key: 'filter_subject', label: 'Subject filter',
-        help: "The one subject of the batch event, rh.evt.v1.<tenant>.<owner>.<event type>. Each Retailhero durable is filtered to exactly one subject. The product and price events Retailhero publishes today are not batches and can't be used here.",
-        placeholder: 'rh.evt.v1.<tenant>.<owner>.<event type>',
+        help: 'The one subject of the batch event for your tenant. It must match the durable\'s own filter.',
+        placeholder: 'rh.evt.v1.<tenant>.pos_publication.bifrost-catalogue.batch',
       },
       {
         nodeId: 'dst', objectPath: 'bifrost_catalogue', key: 'base_url', label: 'Bifrost catalogue-api address',

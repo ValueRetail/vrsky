@@ -1653,6 +1653,27 @@ Last updated 2026-10-28.
     reproduced against Postgres. Fix as the NATS source does (#859): refuse
     a non-empty value under every spelling. Found in the review of #859.
 
+224. **Ordered delivery for sequenced Bifrost imports.** Bifrost refuses a
+    lower `sequence` with 409 and the catalogue producer drops it, so a batch
+    that reaches it after the next one is lost. The Retailhero template's
+    source forwards one batch at a time (#855), but VRSky can still reorder:
+    a converter or producer retry waits out its backoff while the next batch
+    goes on, the converter's two pods can convert n and n + 1 at once, and a
+    rolling deploy runs two source or producer pods side by side.
+    Options: hold the line per connection in the converter and producer while
+    a message of that connection waits for a retry, or, since Retailhero's
+    `fact.sequence` grows by exactly one per store, have the producer retry a
+    batch whose number is not the last committed plus one. Delivery
+    semantics: Opus review. Found in #855.
+
+225. **One Retailhero tenant, several stores, one durable.** Retailhero's
+    `fact.sequence` counts per tenant and store, and its partner durable
+    `vrsky_bifrost-catalogue-batch_<tenant>` carries every store of the
+    tenant, while the template sends to one Bifrost catalogue. A second
+    store's batches would land in the first store's catalogue. Needs either a
+    durable per store from Retailhero or routing on `fact.storeId` to a
+    Bifrost node per store. Found in #855.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource

@@ -3,7 +3,7 @@
   "mappings": [
     {
       "type": "each",
-      "source": "rows",
+      "source": "fact.rows",
       "target": "items",
       "drop_unmapped": true,
       "mappings": [
@@ -61,8 +61,9 @@
     },
     {
       "type": "rename",
-      "source": "recordedAt",
-      "target": "sequence"
+      "source": "fact.sequence",
+      "target": "sequence",
+      "required": true
     }
   ]
 }
