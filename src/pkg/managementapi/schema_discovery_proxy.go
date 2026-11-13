@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 )
 
 // Schema discovery for the mapping UI ("Discover fields").
@@ -112,6 +114,14 @@ func (h *Handler) DiscoverSchema(w http.ResponseWriter, r *http.Request) {
 			_ = writeError(w, http.StatusBadRequest, "BadRequest", "body must be a JSON object", nil)
 			return
 		}
+	}
+
+	// The worker resolves stored secrets for this tenant in the credential
+	// settings only and refuses a {secret:} placeholder anywhere else (#853);
+	// refused here first, with the same message, which names the setting.
+	if err := crypto.CheckBlockSecrets(sourceType, raw); err != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidConfig", err.Error(), nil)
+		return
 	}
 
 	// The tenant comes from the session, never from the caller.

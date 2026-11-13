@@ -381,7 +381,7 @@ func (p *bcProducer) getConfig(ctx context.Context, connectionID, tenantID strin
 		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "business_central" || nc.BusinessCentral == nil {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			return nil, route{}, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}

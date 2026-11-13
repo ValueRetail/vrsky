@@ -598,8 +598,16 @@ func (s *sitooConsumer) getSitooConfig(ctx context.Context, connectionID, tenant
 		if n.Type != "consumer" {
 			continue
 		}
+		// Only our own node: another connector's settings are not ours to
+		// resolve, and a refusal there must not stop this one.
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(n.Config, &kind) != nil || kind.Type != "sitoo" {
+			continue
+		}
 		// Replace api_password_secret_id → api_password (decrypted) before parse.
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			return nil, fmt.Errorf("resolve secrets: %w", rerr)
 		}

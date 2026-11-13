@@ -853,7 +853,7 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		// Before resolving: once resolved, http.token holds the stored
 		// secret's value and a token written into the node looks the same.
 		inlineToken := hasInlineToken(node.Config)
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, node.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, node.Config)
 		if rerr != nil {
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets for node %s: %w", node.ID, rerr))
 		}
@@ -872,7 +872,7 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 				Token string `json:"token"`
 			} `json:"http"`
 			// mTLS material (#89). In the stored config these are *_secret_id
-			// refs; crypto.ResolveSecretsInJSON has already replaced them with
+			// refs; crypto.ResolveNodeSecrets has already replaced them with
 			// plaintext PEM by the time we parse here.
 			TLS tlsconfig.NodeConfig `json:"tls"`
 		}

@@ -236,7 +236,7 @@ func (p *frontSystemsProducer) getConfig(ctx context.Context, connectionID, tena
 		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "front_systems" || nc.FrontSystems == nil {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}

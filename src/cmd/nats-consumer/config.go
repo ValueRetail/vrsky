@@ -326,35 +326,3 @@ func plaintextCredentials(block json.RawMessage) error {
 	}
 	return nil
 }
-
-// credentialSecretIDs are the only stored-secret references a nats block may
-// carry: the three credentials and the CA. Any other *_secret_id would
-// resolve into a setting whose value can come back in an error ("auth_type %q
-// is not one of …"), and secrets are write-only.
-var credentialSecretIDs = map[string]bool{
-	"password_secret_id": true, "creds_secret_id": true, "nkey_seed_secret_id": true, "ca_cert_secret_id": true,
-}
-
-// onlyCredentialSecrets drops every *_secret_id key from block except the
-// credential and CA ones. A block that is not an object is returned as it is.
-func onlyCredentialSecrets(block json.RawMessage) json.RawMessage {
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(block, &raw) != nil || raw == nil {
-		return block
-	}
-	changed := false
-	for k := range raw {
-		if strings.HasSuffix(k, "_secret_id") && !credentialSecretIDs[k] {
-			delete(raw, k)
-			changed = true
-		}
-	}
-	if !changed {
-		return block
-	}
-	out, err := json.Marshal(raw)
-	if err != nil {
-		return block
-	}
-	return out
-}

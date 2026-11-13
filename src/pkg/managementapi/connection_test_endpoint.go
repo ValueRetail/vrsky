@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 )
 
 // testHTTPClient is the client the management-api uses to reach worker aux
@@ -163,6 +165,20 @@ func (h *Handler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	if role == "" {
 		role = "consumer"
+	}
+
+	// A {secret:} placeholder outside the type's credential settings is
+	// refused before any worker sees it (#853): the nats worker resolves
+	// stored secrets for this tenant, and its answer comes back here. The
+	// message names the setting, never a value. A draft that cannot be
+	// checked is not tested (fail closed).
+	draft, err := json.Marshal(raw)
+	if err == nil {
+		err = crypto.CheckNodeSecrets(draft)
+	}
+	if err != nil {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": err.Error()})
+		return
 	}
 
 	url, body, supported, hint := buildTestTarget(typ, role, raw, tenantID)

@@ -558,26 +558,34 @@ func (s *dbConsumer) getConnection(connectionID, tenantID string) (*Connection, 
 	return &conn, nil
 }
 
-// resolveSecretsInNodes walks the nodes[] array, decodes each node.config,
-// runs the resolver, and re-marshals. Errors here are fatal — we'd rather
+// resolveSecretsInNodes walks the nodes[] array, runs the resolver on this
+// connector's own node, and re-marshals. Errors here are fatal — we'd rather
 // fail loud than connect with the wrong password.
 func (s *dbConsumer) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
 	if len(nodesJSON) == 0 {
 		return nodesJSON, nil
 	}
-	var nodes []map[string]any
+	var nodes []map[string]json.RawMessage
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		return nodesJSON, err
 	}
 	reader := crypto.NewSQLSecretReader(s.db)
 	for _, n := range nodes {
-		cfg, ok := n["config"].(map[string]any)
-		if !ok {
+		// Only our own node, and in it only the credential fields (#853):
+		// another connector's settings are not ours to resolve.
+		var role string
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(n["type"], &role) != nil || role != "consumer" ||
+			json.Unmarshal(n["config"], &kind) != nil || kind.Type != "database" {
 			continue
 		}
-		if err := crypto.ResolveSecrets(context.Background(), reader, tenantID, cfg); err != nil {
+		resolved, err := crypto.ResolveNodeSecrets(context.Background(), reader, tenantID, n["config"])
+		if err != nil {
 			return nodesJSON, err
 		}
+		n["config"] = resolved
 	}
 	return json.Marshal(nodes)
 }

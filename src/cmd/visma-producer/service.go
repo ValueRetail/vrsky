@@ -207,7 +207,7 @@ func (p *vismaProducer) getConfig(ctx context.Context, connectionID, tenantID st
 		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "visma" || nc.Visma == nil {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}

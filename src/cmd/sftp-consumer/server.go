@@ -106,9 +106,14 @@ func (s *sftpConsumer) handleSampleData() http.HandlerFunc {
 		_ = json.Unmarshal(raw, &meta)
 		cfgJSON := json.RawMessage(raw)
 		if meta.TenantID != "" && s.db != nil {
-			if resolved, rerr := crypto.ResolveSecretsInJSON(r.Context(), crypto.NewSQLSecretReader(s.db), meta.TenantID, cfgJSON); rerr == nil {
-				cfgJSON = resolved
+			// Only the credential fields resolve; a placeholder anywhere else
+			// is refused, naming the setting (#853).
+			resolved, rerr := crypto.ResolveBlockSecrets(r.Context(), crypto.NewSQLSecretReader(s.db), meta.TenantID, "sftp", cfgJSON)
+			if rerr != nil {
+				writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": "could not read the stored credentials: " + rerr.Error()})
+				return
 			}
+			cfgJSON = resolved
 		}
 		var cfg SFTPConfig
 		if err := json.Unmarshal(cfgJSON, &cfg); err != nil {

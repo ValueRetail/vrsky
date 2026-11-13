@@ -270,7 +270,7 @@ func (p *sitooProducer) getSitooConfig(ctx context.Context, connectionID, tenant
 		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "sitoo" || nc.Sitoo == nil {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			return nil, route{}, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}

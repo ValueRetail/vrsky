@@ -179,9 +179,10 @@ template again to get the new nodes.
 
 Settled, with the contract pinned for this path on 2026-11-11:
 
-- **Authentication** is a bearer credential from a stored secret (#850). Until
-  that is merged, the template sends no `Authorization` header and the intake
-  answers `401`, which is retried and dead-lettered, so nothing is lost.
+- **Authentication** is a bearer credential from a stored secret (#850, PR
+  #862): the wizard stores the token as `http.token_secret_id` on deploy and
+  the destination sends it as `Authorization: Bearer`. A `401` from the
+  intake is retried and dead-lettered, so nothing is lost.
 - **Journal position** (#851): `data.journal_sequence`, sent as
   `journalPosition`. An event without it is dead-lettered with the reason.
 - **Revisions**: always `r1`. Bifrost never sends an amendment or a void; a

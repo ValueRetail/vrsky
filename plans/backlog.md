@@ -1674,6 +1674,31 @@ Last updated 2026-10-28.
     durable per store from Retailhero or routing on `fact.storeId` to a
     Bifrost node per store. Found in #855.
 
+226. **Bind a stored secret to the connections that may use it.** After
+    #853 a secret can only land in a credential setting, but any editor can
+    still point one at a host they control (a header on an HTTP
+    destination, a database or SFTP host) and receive any of the
+    workspace's secrets there: secrets belong to the workspace, not to a
+    connection. Header values still accept inline placeholders, so a secret
+    can also be sent to any public echo service, not only a host the editor
+    controls. Record which node a secret was minted for and refuse others,
+    or make reuse an admin action. Secrets handling: human review. Found in
+    #853. Filed as #869.
+
+227. **The DB connectors' password tests fail without a test database.**
+    `TestDBConsumer_PasswordWithSpaceAndQuote` and its siblings in
+    `cmd/db-consumer` and `cmd/db-producer` say they are skipped without
+    `VRSKY_TEST_POSTGRES_URL`, but open the admin connection first and fail
+    on `localhost:5432`. Call `testdb` (or skip on an empty variable) before
+    dialling. Found in #853. Filed as #870.
+
+228. **`CONNECTOR_KEYS` puts the HTTP destination's `tls` inside the `http`
+    block.** `ui/src/types/nodeConfig.ts` lists `tls` among the keys of
+    `producer/http`, but http-producer reads `tls` beside the block, at the
+    root of the node config (`docs/SECURITY.md`, mTLS). A template that
+    followed the table would set mTLS where nothing reads it. Found in #853.
+    Filed as #871.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource

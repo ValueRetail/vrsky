@@ -605,10 +605,11 @@ func (c *natsConsumer) getConfig(ctx context.Context, connectionID, tenantID str
 		if err := plaintextCredentials(nc.NATS); err != nil {
 			return nil, true, err
 		}
-		resolved, err := crypto.ResolveSecretsInJSON(ctx, crypto.NewSQLSecretReader(c.db), tenantID, onlyCredentialSecrets(nc.NATS))
+		// Only the credentials and the CA resolve; a stray *_secret_id is
+		// dropped and a {secret:} placeholder refused (#853).
+		resolved, err := crypto.ResolveBlockSecrets(ctx, crypto.NewSQLSecretReader(c.db), tenantID, "nats", nc.NATS)
 		if err != nil {
-			// The resolver's message names the field and the secret id,
-			// never a value.
+			// The resolver's message names the field, never a value.
 			return nil, true, fmt.Errorf("resolve stored credentials: %w", err)
 		}
 		cfg = &NATSConfig{}

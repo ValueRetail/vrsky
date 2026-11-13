@@ -29,18 +29,75 @@ Connector configs hold references — never plaintext:
 }
 ```
 
-For database DSNs (a single string containing user, password, host, etc.)
-the password is replaced inline with a placeholder:
+An HTTP header value, the one setting that is a longer string with a
+credential inside and goes only to the target, can carry the secret inline
+as a placeholder instead:
 
 ```
-postgres://app:{secret:f0e0a3c2-…}@db.internal:5432/orders
+"Authorization": "Bearer {secret:f0e0a3c2-…}"
 ```
 
-Workers call `crypto.ResolveSecrets` in
-`src/pkg/crypto/resolver.go` after loading a connection from the management
-DB. The function expands every `<key>_secret_id` and every `{secret:<uuid>}`
-placeholder into plaintext in-process; nothing leaves the worker boundary
-in cleartext form.
+Workers call `crypto.ResolveNodeSecrets` (or `ResolveBlockSecrets` for a
+test or preview request) in `src/pkg/crypto/resolver.go` after loading a
+connection from the management DB, and the value is decrypted in-process;
+nothing leaves the worker boundary in cleartext form.
+
+### Where a secret may be referenced
+
+Only in a credential setting (#853). A connector checks its settings and
+quotes them in errors (`auth_type "…" is not one of …`), and some it sends
+on to the target as data (a header, a file name, an exchange). If any
+setting could hold a secret, anyone who may edit a pipeline could put one
+in such a setting and read any of the workspace's secrets back from Test
+Connection, the activity feed, a connection's last error or the DLQ copy's
+`X-Vrsky-Last-Error`. So, per connector type:
+
+- `<field>_secret_id` is resolved only when `<field>` is in the table
+  below. Anywhere else it is ignored, as if it were not there.
+- A `{secret:<uuid>}` placeholder is expanded only where the table says
+  "inline". Anywhere else, in a credential setting too, the node is
+  refused: on save, on start, by Test Connection and schema discovery,
+  and by the connector itself for a node stored earlier (a destination
+  retries the message and then dead-letters it). The error names the
+  setting, never a value.
+
+Paths are relative to the node config; `*` is any header name or list
+item. Keys match in any case, the way the connectors read them.
+
+| Type | Credential settings | Inline `{secret:}` |
+|---|---|---|
+| `http` (webhook source, HTTP destination) | `http.headers.*` | yes |
+| | `http.token`, `http.signature.secret`, `tls.client_ca`, `tls.cert`, `tls.key` | no |
+| `api` | `api.endpoints.*.auth_value` | no |
+| `database` | `database.password` | no |
+| `sftp` | `sftp.password`, `sftp.private_key` | no |
+| `kafka` | `kafka.password`, `kafka.client_cert`, `kafka.client_key` | no |
+| `rabbitmq` | `rabbitmq.password` | no |
+| `cloud_storage` | `cloud_storage.secret_access_key`, `cloud_storage.account_key`, `cloud_storage.connection_string`, `cloud_storage.credentials_json` | no |
+| `sitoo` | `sitoo.api_password` | no |
+| `front_systems` | `front_systems.subscription_key`, `front_systems.api_key` | no |
+| `business_central` | `business_central.client_secret` | no |
+| `visma` | `visma.client_secret` | no |
+| `brightpearl` | `brightpearl.staff_token` | no |
+| `sap_s4hana` | `sap_s4hana.password`, `sap_s4hana.client_secret` | no |
+| `nats` | `nats.password`, `nats.creds`, `nats.nkey_seed`, `nats.ca_cert` | no |
+| `bifrost_catalogue` | `bifrost_catalogue.token` | no |
+
+The Azure connection string takes only a reference: its `AccountName`,
+`BlobEndpoint` and `EndpointSuffix` become the service URL, and transport
+and DNS errors quote that URL, so an inline placeholder there would come
+back in the error. Kafka's `ca_cert` is not on the list on purpose: it is a
+public PEM certificate and the editor stores it as typed.
+
+Other types (file, remote agent, Salesforce, tenant) have no credential
+settings. The list lives in `src/pkg/crypto/secretfields.go`; keep this
+table in step with it.
+
+What this does not stop: an editor can still point a credential setting at
+a host they control (a header on an HTTP destination, a database host), or
+a header at any public service that echoes requests, and receive any of the
+workspace's secrets there. Secrets belong to the workspace, not to one
+connection (#869).
 
 ### Tenant isolation
 

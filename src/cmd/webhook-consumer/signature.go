@@ -14,7 +14,7 @@ import (
 
 // signatureConfig is the runtime form of WebhookSignatureConfig from the
 // management-api schema. The Secret field is the *plaintext* shared secret,
-// resolved at connection-start time via crypto.ResolveSecrets.
+// resolved at connection-start time via crypto.ResolveNodeSecrets.
 type signatureConfig struct {
 	Header    string
 	Algorithm string

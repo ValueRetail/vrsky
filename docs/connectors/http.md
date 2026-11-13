@@ -211,12 +211,14 @@ encrypted tenant secret and the node keeps only `http.token_secret_id`:
   whitespace is trimmed from the stored token.
 
 A `{secret:<uuid>}` placeholder in a header value
-(`"Authorization": "Bearer {secret:<uuid>}"`) is also expanded, because the
-producer resolves its whole node config (see `docs/SECURITY.md`). Use
-`auth_type` `"bearer"` instead. The editor has no field for a placeholder, a
-plaintext token can't be told apart from a placeholder typed by hand, and an
-expanded value can come back in an error text (#853). The response preview
-masks only a token sent through `auth_type` `"bearer"` or OAuth.
+(`"Authorization": "Bearer {secret:<uuid>}"`) is also expanded. Header
+values are the only settings of this node that take one inline; in any
+other setting (the URL, the method, …) the node is refused, and only the
+credential settings take a `_secret_id` reference (see
+[Where a secret may be referenced](../SECURITY.md#where-a-secret-may-be-referenced),
+#853). Prefer `auth_type` `"bearer"`: the editor has no field for a
+placeholder, and the response preview masks only a token sent through
+`auth_type` `"bearer"` or OAuth.
 
 ### Failed deliveries
 

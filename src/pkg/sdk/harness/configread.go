@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -52,7 +53,22 @@ type ConfigReadSpec struct {
 	// TestSecret. delivered reports whether the fake got the message with
 	// TestSecret in hand.
 	Positive func(t *testing.T, db *sql.DB) (p sdk.Producer, ownNode string, delivered func() bool)
+	// PlaceholderField is a dotted path, in the node Positive builds, of a
+	// setting that is not a credential: one the producer validates, quotes
+	// in an error or sends on (a mode, a resource, a name). The secret-field
+	// cases (#853) put a stored secret there, as a {secret:} placeholder and
+	// as a <field>_secret_id reference, and check that its value comes back
+	// in no error and that nothing is delivered with the placeholder. Empty
+	// for a producer that resolves no secrets.
+	PlaceholderField string
 }
+
+// LeakSecretID is the secret the secret-field cases put in a setting that is
+// not a credential, and LeakSecret what it would resolve to.
+const (
+	LeakSecretID = "00000000-0000-0000-0000-0000000000bb"
+	LeakSecret   = "write-only-value-that-must-not-leak"
+)
 
 // RunConfigReadCases checks the split #704 is about. A failed config or secret
 // read must never ack: ServesConnection (when the producer implements it)
@@ -105,6 +121,14 @@ func RunConfigReadCases(t *testing.T, spec ConfigReadSpec) {
 	t.Run("own node delivers next to another connector's unreadable secret", func(t *testing.T) {
 		runPositiveCase(t, spec)
 	})
+	if spec.PlaceholderField != "" {
+		t.Run("placeholder in a setting that is not a credential is refused", func(t *testing.T) {
+			runSecretFieldCase(t, spec, true)
+		})
+		t.Run("reference in a setting that is not a credential is never resolved", func(t *testing.T) {
+			runSecretFieldCase(t, spec, false)
+		})
+	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -227,6 +251,113 @@ func runPositiveCase(t *testing.T, spec ConfigReadSpec) {
 	if !delivered() {
 		t.Error("the message did not reach the fake target with the resolved secret")
 	}
+}
+
+// runSecretFieldCase puts LeakSecret into spec.PlaceholderField of the
+// positive case's own node, as a {secret:} placeholder (placeholder true) or
+// as a <field>_secret_id reference, with the database ready to hand it out.
+// A placeholder must refuse the delivery: a retriable error that names the
+// setting, nothing delivered. A reference is dropped, never resolved: the
+// delivery may go through or fail on the missing setting. Either way
+// LeakSecret appears in no error (the DLQ's X-Vrsky-Last-Error, the activity
+// feed) (#853).
+func runSecretFieldCase(t *testing.T, spec ConfigReadSpec, placeholder bool) {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	keyHex := hex.EncodeToString(key)
+	t.Setenv(crypto.KeyEnvVar, keyHex)
+	credCT, err := crypto.Encrypt(TestSecret, keyHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leakCT, err := crypto.Encrypt(LeakSecret, keyHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	mock.MatchExpectationsInOrder(false)
+	p, ownNode, delivered := spec.Positive(t, db)
+	node, err := setSecretField(ownNode, spec.PlaceholderField, placeholder)
+	if err != nil {
+		t.Fatalf("PlaceholderField %q: %v", spec.PlaceholderField, err)
+	}
+	for i := 0; i < 4; i++ {
+		mock.ExpectQuery(`FROM connections`).WillReturnRows(connectionRow(spec.Columns, node))
+		mock.ExpectQuery(`FROM secrets`).WithArgs(TestSecretID, "tenant-1").
+			WillReturnRows(sqlmock.NewRows([]string{"ciphertext"}).AddRow(credCT))
+		mock.ExpectQuery(`FROM secrets`).WithArgs(LeakSecretID, "tenant-1").
+			WillReturnRows(sqlmock.NewRows([]string{"ciphertext"}).AddRow(leakCT))
+	}
+
+	ctx := context.Background()
+	env := envelope.New()
+	env.TenantID = "tenant-1"
+	env.IntegrationID = "conn-1"
+	env.ContentType = "application/json"
+	env.Payload = []byte(`{"id":1}`)
+	if cs, ok := p.(sdk.ConnectionScoped); ok && !cs.ServesConnection(ctx, env.TenantID, env.IntegrationID) {
+		t.Fatal("ServesConnection = false for a connection with this producer's node")
+	}
+	errs := []error{p.Deliver(ctx, env)}
+	if sp, ok := p.(sdk.StreamingProducer); ok {
+		errs = append(errs, sp.DeliverStream(ctx, env, strings.NewReader(`{"id":1}`)))
+	}
+	for _, err := range errs {
+		if err != nil && strings.Contains(err.Error(), LeakSecret) {
+			t.Fatalf("the error carries the secret: %v", err)
+		}
+		if !placeholder {
+			continue
+		}
+		switch {
+		case err == nil:
+			t.Fatal("delivered with a placeholder in a setting that is not a credential")
+		case sdk.IsPermanent(err):
+			t.Errorf("error = Permanent(%v): the message would be acked and lost", err)
+		case !strings.Contains(err.Error(), "holds a {secret:…} placeholder"):
+			t.Errorf("error = %v, want it to name the setting that holds the placeholder", err)
+		}
+	}
+	if placeholder && delivered() {
+		t.Error("the target got the message although the node was refused")
+	}
+}
+
+// setSecretField puts LeakSecretID at a dotted path of a node config: as a
+// placeholder in the setting, or as a reference beside it (the setting
+// itself removed, so only the reference could fill it).
+func setSecretField(nodeJSON, path string, placeholder bool) (string, error) {
+	var root map[string]any
+	if err := json.Unmarshal([]byte(nodeJSON), &root); err != nil {
+		return "", err
+	}
+	segs := strings.Split(path, ".")
+	cur := root
+	for _, s := range segs[:len(segs)-1] {
+		next, ok := cur[s].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			cur[s] = next
+		}
+		cur = next
+	}
+	last := segs[len(segs)-1]
+	if placeholder {
+		cur[last] = "{secret:" + LeakSecretID + "}"
+	} else {
+		delete(cur, last)
+		cur[last+crypto.SecretIDSuffix] = LeakSecretID
+	}
+	out, err := json.Marshal(root)
+	return string(out), err
 }
 
 // Upstream is a fake HTTP target for the positive case. It answers token

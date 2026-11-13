@@ -651,7 +651,7 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 		if err := json.Unmarshal(node.Config, &kind); err != nil || kind.Type != "database" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, node.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, node.Config)
 		if rerr != nil {
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets for node %s: %w", node.ID, rerr))
 		}

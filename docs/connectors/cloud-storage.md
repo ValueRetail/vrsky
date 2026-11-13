@@ -358,6 +358,10 @@ Config bullets:
   encrypted tenant secrets at deploy and replaced with `<field>_secret_id`
   references — they never appear in plaintext in the stored connection.
   Non-secret fields like `access_key_id` and `account_name` are stored as-is.
+  A `{secret:<id>}` placeholder typed into any setting, the connection
+  string included, is refused: store the whole connection string as a
+  secret instead
+  ([SECURITY.md](../SECURITY.md#where-a-secret-may-be-referenced), #853).
 - **Test connection.** The cloud-storage worker exposes a `/test-connection`
   endpoint; use the **Test connection** button in the editor to verify bucket
   access before deploying.

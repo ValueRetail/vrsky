@@ -484,12 +484,12 @@ func (p *catalogueProducer) getNodes(ctx context.Context, connectionID, tenantID
 		if len(nc.Bifrost) > 0 && string(nc.Bifrost) != "null" {
 			bn.plainToken = hasPlaintextToken(nc.Bifrost)
 			// Only token_secret_id is resolved, by id, and nothing else in the
-			// block goes near the secrets table. crypto.ResolveSecretsInJSON
-			// would also resolve other *_secret_id keys and expand
-			// {secret:<id>} placeholders in any string, and those settings
-			// can come back in an error text ("mode %q is not …"), a header
-			// (tenant_id) or Bifrost's audit (allow_shrink_reason). Secrets
-			// are write-only.
+			// block goes near the secrets table. Other settings can come back
+			// in an error text ("mode %q is not …"), a header (tenant_id) or
+			// Bifrost's audit (allow_shrink_reason), and secrets are
+			// write-only. crypto.ResolveNodeSecrets now applies the same rule
+			// to every connector (#853); this one keeps its own, stricter
+			// reading.
 			secretID, err := readBlock(nc.Bifrost, cfg)
 			switch {
 			case err != nil:

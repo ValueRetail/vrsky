@@ -1944,7 +1944,15 @@ func (c *bcConsumer) getConfig(ctx context.Context, connectionID, tenantID strin
 		if n.Type != "consumer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		// Only our own node: another connector's settings are not ours to
+		// resolve, and a refusal there must not stop this one.
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(n.Config, &kind) != nil || kind.Type != "business_central" {
+			continue
+		}
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			return nil, fmt.Errorf("resolve secrets: %w", rerr)
 		}

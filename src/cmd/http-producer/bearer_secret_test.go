@@ -151,10 +151,10 @@ func bearerEnv(tenant, connID string) *envelope.Envelope {
 }
 
 // The owner's question on #850: does a {secret:<id>} placeholder in an
-// Authorization header already send a stored bearer? It does. The producer
-// resolves its whole node config with crypto.ResolveSecretsInJSON, which
-// expands a placeholder in any string. auth_type "bearer" is still the way
-// to do it (docs/connectors/http.md says why); this test records the fact.
+// Authorization header already send a stored bearer? It does: header values
+// are the one place of this node where crypto.ResolveNodeSecrets expands a
+// placeholder inline (#853). auth_type "bearer" is still the way to do it
+// (docs/connectors/http.md says why); this test records the fact.
 func TestBearer_PlaceholderInAuthorizationHeaderIsExpanded(t *testing.T) {
 	pg := newBearerPG(t)
 	tenant := pg.tenant(t)

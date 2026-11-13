@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
 )
@@ -236,7 +237,28 @@ func validateEdgeNodeConfig(node *Node) []string {
 		errs = append(errs, validateHTTPProducerURL(node, raw)...)
 		errs = append(errs, validateHTTPProducerBearer(node, raw)...)
 	}
+	errs = append(errs, validateSecretPlaceholders(node)...)
 	return errs
+}
+
+// validateSecretPlaceholders refuses a {secret:<uuid>} placeholder anywhere
+// but the node type's credential settings (#853). The connector would refuse
+// it too; before, it expanded it, and a setting the connector quotes in an
+// error ("auth_type %q is not …") gave the secret's value back to anyone who
+// may edit the pipeline. crypto keeps the one list of credential settings;
+// the message names the setting, never a value. A stray <field>_secret_id is
+// not refused: the connectors drop it unresolved.
+//
+// Runs on save (ValidateDAG) and on start, and on consumer and producer
+// nodes only: no other node has its secrets resolved.
+func validateSecretPlaceholders(node *Node) []string {
+	if node == nil || (node.Type != "consumer" && node.Type != "producer") || !json.Valid(node.Config) {
+		return nil
+	}
+	if err := crypto.CheckNodeSecrets(node.Config); err != nil {
+		return []string{fmt.Sprintf("node %s: %v", node.ID, err)}
+	}
+	return nil
 }
 
 // validateAPIConsumerURLs refuses a base_url or endpoint the API consumer would
@@ -398,9 +420,10 @@ var natsCredentialRefs = map[string]string{
 // credential is refused under any spelling. auth_type or username spelled two
 // ways is refused: which spelling the connector reads depends on the order
 // the keys reach it, which this check cannot know. The *_secret_id references
-// are read by their exact key, because the connector resolves only those
-// (onlyCredentialSecrets keeps the exact names, and crypto resolves only the
-// lowercase _secret_id suffix).
+// are read by their exact key, the way the editor writes them. crypto
+// resolves only the lowercase _secret_id suffix, on a credential name in any
+// case ("Password_secret_id"); that spelling fails the required check here,
+// which errs on the strict side.
 func validateNATSConsumer(node *Node, raw map[string]json.RawMessage) []string {
 	var block map[string]json.RawMessage
 	if json.Unmarshal(raw["nats"], &block) != nil {

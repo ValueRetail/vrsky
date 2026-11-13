@@ -186,7 +186,11 @@ one tenant and one event type:
   is minted into an encrypted tenant secret at deploy and stored as
   `password_secret_id`, `creds_secret_id` or `nkey_seed_secret_id`. A stored
   config with any of them in plaintext is refused at start. Credentials are
-  never logged.
+  never logged. Only these three and `ca_cert_secret_id` are read from the
+  secrets store; another `*_secret_id` is ignored, and a `{secret:<id>}`
+  placeholder in any setting is refused on save, at start and by Test
+  connection, with an error that names the setting
+  ([SECURITY.md](../SECURITY.md#where-a-secret-may-be-referenced), #853).
 - **TLS and addresses.** TLS is required. The URLs must not point at a
   private, loopback or link-local address, and the check is repeated on the
   address a host name resolves to. Servers that a cluster announces are not
