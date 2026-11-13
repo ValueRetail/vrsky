@@ -1950,24 +1950,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-message-the-template-expects" class="md-nav__link">
+  <a href="#the-message-the-template-reads" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The message the template expects
+        The message the template reads
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The message the template reads">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retailheros-other-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retailhero's other events
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#what-retailhero-publishes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Retailhero publishes
-      
-    </span>
-  </a>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2011,10 +2017,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#setting-it-up" class="md-nav__link">
     <span class="md-ellipsis">
       
         Setting it up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it-locally-for-a-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running it locally for a test
       
     </span>
   </a>
@@ -2645,24 +2673,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-message-the-template-expects" class="md-nav__link">
+  <a href="#the-message-the-template-reads" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The message the template expects
+        The message the template reads
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The message the template reads">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retailheros-other-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retailhero's other events
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#what-retailhero-publishes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Retailhero publishes
-      
-    </span>
-  </a>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2706,10 +2740,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#setting-it-up" class="md-nav__link">
     <span class="md-ellipsis">
       
         Setting it up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it-locally-for-a-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running it locally for a test
       
     </span>
   </a>
@@ -2759,14 +2815,16 @@
 <p>The onboarding template <strong>Articles and prices → tills (Retailhero → Bifrost)</strong>
 moves articles and prices from Retailhero into the catalogue of the Bifrost
 tills. The tills keep pulling from the catalogue-api as they do today.</p>
-<div class="highlight"><pre><span></span><code>Retailhero partner account        VRSky                               Bifrost
-rh.evt.v1.&lt;tenant&gt;.…  ─►  nats source ─► converter ─► bifrost_catalogue (delta) ─► catalogue-api
+<div class="highlight"><pre><span></span><code>Retailhero partner account                    VRSky                                       Bifrost
+rh.evt.v1.&lt;tenant&gt;.pos_publication.  ─►  nats ─► converter ─► bifrost_catalogue (delta) ─►  catalogue-api
+  bifrost-catalogue.batch
 </code></pre></div>
-<p>It is marked <strong>beta</strong>. It deploys, and its converter and producer are tested
-against Retailhero's fixtures, but it cannot run end to end yet: Retailhero
-does not publish the Bifrost batches (see
-<a href="#what-retailhero-publishes">What Retailhero publishes</a> and
-<a href="#what-blocks-it">What blocks it</a>).</p>
+<p>It is marked <strong>beta</strong>. Retailhero publishes the batches from
+ValueRetail/Retailhero PR #2746 (Retailhero#2744, not merged when this was
+written), and the converter and producer are tested against that PR's sample
+event. Bifrost takes <code>price_incl_vat</code> with <code>vat_code</code> since
+ValueRetail/Bifrost PR #252. What still stands between it and the tills is
+under <a href="#what-blocks-it">What blocks it</a>.</p>
 <h2 id="who-is-master">Who is master<a class="headerlink" href="#who-is-master" title="Permanent link">&para;</a></h2>
 <p>Retailhero is the master for articles and prices in the Bifrost pilot stores
 (ValueRetail/Retailhero#2675). <strong>Only one master may feed a store.</strong> The
@@ -2782,152 +2840,117 @@ sent.</p>
 template.</p>
 <h2 id="what-the-pipeline-does">What the pipeline does<a class="headerlink" href="#what-the-pipeline-does" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>Source, <code>nats</code>.</strong> A durable pull consumer on the partner account's stream,
-   filtered to the subjects that carry the Bifrost batches. <code>deliver_policy</code>
-   is <code>new</code>, so a start does not push the whole stream into the pipeline (see
-   <a href="../nats/">NATS JetStream</a>). A durable that is new or renamed therefore
-   misses the catalogue as it stands and only gets the batches published
-   after it exists. That holds for a durable VRSky creates. On a Retailhero
-   partner account the operator creates the durable and VRSky only binds it
-   (<code>create_durable: false</code>), so Retailhero's own policy applies, which is
-   <code>all</code> today (<code>ConsumerSpec::to_config</code> in its <code>messaging.rs</code>). In <code>delta</code>
-   mode a full-kind batch is applied as an
-   upsert and removes nothing, so it does not replace the catalogue either.
-   Loading a store from scratch is the full-list variant (#856).</li>
-<li><strong>Converter.</strong> Takes the <code>rows</code> of one batch and returns
-   <code>{"items": [...]}</code>.</li>
+<li><strong>Source, <code>nats</code>.</strong> Binds the durable Retailhero's operator created on the
+   tenant's partner account (<code>create_durable: false</code>) and takes one batch at
+   a time (<code>batch_size: 1</code>): a batch is published into the pipeline and acked
+   before the next is fetched. Where the durable starts is Retailhero's
+   setting (<code>all</code> today, <code>ConsumerSpec::to_config</code> in its <code>messaging.rs</code>), not
+   VRSky's. In <code>delta</code> mode a full-kind batch is applied as an upsert and
+   removes nothing. Loading a store from scratch is the full-list variant
+   (#856).</li>
+<li><strong>Converter.</strong> Takes <code>fact.rows</code> of one batch event and returns
+   <code>{"items": [...], "sequence": &lt;fact.sequence&gt;}</code>.</li>
 <li><strong>Destination, <code>bifrost_catalogue</code>, mode <code>delta</code>.</strong> One batch is one staged
-   import (begin, items, commit; see <a href="../bifrost-catalogue/">Bifrost catalogue</a>).
-   <code>full</code> is not used: it replaces the whole catalogue with the message, and a
-   Retailhero batch is not the whole catalogue (a source that can collect a
-   whole list is #841).</li>
+   import (begin with the sequence, items, commit; see
+   <a href="../bifrost-catalogue/">Bifrost catalogue</a>). <code>full</code> is not used: it replaces
+   the whole catalogue with the message, and a Retailhero batch is not the
+   whole catalogue (a source that can collect a whole list is #841).</li>
 </ol>
-<h2 id="the-message-the-template-expects">The message the template expects<a class="headerlink" href="#the-message-the-template-expects" title="Permanent link">&para;</a></h2>
-<p>Retailhero's Bifrost catalogue target profile
-(<code>docs/contracts/pos-publication-bifrost-catalogue.md</code> in the Retailhero
-repository, a Proposed contract) maps a published package into rows, and each
-row comes out twice: as Bifrost's <code>CatalogueItem</code> and as the wire <code>importItem</code>.
-The template reads the wire form. <strong>One message is one import batch</strong> of the
-profile (a full import, or one delta group):</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"delta"</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">"effectiveFrom"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-12-15T23:00:00Z"</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">"rows"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">"sourceItemId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"S-B2"</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">"importItem"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="nt">"article_no"</span><span class="p">:</span><span class="w"> </span><span class="s2">"B-200"</span><span class="p">,</span><span class="w"> </span><span class="nt">"gtin"</span><span class="p">:</span><span class="w"> </span><span class="s2">"7000000000039"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Vare B"</span><span class="p">,</span>
-<span class="w">        </span><span class="nt">"price_incl_vat"</span><span class="p">:</span><span class="w"> </span><span class="s2">"25.00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"vat_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"F"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pcs"</span><span class="p">,</span>
-<span class="w">        </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Mat"</span><span class="p">,</span><span class="w"> </span><span class="nt">"alcohol"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">        </span><span class="nt">"effective_from"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-12-15T23:00:00Z"</span>
-<span class="w">      </span><span class="p">}</span>
-<span class="w">    </span><span class="p">}</span>
-<span class="w">  </span><span class="p">]</span>
-<span class="p">}</span>
-</code></pre></div>
-<p>It has to be one batch per message because Bifrost holds one row per article
-in an import (the last duplicate wins). A full package gives the same article
-several rows with different <code>effective_from</code>; they sit in different batches,
-and sent as one message the earlier prices would be lost.</p>
-<p>This is what VRSky needs, not something Retailhero publishes today. The
-fixtures in <code>src/test/fixtures/retailhero</code> are the profile's own expected
-output (Retailhero <code>tests/fixtures/pos-publication/bifrost-catalogue/v1</code>), cut
-into one message per batch. When Retailhero publishes the batches, the
-converter's <code>rows</code> / <code>importItem</code> paths follow wherever that event puts them
-(inside <code>fact</code>, if it is built like Retailhero's other events), and the
-subject filter names its subject.</p>
-<h2 id="what-retailhero-publishes">What Retailhero publishes<a class="headerlink" href="#what-retailhero-publishes" title="Permanent link">&para;</a></h2>
-<p>Checked against Retailhero's main branch on 2026-11-11, after
-ValueRetail/Retailhero#2680 closed: PR #2692 built the partner accounts, and
-PR #2720 (for Retailhero#2714) made product, pricing and campaign publish
-through the relay.</p>
-<p>The per-tenant partner account exports exactly these subjects, one durable
-pull consumer per tenant and type:</p>
+<h2 id="the-message-the-template-reads">The message the template reads<a class="headerlink" href="#the-message-the-template-reads" title="Permanent link">&para;</a></h2>
+<p>Retailhero's dispatch (<code>integration::pos_publication::bifrost_events</code> in the
+Retailhero repository, contract <code>docs/contracts/pos-publication-bifrost-catalogue.md</code>,
+"Transport to VRsky") runs the Bifrost catalogue profile over one frozen
+publication and writes each batch as one event:</p>
 <table>
 <thead>
 <tr>
-<th>Subject</th>
-<th>Stream</th>
-<th>Durable for tenant <code>T-A</code></th>
+<th></th>
+<th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>rh.evt.v1.&lt;tenant&gt;.product.product.version</code></td>
-<td><code>RH_EVT_V1_PRODUCT</code></td>
-<td><code>vrsky_product-version_T-A</code></td>
+<td>Subject</td>
+<td><code>rh.evt.v1.&lt;tenant&gt;.pos_publication.bifrost-catalogue.batch</code></td>
 </tr>
 <tr>
-<td><code>rh.evt.v1.&lt;tenant&gt;.product.pack.version</code></td>
-<td><code>RH_EVT_V1_PRODUCT</code></td>
-<td><code>vrsky_pack-version_T-A</code></td>
+<td>Stream</td>
+<td><code>RH_EVT_V1_POS_PUBLICATION</code></td>
 </tr>
 <tr>
-<td><code>rh.evt.v1.&lt;tenant&gt;.product.gtin.version</code></td>
-<td><code>RH_EVT_V1_PRODUCT</code></td>
-<td><code>vrsky_gtin-version_T-A</code></td>
+<td>Durable</td>
+<td><code>vrsky_bifrost-catalogue-batch_&lt;tenant&gt;</code> (made by Retailhero's operator)</td>
 </tr>
 <tr>
-<td><code>rh.evt.v1.&lt;tenant&gt;.pricing.price.version</code></td>
-<td><code>RH_EVT_V1_PRICING</code></td>
-<td><code>vrsky_price-version_T-A</code></td>
-</tr>
-<tr>
-<td><code>rh.evt.v1.&lt;tenant&gt;.campaign.campaign.version</code></td>
-<td><code>RH_EVT_V1_CAMPAIGN</code></td>
-<td><code>vrsky_campaign-version_T-A</code></td>
+<td><code>Nats-Msg-Id</code></td>
+<td>the event id, <code>bifrost-&lt;publication id&gt;-&lt;batch&gt;</code></td>
 </tr>
 </tbody>
 </table>
-<ul>
-<li>The list lives in <code>infrastructure/local/receiving/config/nats/streams.json</code>
-  (<code>partners</code>) and is described in <code>docs/operations/local-receiving.md</code>,
-  "VRSky partner accounts".</li>
-<li>The message body is the owner's outbox row, published unchanged by the
-  relay with <code>Nats-Msg-Id</code> set to the event id. Its shape is the event
-  contract (<code>contracts/events/master-data/v1.schema.json</code>,
-  <code>contracts/events/pricing/v1.1.schema.json</code>): top-level <code>contractVersion</code>,
-  <code>eventType</code>, <code>event</code> (tenant, producer, id), <code>stream</code> (the object, its
-  per-object <code>sequence</code>, the previous event), <code>recordedAt</code> (RFC 3339, UTC),
-  <code>correlationId</code> and <code>fact</code> (the version itself).</li>
-<li>Events arrive in dependency order, not version order across types.
-  Retailhero asks consumers to be idempotent on the event id and not to drop
-  an event because its version is lower than one already seen.</li>
-<li>The account signs in with an NKey seed (no JWT), has no JetStream of its
-  own, uses the API prefix <code>JS.RH.API</code> and the inbox prefix
-  <code>_INBOX_vrsky_t_&lt;x&gt;</code>, and may not ask for stream info. Retailhero's operator
-  creates the durables; the account may create only those same durables. The
-  <code>nats</code> source reads such an account once PR #859 is merged
-  (<a href="../nats/">NATS JetStream</a>).</li>
-</ul>
-<p>None of these events is a Bifrost import batch, and the template cannot build
-one from them:</p>
-<ul>
-<li>A Bifrost item needs fields from several events (SKU and name from
-  <code>product.version</code>, the barcode from <code>gtin.version</code>, the price from
-  <code>price.version</code>). A converter maps one message at a time and can't join
-  them.</li>
-<li><code>price.version</code> is an authored version. Its approval is a separate
-  <code>price.decision</code> event, which is not exported. Retailhero's ADR-0063 says
-  the tills get the frozen publication content, never a price VRSky works out.</li>
-<li>The VAT rate is frozen in the POS publication package (target A profile
-  1.3, Proposed, Retailhero#2687), not carried on these events.</li>
-</ul>
-<p>The Bifrost batches come from Retailhero's Bifrost catalogue profile
-(<code>core/receiving/src/integration/pos_publication/bifrost_catalogue</code>, PR #2685,
-contract <code>docs/contracts/pos-publication-bifrost-catalogue.md</code>, Proposed). It
-is a pure function from a frozen package to batches and refusals, with no
-transport: dispatch is outside Retailhero#2676. Nothing publishes its output
-on NATS yet.</p>
-<p>A message of another shape (a campaign or a product event that the filter lets
-through) leaves the converter without <code>items</code> and is dropped by the producer
-as "not a list of items", with a log line. Narrow the subject filter to the
-batches to keep that quiet.</p>
+<p>The body has the envelope of Retailhero's other events and the batch in
+<code>fact</code> (trimmed from Retailhero's sample,
+<code>tests/fixtures/pos-publication/bifrost-catalogue/v1/event-batch.json</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"contractVersion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pos-publication-events.v1"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"eventType"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bifrost-catalogue.batch"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bifrost-Pub-1-1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"producer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pos_publication"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tenantId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"T-A"</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"stream"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"reference"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"owner"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pos_publication"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bifrost-catalogue"</span><span class="p">,</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Store-1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tenantId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"T-A"</span><span class="p">},</span>
+<span class="w">             </span><span class="nt">"sequence"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"previousEvent"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"recordedAt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-11-11T12:00:00.000000Z"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"correlationId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bifrost-Pub-1"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"fact"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"full"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"effectiveFrom"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-31T23:00:00Z"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"sequence"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"batch"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"batchCount"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"publicationId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Pub-1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"targetId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Target-1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"storeId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Store-1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"profile"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bifrost-catalogue-import"</span><span class="p">,</span><span class="w"> </span><span class="nt">"profileVersion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1.0"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"rows"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"sourceItemId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"S-A1"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"importItem"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">          </span><span class="nt">"article_no"</span><span class="p">:</span><span class="w"> </span><span class="s2">"A-100"</span><span class="p">,</span><span class="w"> </span><span class="nt">"gtin"</span><span class="p">:</span><span class="w"> </span><span class="s2">"7000000000015"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Vare A"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"price_incl_vat"</span><span class="p">:</span><span class="w"> </span><span class="s2">"24.90"</span><span class="p">,</span><span class="w"> </span><span class="nt">"vat_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"H"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pcs"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Dagligvare"</span><span class="p">,</span><span class="w"> </span><span class="nt">"alcohol"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"effective_from"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-31T23:00:00Z"</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The template reads <code>fact.rows[].importItem</code> and <code>fact.sequence</code>, nothing else.
+<code>fact.kind</code> doesn't matter, since every batch goes as a delta.</p>
+<p>A publication can be several events. Retailhero gives each distinct start
+(<code>effective_from</code>) its own batch, since Bifrost keeps one row per article in an
+import, and it is to split a large batch across events (not yet, see
+<a href="#what-blocks-it">What blocks it</a>). Each event has
+the next <code>fact.sequence</code>, and each is a delta of its own. Nothing in VRSky
+treats one event as the whole list: an article that isn't in a batch stays in
+the catalogue as it was.</p>
+<p>The fixtures in <code>src/test/fixtures/retailhero</code> are events in this shape:
+<code>bifrost-batch-full-1.json</code> is Retailhero's sample event as it is, and
+<code>bifrost-batch-delta.json</code> is the delta batch of the profile's
+<code>expected-delta.json</code> in the same envelope, numbered 4 as the dispatch would
+number it after the full package's three batches.</p>
+<h3 id="retailheros-other-events">Retailhero's other events<a class="headerlink" href="#retailheros-other-events" title="Permanent link">&para;</a></h3>
+<p>The partner account also exports <code>product.version</code>, <code>pack.version</code>,
+<code>gtin.version</code>, <code>price.version</code> and <code>campaign.version</code> (streams
+<code>RH_EVT_V1_PRODUCT</code>, <code>RH_EVT_V1_PRICING</code>, <code>RH_EVT_V1_CAMPAIGN</code>). They are not
+for this template. A Bifrost item needs fields from several of them, which a
+converter can't join; <code>price.version</code> is an authored price, not an approved
+one; and the VAT rate is only in the frozen POS publication. ADR-0063 in the
+Retailhero repository says the tills get the frozen publication content,
+never a price VRSky works out. Each durable is filtered to one subject, so
+binding the batch durable is enough to keep them out.</p>
 <h2 id="mapping">Mapping<a class="headerlink" href="#mapping" title="Permanent link">&para;</a></h2>
-<p>The converter renames each field of <code>importItem</code> into the item, field for
-field, and drops everything else (<code>sourceItemId</code>, the rest of the batch
-header, the profile's <code>catalogueItem</code> copy). A field the row does not have
-stays absent; it does not become <code>null</code>.</p>
+<p>For each row of <code>fact.rows</code>, the converter renames each field of
+<code>importItem</code> into the item, field for field, and drops everything else
+(<code>sourceItemId</code>, the event envelope, the rest of <code>fact</code>). A field the row does
+not have stays absent; it does not become <code>null</code>. The fields are exactly those
+of Retailhero's wire <code>ImportItem</code> (<code>import_item()</code> in its
+<code>bifrost_catalogue/mod.rs</code>): <code>gtin</code>, <code>category</code> and <code>min_age</code> are left out
+when empty, the rest are always there.</p>
 <table>
 <thead>
 <tr>
@@ -2989,13 +3012,19 @@ stays absent; it does not become <code>null</code>.</p>
 </tr>
 </tbody>
 </table>
-<p>Beside the items, the batch's <code>recordedAt</code> (the time every Retailhero event
-carries) is passed through as <code>sequence</code>. The producer sends it to Bifrost in
-milliseconds, and Bifrost refuses an older batch that arrives after a newer
-one (see <a href="../bifrost-catalogue/#sequence">Sequence</a>). It has to grow from one
-batch to the next, in milliseconds: two batches with the same <code>recordedAt</code>
-count as one delivery, and the second is dropped with its rows. A batch
-without <code>recordedAt</code> is sent unnumbered.</p>
+<p>Beside the items, <code>fact.sequence</code> goes to the producer as <code>sequence</code>, and the
+producer sends it on <code>begin</code> (see <a href="../bifrost-catalogue/#sequence">Sequence</a>).
+It is a whole number from 1 that grows by exactly one per batch for each
+Retailhero tenant and store, across publications. Bifrost refuses the commit
+with 409 when it already has that number or a higher one, and the producer
+then drops the delivery instead of retrying it.</p>
+<p><code>recordedAt</code> is not used. It is the start time of the transaction that wrote
+the batches, so every batch of one publication has the same value, and
+Bifrost would refuse all but the first. A batch without <code>fact.sequence</code> (or
+with <code>null</code>) is not converted: the converter fails it, so it is retried and
+then lands in the DLQ with the field named. Sent unnumbered it would be
+applied whatever Bifrost already holds, and a late retry could put an older
+price back.</p>
 <p>The mapping lives in <code>ui/src/onboarding/templates.ts</code> and is the same file the
 Go test reads (<code>ui/src/onboarding/testdata/retailhero-to-bifrost.json</code>).</p>
 <h3 id="prices-are-strings">Prices are strings<a class="headerlink" href="#prices-are-strings" title="Permanent link">&para;</a></h3>
@@ -3016,33 +3045,137 @@ not default, repair or derive a rate. A product without a rate is refused by
 the profile and never reaches VRSky, so it is missing from the tills rather
 than sold at a guessed VAT. When Retailhero freezes the rate on the product,
 the profile reads it from there and nothing changes here.</p>
+<h2 id="order">Order<a class="headerlink" href="#order" title="Permanent link">&para;</a></h2>
+<p>Bifrost keeps one sequence per catalogue and refuses a lower one with 409, and
+the producer drops that delivery. So a batch that reaches Bifrost after the
+next one is lost: its rows reach the tills only when a later batch or a full
+import carries the same articles. It is logged as an error (<code>dropped the
+delivery; its rows reach the tills only if a later import carries them</code>).
+The guard means an older price never overwrites a newer one, but the batches
+still have to arrive in order for none to be lost.</p>
+<p>What keeps them in order:</p>
+<ul>
+<li>Retailhero's relay publishes the batches in <code>fact.sequence</code> order.</li>
+<li>The source holds one batch at a time (<code>batch_size: 1</code>). It publishes the
+  batch into the pipeline, retrying the same batch if that fails, acks it, and
+  only then fetches the next.</li>
+<li>The producer runs as one replica and handles one message at a time.</li>
+</ul>
+<p>Where VRSky can still let a later batch through first:</p>
+<ul>
+<li><strong>A retry.</strong> When the converter or the producer fails on batch n (Bifrost
+  answers 5xx, times out or restarts), n waits for its retry (1 s, 5 s, 30 s,
+  2 min) while n + 1 goes on and commits. n is then dropped with 409.</li>
+<li><strong>The converter runs as two pods</strong> on one durable. Batch n and n + 1 can be
+  converted at the same time and reach the producer in either order. The
+  window is short, because the source forwards n + 1 only after n is stored
+  and acked, but a large batch followed by a small one can lose the race.</li>
+<li><strong>A crash or a lost connection at the source.</strong> The held batch comes back
+  when the durable's AckWait (30 s at Retailhero) runs out, and the next one
+  can be delivered first.</li>
+<li><strong>A deploy.</strong> The source and the producer roll over with a new pod
+  started before the old one stops. For that moment two source pods bind the
+  same durable, and two producer pods run imports, so batch n + 1 can go
+  ahead of n.</li>
+</ul>
+<p>Retailhero setting the durable's <code>maxAckPending</code> to 1 for this event type
+closes the last two at the source; VRSky never changes a durable it only
+binds.</p>
+<p>A batch can also go missing without that error. Every time the source hands
+a held batch back (a stop, a deploy, a lost connection) the server counts a
+delivery, and after Retailhero's <code>maxDeliver</code> (10) the batch leaves the
+durable. With one batch held at a time the next one then commits as normal.
+VRSky logs nothing; the only sign is the MAX_DELIVERIES advisory on
+Retailhero's server, which Retailhero's contract says an operator must watch.</p>
+<p>Ordered handling per connection in the converter and the producer is not
+built (<code>plans/backlog.md</code>). Until it is, watch for the error above, and when
+it shows, send the articles again with a newer batch or load the store with a
+full import (#856).</p>
 <h2 id="setting-it-up">Setting it up<a class="headerlink" href="#setting-it-up" title="Permanent link">&para;</a></h2>
-<p>The wizard asks for the Retailhero NATS server, a user and password, the
-stream, a durable name, the subject filter, and the Bifrost address and API
-key. An account that signs in with a <code>.creds</code> file needs the pipeline builder
-instead, which has a box for the whole file (the wizard's secret field is one
-line).</p>
-<p>Retailhero's partner account signs in with an NKey seed instead, and needs the
-API prefix <code>JS.RH.API</code>, its inbox prefix and <code>create_durable: false</code> (see
-<a href="#what-retailhero-publishes">What Retailhero publishes</a>). The wizard can't set
-those yet. Once PR #859 is merged, set them on the source in the pipeline
-builder. Use the stream, durable and subject Retailhero names for the batch
-event; each durable is filtered to exactly one subject.</p>
+<p>The wizard asks for the Retailhero NATS server, the partner user's NKey seed,
+the inbox prefix, the durable, the subject filter, and the Bifrost address and
+API key. The rest is fixed in the template: <code>auth_type: nkey</code>, the API prefix
+<code>JS.RH.API</code>, the stream <code>RH_EVT_V1_POS_PUBLICATION</code>, <code>create_durable: false</code>
+and <code>batch_size: 1</code>. For tenant <code>T-A</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NKey seed</td>
+<td>the contents of <code>vrsky_t_a.nk</code></td>
+</tr>
+<tr>
+<td>Inbox prefix</td>
+<td><code>_INBOX_vrsky_t_a</code></td>
+</tr>
+<tr>
+<td>Durable</td>
+<td><code>vrsky_bifrost-catalogue-batch_T-A</code></td>
+</tr>
+<tr>
+<td>Subject filter</td>
+<td><code>rh.evt.v1.T-A.pos_publication.bifrost-catalogue.batch</code></td>
+</tr>
+</tbody>
+</table>
+<p>A server whose certificate is signed by Retailhero's own CA needs that CA on
+the source (<code>ca_cert</code>), set in the pipeline builder after the wizard: the
+wizard's fields are one line. See
+<a href="../nats/#a-retailhero-partner-account">NATS JetStream</a>.</p>
+<p><strong>One store per Retailhero tenant.</strong> <code>fact.sequence</code> counts per tenant and
+store, and Retailhero's durable carries every store of the tenant. The
+pipeline sends everything to one Bifrost catalogue, so a second store's
+batches would land in the first store's catalogue, or be refused there with
+409 when their number is lower. Until there is a durable (or a route) per
+store, use this template only for a Retailhero tenant that serves one store.</p>
+<h2 id="running-it-locally-for-a-test">Running it locally for a test<a class="headerlink" href="#running-it-locally-for-a-test" title="Permanent link">&para;</a></h2>
+<p>For a test on one computer, with Retailhero, Bifrost and VRSky's
+<code>docker-compose.yml</code> stack all running there. This is for local testing only:
+production can't reach the catalogue-api this way, and how it will is still
+open in #843.</p>
+<ol>
+<li>
+<p>Start the stack with the two connectors this template uses, which
+   <code>make up-core</code> leaves out:</p>
+<div class="highlight"><pre><span></span><code>make<span class="w"> </span>up-core
+docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build<span class="w"> </span>nats-consumer<span class="w"> </span>bifrost-catalogue-producer
+</code></pre></div>
+</li>
+<li>
+<p>Local addresses are refused unless the operator switch
+   <code>ALLOW_PRIVATE_UPSTREAMS=true</code> is set on <code>management-api</code> (its start check
+   reads <code>base_url</code> and the NATS server), <code>nats-consumer</code> and
+   <code>bifrost-catalogue-producer</code>. <code>docker-compose.yml</code> sets it to <code>true</code> on all
+   three unless the shell sets it to something else; check with
+   <code>docker compose config | grep ALLOW_PRIVATE_UPSTREAMS</code>. It also lets
+   <code>base_url</code> be plain <code>http</code>, so Bifrost needs no proxy in front. Never set
+   it in production.</p>
+</li>
+<li>From inside a container on Docker Desktop, a service on the host is
+   <code>host.docker.internal</code>, not <code>localhost</code> (on Linux, give the services
+   <code>extra_hosts: ["host.docker.internal:host-gateway"]</code> in an override file). Bifrost's <code>base_url</code> is then
+   <code>http://host.docker.internal:&lt;catalogue-api port&gt;</code>.</li>
+<li>Retailhero's local broker (<code>messaging-up</code>) publishes no host port, and its
+   certificate names the host <code>nats</code>, which inside VRSky's compose network is
+   VRSky's own NATS. Reaching it from <code>nats-consumer</code> takes a change on
+   Retailhero's side (a published port and a certificate for that name) or a
+   Docker network setup that keeps the two names apart. Neither is written
+   down yet. Put Retailhero's run CA (<code>ca.crt</code>) on the source in the pipeline
+   builder.</li>
+</ol>
 <h2 id="what-blocks-it">What blocks it<a class="headerlink" href="#what-blocks-it" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Bifrost must accept <code>price_incl_vat</code></strong> (ValueRetail/Bifrost#249, PR #252).
-  Its import takes <code>price_ex_vat</code> only today and refuses the whole batch when <code>price_ex_vat</code> is missing (the field is required).
-  Whether it also keeps <code>vat_code</code> or switches to <code>vat_rate</code> next to the
-  inclusive price is for that change to settle; if it takes <code>vat_rate</code>, the
-  converter maps <code>importItem.vat_code</code> to <code>catalogueItem.vat_rate</code> instead.</li>
-<li><strong>Retailhero must publish the batches.</strong> The partner account (#2680) carries
-  product, pack, GTIN, price and campaign events, which the template can't use
-  (see <a href="#what-retailhero-publishes">What Retailhero publishes</a>). The batches
-  need a dispatch on Retailhero's side that runs the Bifrost profile and
-  publishes each batch as its own event on a subject exported to the partner
-  account. No Retailhero issue for that was found on 2026-11-11. Also open:
-  whether Bifrost keeps a per-item <code>effective_from</code> later than the import
-  start inside a full import.</li>
+<li><strong>How VRSky reaches the catalogue-api in production</strong> is open (#843).</li>
+<li><strong>Retailhero's dispatch is not merged</strong> (Retailhero PR #2746). Nothing
+  calls it yet (no route or schedule), and a full batch above about 4,000
+  articles passes the stream's 1 MiB message limit until Retailhero splits
+  it. Also open: whether Bifrost keeps a per-item <code>effective_from</code> later than
+  the import start inside a full import.</li>
 <li><strong>Removals and full lists.</strong> A delta cannot remove an article or withdraw a
   price. Retailhero's profile refuses delistings and retirements for that
   reason. The first load and a clean-up need a full import, which needs the
@@ -3050,29 +3183,26 @@ event; each durable is filtered to exactly one subject.</p>
 <li><strong>Campaigns and member prices</strong> have no place in Bifrost's catalogue yet
   (ValueRetail/Bifrost#247). The campaign price itself flows as an ordinary
   price.</li>
-<li><strong>Order.</strong> The template passes <code>recordedAt</code> through as Bifrost's <code>sequence</code>
-  (#858), so a retried older batch is dropped instead of overwriting a newer
-  one. Before go-live, Retailhero has to confirm that every batch carries a
-  <code>recordedAt</code> that grows by at least a millisecond per batch, including the
-  several batches one package is cut into, or send a per-batch counter
-  instead. Retailhero's <code>recordedAt</code> is today the writing transaction's start
-  time, so batches written in one transaction would share it, and every batch
-  after the first would be dropped. Also, a delta that is retried after a
-  newer one committed is dropped even when the newer one held other articles
-  (see <a href="../bifrost-catalogue/#retries-are-safe">What the guard costs</a>).</li>
+<li><strong>Order inside VRSky</strong> holds only when no deploy runs and every batch goes
+  through on its first attempt (see <a href="#order">Order</a>).</li>
+<li><strong>One store per Retailhero tenant</strong> (see <a href="#setting-it-up">Setting it up</a>).</li>
 </ul>
 <h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>src/cmd/data-converter/retailhero_template_test.go</code> runs the deployed
-  converter config on embedded JetStream against Retailhero's fixtures and
-  compares with the item lists in <code>src/test/fixtures/retailhero</code>.</li>
+  converter config on embedded JetStream against the batch events in
+  <code>src/test/fixtures/retailhero</code> and compares with the payloads there. It
+  also checks that <code>fact.sequence</code> comes out as the same whole number (not
+  <code>recordedAt</code> or <code>stream.sequence</code>) and that an event without it fails.</li>
 <li><code>src/cmd/bifrost-catalogue-producer/retailhero_template_test.go</code> sends those
-  lists through the producer in <code>delta</code> mode to the stubbed catalogue-api and
-  checks that every field, the price strings included, arrives as written,
-  that articles the batches don't mention stay, and that an older batch
-  retried after a newer one is dropped.</li>
+  payloads through the producer in <code>delta</code> mode to the stubbed catalogue-api
+  and checks that every field, the price strings included, arrives as written
+  with <code>fact.sequence</code> on <code>begin</code>; that a publication cut into three events
+  commits three deltas and keeps the articles of each; and that a batch
+  retried after the next one committed is dropped.</li>
 <li><code>ui/src/onboarding/templates.test.ts</code> keeps the template in step with the
-  Go test's config and with the connectors' keys.</li>
+  Go test's config and with the connectors' keys, and checks the partner
+  account settings and <code>batch_size: 1</code>.</li>
 </ul>
 
 
