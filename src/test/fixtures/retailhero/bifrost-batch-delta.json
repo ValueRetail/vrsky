@@ -1,32 +1,53 @@
 {
-  "kind": "delta",
-  "effectiveFrom": "2026-12-15T23:00:00Z",
-  "rows": [
-    {
-      "catalogueItem": {
-        "article_no": "B-200",
-        "gtin": "7000000000039",
-        "name": "Vare B",
-        "price_incl_vat": "25.00",
-        "vat_rate": "0.15",
-        "unit": "pcs",
-        "category": "Mat",
-        "min_age": null,
-        "alcohol": false,
-        "effective_from": "2026-12-15T23:00:00Z"
-      },
-      "importItem": {
-        "article_no": "B-200",
-        "gtin": "7000000000039",
-        "name": "Vare B",
-        "price_incl_vat": "25.00",
-        "vat_code": "F",
-        "unit": "pcs",
-        "category": "Mat",
-        "alcohol": false,
-        "effective_from": "2026-12-15T23:00:00Z"
-      },
-      "sourceItemId": "S-B2"
-    }
-  ]
+  "contractVersion": "pos-publication-events.v1",
+  "correlationId": "bifrost-Pub-2",
+  "event": {
+    "id": "bifrost-Pub-2-1",
+    "producer": "pos_publication",
+    "tenantId": "T-A"
+  },
+  "eventType": "bifrost-catalogue.batch",
+  "fact": {
+    "batch": 1,
+    "batchCount": 1,
+    "effectiveFrom": "2026-12-15T23:00:00Z",
+    "kind": "delta",
+    "profile": "bifrost-catalogue-import",
+    "profileVersion": "1.0",
+    "publicationId": "Pub-2",
+    "rows": [
+      {
+        "importItem": {
+          "alcohol": false,
+          "article_no": "B-200",
+          "category": "Mat",
+          "effective_from": "2026-12-15T23:00:00Z",
+          "gtin": "7000000000039",
+          "name": "Vare B",
+          "price_incl_vat": "25.00",
+          "unit": "pcs",
+          "vat_code": "F"
+        },
+        "sourceItemId": "S-B2"
+      }
+    ],
+    "sequence": 4,
+    "storeId": "Store-1",
+    "targetId": "Target-1"
+  },
+  "recordedAt": "2026-11-12T12:00:00.000000Z",
+  "stream": {
+    "previousEvent": {
+      "id": "bifrost-Pub-1-3",
+      "producer": "pos_publication",
+      "tenantId": "T-A"
+    },
+    "reference": {
+      "id": "Store-1",
+      "kind": "bifrost-catalogue",
+      "owner": "pos_publication",
+      "tenantId": "T-A"
+    },
+    "sequence": "4"
+  }
 }
