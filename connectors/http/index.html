@@ -1524,41 +1524,8 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#failed-deliveries" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Failed deliveries
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#which-addresses-it-will-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Which addresses it will call
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
-      
-    </span>
-  </a>
   
 </li>
       
@@ -2690,41 +2657,8 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#failed-deliveries" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Failed deliveries
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#which-addresses-it-will-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Which addresses it will call
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
-      
-    </span>
-  </a>
   
 </li>
       
@@ -2935,12 +2869,14 @@ encrypted tenant secret and the node keeps only <code>http.token_secret_id</code
   whitespace is trimmed from the stored token.</li>
 </ul>
 <p>A <code>{secret:&lt;uuid&gt;}</code> placeholder in a header value
-(<code>"Authorization": "Bearer {secret:&lt;uuid&gt;}"</code>) is also expanded, because the
-producer resolves its whole node config (see <code>docs/SECURITY.md</code>). Use
-<code>auth_type</code> <code>"bearer"</code> instead. The editor has no field for a placeholder, a
-plaintext token can't be told apart from a placeholder typed by hand, and an
-expanded value can come back in an error text (#853). The response preview
-masks only a token sent through <code>auth_type</code> <code>"bearer"</code> or OAuth.</p>
+(<code>"Authorization": "Bearer {secret:&lt;uuid&gt;}"</code>) is also expanded. Header
+values are the only settings of this node that take one inline; in any
+other setting (the URL, the method, …) the node is refused, and only the
+credential settings take a <code>_secret_id</code> reference (see
+<a href="../../SECURITY/#where-a-secret-may-be-referenced">Where a secret may be referenced</a>,</p>
+<h1 id="853-prefer-auth_type-bearer-the-editor-has-no-field-for-a">853). Prefer <code>auth_type</code> <code>"bearer"</code>: the editor has no field for a<a class="headerlink" href="#853-prefer-auth_type-bearer-the-editor-has-no-field-for-a" title="Permanent link">&para;</a></h1>
+<p>placeholder, and the response preview masks only a token sent through
+<code>auth_type</code> <code>"bearer"</code> or OAuth.</p>
 <h3 id="failed-deliveries">Failed deliveries<a class="headerlink" href="#failed-deliveries" title="Permanent link">&para;</a></h3>
 <p>A target that never answers is cut off after 30 seconds, whether it never
 accepts the connection or accepts it and goes quiet. That counts as a network

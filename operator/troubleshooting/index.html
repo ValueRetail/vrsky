@@ -1274,6 +1274,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#setting-holds-a-secret-placeholder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "&lt;setting&gt; holds a {secret:…} placeholder"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2782,6 +2793,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#setting-holds-a-secret-placeholder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "&lt;setting&gt; holds a {secret:…} placeholder"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3028,6 +3050,20 @@ Its pipelines were stopped by the billing sweep and the UI shows a red banner.
 Reading and editing still work. The owner asks for a plan under Settings → Plan;
 you activate it under Platform → Workspaces, which also starts the stopped
 pipelines again. To extend a trial instead, set plan Trial with a new end date.</p>
+<h2 id="setting-holds-a-secret-placeholder">"<code>&lt;setting&gt;</code> holds a {secret:…} placeholder"<a class="headerlink" href="#setting-holds-a-secret-placeholder" title="Permanent link">&para;</a></h2>
+<p>A node refers to a stored secret, as <code>{secret:&lt;uuid&gt;}</code>, in a setting that is
+not a credential, or inline in a credential that takes only a
+<code>&lt;field&gt;_secret_id</code> reference (#853). The list of settings that may, per
+connector, is in <a href="../../SECURITY/#where-a-secret-may-be-referenced">SECURITY.md</a>.
+Save, start, Test Connection and schema discovery refuse it with this message.
+A node stored before #853 fails the same way at runtime: a source goes to
+status <code>error</code> (or logs it and stays idle), a destination retries the message
+and dead-letters it with this text in <code>X-Vrsky-Last-Error</code>. Fix the setting
+(the plain value, or the credential's <code>_secret_id</code> reference), restart the
+pipeline and replay the DLQ. A <code>&lt;field&gt;_secret_id</code> on a setting that is not a
+credential is not an error: it is ignored, and the setting reads as unset.</p>
+<p>A missing secret now reads <code>resolve &lt;setting&gt;_secret_id: stored secret not
+found</code>, without the secret's id or the workspace.</p>
 <h2 id="a-builder-panel-says-cannot-reach-the-data-converter-service">A builder panel says "cannot reach the data-converter service"<a class="headerlink" href="#a-builder-panel-says-cannot-reach-the-data-converter-service" title="Permanent link">&para;</a></h2>
 <p>The builder's live panels (Converter, Filter, File Watcher, …) are served by
 the management API, which proxies each worker's event stream at

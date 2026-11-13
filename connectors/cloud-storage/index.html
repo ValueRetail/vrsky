@@ -2994,7 +2994,11 @@ block: <code>none</code>, <code>sse-s3</code> (S3-managed keys), or <code>sse-km
   <code>connection_string</code>, <code>account_key</code>, <code>credentials_json</code>) are minted into
   encrypted tenant secrets at deploy and replaced with <code>&lt;field&gt;_secret_id</code>
   references — they never appear in plaintext in the stored connection.
-  Non-secret fields like <code>access_key_id</code> and <code>account_name</code> are stored as-is.</li>
+  Non-secret fields like <code>access_key_id</code> and <code>account_name</code> are stored as-is.
+  A <code>{secret:&lt;id&gt;}</code> placeholder typed into any setting, the connection
+  string included, is refused: store the whole connection string as a
+  secret instead
+  (<a href="../../SECURITY/#where-a-secret-may-be-referenced">SECURITY.md</a>, #853).</li>
 <li><strong>Test connection.</strong> The cloud-storage worker exposes a <code>/test-connection</code>
   endpoint; use the <strong>Test connection</strong> button in the editor to verify bucket
   access before deploying.</li>

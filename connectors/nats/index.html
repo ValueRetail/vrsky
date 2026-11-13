@@ -2812,7 +2812,11 @@ one tenant and one event type:</p>
   is minted into an encrypted tenant secret at deploy and stored as
   <code>password_secret_id</code>, <code>creds_secret_id</code> or <code>nkey_seed_secret_id</code>. A stored
   config with any of them in plaintext is refused at start. Credentials are
-  never logged.</li>
+  never logged. Only these three and <code>ca_cert_secret_id</code> are read from the
+  secrets store; another <code>*_secret_id</code> is ignored, and a <code>{secret:&lt;id&gt;}</code>
+  placeholder in any setting is refused on save, at start and by Test
+  connection, with an error that names the setting
+  (<a href="../../SECURITY/#where-a-secret-may-be-referenced">SECURITY.md</a>, #853).</li>
 <li><strong>TLS and addresses.</strong> TLS is required. The URLs must not point at a
   private, loopback or link-local address, and the check is repeated on the
   address a host name resolves to. Servers that a cluster announces are not

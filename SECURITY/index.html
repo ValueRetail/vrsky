@@ -2189,6 +2189,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#where-a-secret-may-be-referenced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where a secret may be referenced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#tenant-isolation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2929,6 +2940,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#where-a-secret-may-be-referenced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where a secret may be referenced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#tenant-isolation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3322,15 +3344,139 @@ database. Plaintext is never written to disk by the application.</p>
   "password_secret_id": "f0e0a3c2-…"  // resolved at worker startup
 }
 </code></pre></div>
-<p>For database DSNs (a single string containing user, password, host, etc.)
-the password is replaced inline with a placeholder:</p>
-<div class="highlight"><pre><span></span><code>postgres://app:{secret:f0e0a3c2-…}@db.internal:5432/orders
+<p>An HTTP header value, the one setting that is a longer string with a
+credential inside and goes only to the target, can carry the secret inline
+as a placeholder instead:</p>
+<div class="highlight"><pre><span></span><code>"Authorization": "Bearer {secret:f0e0a3c2-…}"
 </code></pre></div>
-<p>Workers call <code>crypto.ResolveSecrets</code> in
-<code>src/pkg/crypto/resolver.go</code> after loading a connection from the management
-DB. The function expands every <code>&lt;key&gt;_secret_id</code> and every <code>{secret:&lt;uuid&gt;}</code>
-placeholder into plaintext in-process; nothing leaves the worker boundary
-in cleartext form.</p>
+<p>Workers call <code>crypto.ResolveNodeSecrets</code> (or <code>ResolveBlockSecrets</code> for a
+test or preview request) in <code>src/pkg/crypto/resolver.go</code> after loading a
+connection from the management DB, and the value is decrypted in-process;
+nothing leaves the worker boundary in cleartext form.</p>
+<h3 id="where-a-secret-may-be-referenced">Where a secret may be referenced<a class="headerlink" href="#where-a-secret-may-be-referenced" title="Permanent link">&para;</a></h3>
+<p>Only in a credential setting (#853). A connector checks its settings and
+quotes them in errors (<code>auth_type "…" is not one of …</code>), and some it sends
+on to the target as data (a header, a file name, an exchange). If any
+setting could hold a secret, anyone who may edit a pipeline could put one
+in such a setting and read any of the workspace's secrets back from Test
+Connection, the activity feed, a connection's last error or the DLQ copy's
+<code>X-Vrsky-Last-Error</code>. So, per connector type:</p>
+<ul>
+<li><code>&lt;field&gt;_secret_id</code> is resolved only when <code>&lt;field&gt;</code> is in the table
+  below. Anywhere else it is ignored, as if it were not there.</li>
+<li>A <code>{secret:&lt;uuid&gt;}</code> placeholder is expanded only where the table says
+  "inline". Anywhere else, in a credential setting too, the node is
+  refused: on save, on start, by Test Connection and schema discovery,
+  and by the connector itself for a node stored earlier (a destination
+  retries the message and then dead-letters it). The error names the
+  setting, never a value.</li>
+</ul>
+<p>Paths are relative to the node config; <code>*</code> is any header name or list
+item. Keys match in any case, the way the connectors read them.</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Credential settings</th>
+<th>Inline <code>{secret:}</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>http</code> (webhook source, HTTP destination)</td>
+<td><code>http.headers.*</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td></td>
+<td><code>http.token</code>, <code>http.signature.secret</code>, <code>tls.client_ca</code>, <code>tls.cert</code>, <code>tls.key</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td><code>api.endpoints.*.auth_value</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>database</code></td>
+<td><code>database.password</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>sftp</code></td>
+<td><code>sftp.password</code>, <code>sftp.private_key</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>kafka</code></td>
+<td><code>kafka.password</code>, <code>kafka.client_cert</code>, <code>kafka.client_key</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>rabbitmq</code></td>
+<td><code>rabbitmq.password</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>cloud_storage</code></td>
+<td><code>cloud_storage.secret_access_key</code>, <code>cloud_storage.account_key</code>, <code>cloud_storage.connection_string</code>, <code>cloud_storage.credentials_json</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>sitoo</code></td>
+<td><code>sitoo.api_password</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>front_systems</code></td>
+<td><code>front_systems.subscription_key</code>, <code>front_systems.api_key</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>business_central</code></td>
+<td><code>business_central.client_secret</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>visma</code></td>
+<td><code>visma.client_secret</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>brightpearl</code></td>
+<td><code>brightpearl.staff_token</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>sap_s4hana</code></td>
+<td><code>sap_s4hana.password</code>, <code>sap_s4hana.client_secret</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>nats</code></td>
+<td><code>nats.password</code>, <code>nats.creds</code>, <code>nats.nkey_seed</code>, <code>nats.ca_cert</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>bifrost_catalogue</code></td>
+<td><code>bifrost_catalogue.token</code></td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p>The Azure connection string takes only a reference: its <code>AccountName</code>,
+<code>BlobEndpoint</code> and <code>EndpointSuffix</code> become the service URL, and transport
+and DNS errors quote that URL, so an inline placeholder there would come
+back in the error. Kafka's <code>ca_cert</code> is not on the list on purpose: it is a
+public PEM certificate and the editor stores it as typed.</p>
+<p>Other types (file, remote agent, Salesforce, tenant) have no credential
+settings. The list lives in <code>src/pkg/crypto/secretfields.go</code>; keep this
+table in step with it.</p>
+<p>What this does not stop: an editor can still point a credential setting at
+a host they control (a header on an HTTP destination, a database host), or
+a header at any public service that echoes requests, and receive any of the
+workspace's secrets there. Secrets belong to the workspace, not to one
+connection (#869).</p>
 <h3 id="tenant-isolation">Tenant isolation<a class="headerlink" href="#tenant-isolation" title="Permanent link">&para;</a></h3>
 <p>The <code>secrets</code> table has a <code>tenant_id</code> column and every read/write filters
 on it. The HTTP handlers in <code>src/pkg/managementapi/secrets_handler.go</code>

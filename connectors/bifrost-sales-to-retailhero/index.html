@@ -2919,9 +2919,10 @@ and converter: they send sales only, without <code>journalPosition</code>. Deplo
 template again to get the new nodes.</p>
 <p>Settled, with the contract pinned for this path on 2026-11-11:</p>
 <ul>
-<li><strong>Authentication</strong> is a bearer credential from a stored secret (#850). Until
-  that is merged, the template sends no <code>Authorization</code> header and the intake
-  answers <code>401</code>, which is retried and dead-lettered, so nothing is lost.</li>
+<li><strong>Authentication</strong> is a bearer credential from a stored secret (#850, PR
+  #862): the wizard stores the token as <code>http.token_secret_id</code> on deploy and
+  the destination sends it as <code>Authorization: Bearer</code>. A <code>401</code> from the
+  intake is retried and dead-lettered, so nothing is lost.</li>
 <li><strong>Journal position</strong> (#851): <code>data.journal_sequence</code>, sent as
   <code>journalPosition</code>. An event without it is dead-lettered with the reason.</li>
 <li><strong>Revisions</strong>: always <code>r1</code>. Bifrost never sends an amendment or a void; a
