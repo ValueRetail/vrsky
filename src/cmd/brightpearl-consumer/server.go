@@ -47,9 +47,14 @@ func (c *brightpearlConsumer) handleSampleData() http.HandlerFunc {
 		_ = json.Unmarshal(raw, &meta)
 		cfgJSON := json.RawMessage(raw)
 		if meta.TenantID != "" && c.db != nil {
-			if resolved, rerr := crypto.ResolveSecretsInJSON(r.Context(), crypto.NewSQLSecretReader(c.db), meta.TenantID, cfgJSON); rerr == nil {
-				cfgJSON = resolved
+			// Only the credential fields resolve; a placeholder anywhere else
+			// is refused, naming the setting (#853).
+			resolved, rerr := crypto.ResolveBlockSecrets(r.Context(), crypto.NewSQLSecretReader(c.db), meta.TenantID, "brightpearl", cfgJSON)
+			if rerr != nil {
+				writeErr("could not read the stored credentials: " + rerr.Error())
+				return
 			}
+			cfgJSON = resolved
 		}
 
 		var cfg BrightpearlConfig

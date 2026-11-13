@@ -832,7 +832,7 @@ func (c *frontSystemsConsumer) frontSystemsNode(ctx context.Context, nodesJSON j
 		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "front_systems" || nc.FrontSystems == nil {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			if transientDBError(rerr) {
 				return nil, &startError{kind: startTransient, err: fmt.Errorf("resolve secrets: %w", rerr)}

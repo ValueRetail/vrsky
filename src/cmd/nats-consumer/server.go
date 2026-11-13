@@ -52,8 +52,9 @@ func writeTestJSON(w http.ResponseWriter, status int, body map[string]interface{
 // a missing durable is reported as fine when the first start may create it,
 // and as an error when create_durable is off.
 //
-// The body is the nats block, plus tenant_id. With a tenant, *_secret_id
-// references are resolved, so a saved node can be tested again. A draft typed
+// The body is the nats block, plus tenant_id. With a tenant, the credential
+// *_secret_id references are resolved, so a saved node can be tested again;
+// a {secret:} placeholder in any setting is refused (#853). A draft typed
 // a moment ago carries its password in the clear; it is used for this one
 // test and stored nowhere.
 func (c *natsConsumer) handleTestConnection() http.HandlerFunc {
@@ -73,9 +74,10 @@ func (c *natsConsumer) handleTestConnection() http.HandlerFunc {
 		_ = json.Unmarshal(raw, &meta)
 		cfgJSON := json.RawMessage(raw)
 		if meta.TenantID != "" && c.db != nil {
-			resolved, rerr := crypto.ResolveSecretsInJSON(r.Context(), crypto.NewSQLSecretReader(c.db), meta.TenantID, onlyCredentialSecrets(cfgJSON))
+			resolved, rerr := crypto.ResolveBlockSecrets(r.Context(), crypto.NewSQLSecretReader(c.db), meta.TenantID, "nats", cfgJSON)
 			if rerr != nil {
-				writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": "could not read the stored credentials"})
+				// The reason names a setting, never a value (#853).
+				writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": "could not read the stored credentials: " + rerr.Error()})
 				return
 			}
 			cfgJSON = resolved

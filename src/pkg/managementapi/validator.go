@@ -172,6 +172,12 @@ func (v *Validator) ValidateDAG(conn *Connection) error {
 			errors = append(errors, msg)
 		}
 	}
+	// A stored secret may be referenced only from a credential setting
+	// (#853). Checked on save too: a placeholder elsewhere is a value the
+	// user has supplied, and never a legitimate one.
+	for _, node := range conn.Nodes {
+		errors = append(errors, validateSecretPlaceholders(node)...)
+	}
 
 	if len(errors) > 0 {
 		return &DAGValidationError{Errors: errors}

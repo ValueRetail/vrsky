@@ -290,7 +290,7 @@ func (p *sftpProducer) getTargets(ctx context.Context, connID, tenantID string) 
 		}
 		// Secrets are resolved for our own nodes only: an unreadable secret
 		// on another connector's node is not a reason to hold this message.
-		resolved, err := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, err := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if err != nil {
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", err))
 		}

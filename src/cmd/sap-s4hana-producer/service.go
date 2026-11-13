@@ -466,7 +466,7 @@ func (p *sapProducer) getConfig(ctx context.Context, connectionID, tenantID stri
 		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "sap_s4hana" || nc.SAP == nil {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
 			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}

@@ -362,29 +362,3 @@ func TestClassifyJS(t *testing.T) {
 		}
 	}
 }
-
-// Only the two credential references are resolved; any other *_secret_id is
-// dropped before resolving, so a secret cannot come back in a validation error.
-func TestOnlyCredentialSecrets(t *testing.T) {
-	in := []byte(`{"stream":"S","password_secret_id":"a","creds_secret_id":"b","auth_type_secret_id":"c","stream_secret_id":"d","nkey_seed_secret_id":"e","ca_cert_secret_id":"f","api_prefix_secret_id":"g"}`)
-	var out map[string]any
-	if err := json.Unmarshal(onlyCredentialSecrets(in), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out["password_secret_id"] != "a" || out["creds_secret_id"] != "b" || out["stream"] != "S" ||
-		out["nkey_seed_secret_id"] != "e" || out["ca_cert_secret_id"] != "f" {
-		t.Errorf("kept = %v", out)
-	}
-	if _, ok := out["auth_type_secret_id"]; ok {
-		t.Errorf("auth_type_secret_id survived: %v", out)
-	}
-	if _, ok := out["stream_secret_id"]; ok {
-		t.Errorf("stream_secret_id survived: %v", out)
-	}
-	if _, ok := out["api_prefix_secret_id"]; ok {
-		t.Errorf("api_prefix_secret_id survived: %v", out)
-	}
-	if got := onlyCredentialSecrets([]byte(`"x"`)); string(got) != `"x"` {
-		t.Errorf("a non-object changed: %s", got)
-	}
-}

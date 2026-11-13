@@ -137,7 +137,7 @@ type ObjectStore interface {
 }
 
 // Config is the resolved per-node configuration (after
-// crypto.ResolveSecretsInJSON has replaced *_secret_id references with
+// crypto.ResolveNodeSecrets has replaced *_secret_id references with
 // plaintext). It carries the union of fields across providers; only the subset
 // relevant to Provider is used.
 type Config struct {

@@ -29,6 +29,7 @@ func TestConfigRead_FailureIsNotAcked(t *testing.T) {
 		Columns:          []string{"nodes", "edges"},
 		OwnNode:          `{"type":"kafka","kafka":{"brokers":["b:9092"],"password_secret_id":"00000000-0000-0000-0000-000000000001"}}`,
 		OwnNodeHasSecret: true,
+		PlaceholderField: "kafka.auth_type",
 		ForeignNode:      `{"type":"http","http":{"url":"https://example.com"},"auth_value_secret_id":"00000000-0000-0000-0000-000000000002"}`,
 		Positive: func(t *testing.T, db *sql.DB) (sdk.Producer, string, func() bool) {
 			fake := &fakeWriter{}

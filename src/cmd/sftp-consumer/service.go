@@ -858,23 +858,27 @@ func (s *sftpConsumer) getSFTPConfig(connectionID, tenantID string) (*SFTPConfig
 		return nil, false
 	}
 
-	resolved, err := crypto.ResolveSecretsInJSON(context.Background(), crypto.NewSQLSecretReader(s.db), tenantID, nodesJSON)
-	if err != nil {
-		s.logger.Error("resolve secrets", "error", err, "connection_id", connectionID)
-		return nil, false
-	}
-
 	var nodes []node
-	if err := json.Unmarshal(resolved, &nodes); err != nil {
+	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		s.logger.Warn("parse nodes", "error", err, "connection_id", connectionID)
 		return nil, false
 	}
 	for _, n := range nodes {
-		if n.Type != "consumer" {
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if n.Type != "consumer" || json.Unmarshal(n.Config, &kind) != nil || kind.Type != "sftp" {
 			continue
 		}
+		// Secrets of our own node only, and only in its credential fields
+		// (#853).
+		resolved, err := crypto.ResolveNodeSecrets(context.Background(), crypto.NewSQLSecretReader(s.db), tenantID, n.Config)
+		if err != nil {
+			s.logger.Error("resolve secrets", "error", err, "connection_id", connectionID)
+			return nil, false
+		}
 		var nc nodeConfig
-		if err := json.Unmarshal(n.Config, &nc); err != nil {
+		if err := json.Unmarshal(resolved, &nc); err != nil {
 			continue
 		}
 		if nc.Type == "sftp" && nc.SFTP != nil {

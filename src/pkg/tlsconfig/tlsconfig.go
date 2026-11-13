@@ -1,7 +1,7 @@
 // Package tlsconfig builds *tls.Config values for the HTTP connectors' mutual-TLS
 // support (Phase 3F, #89). Cert material is supplied as PEM bytes — the workers
 // resolve the connector's tls.*_secret_id references to plaintext via
-// crypto.ResolveSecrets before calling in here, so this package never touches
+// crypto.ResolveNodeSecrets before calling in here, so this package never touches
 // the secrets vault.
 package tlsconfig
 
@@ -25,7 +25,7 @@ import (
 
 // NodeConfig is the resolved (plaintext PEM) mTLS material a connector node
 // carries under its "tls" block. In the stored config these are *_secret_id
-// references; crypto.ResolveSecrets replaces them with the PEM values below.
+// references; crypto.ResolveNodeSecrets replaces them with the PEM values below.
 //
 //	consumer (webhook): ClientCA verifies inbound client certs;
 //	                    Cert/Key are the listener's server identity.

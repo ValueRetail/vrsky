@@ -520,25 +520,34 @@ func (s *webhookConsumer) getConnection(connectionID, tenantID string) (*Connect
 	return &conn, nil
 }
 
-// resolveSecretsInNodes parses nodes[], runs the resolver on each config,
-// re-marshals. Returns the original bytes on parse failure.
+// resolveSecretsInNodes parses nodes[], runs the resolver on the config of
+// each webhook (http consumer) node, re-marshals. Returns the original bytes
+// on parse failure.
 func (s *webhookConsumer) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
 	if len(nodesJSON) == 0 {
 		return nodesJSON, nil
 	}
-	var nodes []map[string]any
+	var nodes []map[string]json.RawMessage
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		return nodesJSON, err
 	}
 	reader := crypto.NewSQLSecretReader(s.db)
 	for _, n := range nodes {
-		cfg, ok := n["config"].(map[string]any)
-		if !ok {
+		// Only our own node, and in it only the credential fields (#853):
+		// another connector's settings are not ours to resolve.
+		var role string
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(n["type"], &role) != nil || role != "consumer" ||
+			json.Unmarshal(n["config"], &kind) != nil || kind.Type != "http" {
 			continue
 		}
-		if err := crypto.ResolveSecrets(context.Background(), reader, tenantID, cfg); err != nil {
+		resolved, err := crypto.ResolveNodeSecrets(context.Background(), reader, tenantID, n["config"])
+		if err != nil {
 			return nodesJSON, err
 		}
+		n["config"] = resolved
 	}
 	return json.Marshal(nodes)
 }
@@ -571,7 +580,7 @@ func (s *webhookConsumer) extractSignature(conn *Connection) *signatureConfig {
 					Algorithm string `json:"algorithm"`
 					Encoding  string `json:"encoding"`
 					Prefix    string `json:"prefix"`
-					Secret    string `json:"secret"` // resolved by ResolveSecrets
+					Secret    string `json:"secret"` // resolved by crypto.ResolveNodeSecrets
 				} `json:"signature"`
 			} `json:"http"`
 		}
@@ -617,7 +626,7 @@ func (s *webhookConsumer) extractClientCA(conn *Connection) []byte {
 		var cfg struct {
 			Type string `json:"type"`
 			TLS  struct {
-				ClientCA string `json:"client_ca"` // resolved by ResolveSecrets
+				ClientCA string `json:"client_ca"` // resolved by crypto.ResolveNodeSecrets
 			} `json:"tls"`
 		}
 		if err := json.Unmarshal(node.Config, &cfg); err != nil {
