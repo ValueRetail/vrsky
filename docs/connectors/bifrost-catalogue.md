@@ -57,7 +57,9 @@ first, or use `delta`.
   the raw token on the node. This is the only setting read from the secrets
   store: other `*_secret_id` keys are ignored, and a `{secret:<id>}`
   placeholder in any setting makes the node fail as misconfigured (retried,
-  then the DLQ). The error names the setting, not its value.
+  then the DLQ). The error names the setting, not its value. Since #853 the
+  same holds for every connector, and saving or starting such a node is
+  refused too ([SECURITY.md](../SECURITY.md#where-a-secret-may-be-referenced)).
 - `tenant_id` — Bifrost's tenant ID (the one in its credentials file), not
   VRSky's, sent as `X-Tenant-Id`. Optional: Bifrost takes the tenant from the
   credential and answers 403 if the header names another one.

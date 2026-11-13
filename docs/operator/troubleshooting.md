@@ -143,6 +143,23 @@ Reading and editing still work. The owner asks for a plan under Settings → Pla
 you activate it under Platform → Workspaces, which also starts the stopped
 pipelines again. To extend a trial instead, set plan Trial with a new end date.
 
+## "`<setting>` holds a {secret:…} placeholder"
+
+A node refers to a stored secret, as `{secret:<uuid>}`, in a setting that is
+not a credential, or inline in a credential that takes only a
+`<field>_secret_id` reference (#853). The list of settings that may, per
+connector, is in [SECURITY.md](../SECURITY.md#where-a-secret-may-be-referenced).
+Save, start, Test Connection and schema discovery refuse it with this message.
+A node stored before #853 fails the same way at runtime: a source goes to
+status `error` (or logs it and stays idle), a destination retries the message
+and dead-letters it with this text in `X-Vrsky-Last-Error`. Fix the setting
+(the plain value, or the credential's `_secret_id` reference), restart the
+pipeline and replay the DLQ. A `<field>_secret_id` on a setting that is not a
+credential is not an error: it is ignored, and the setting reads as unset.
+
+A missing secret now reads `resolve <setting>_secret_id: stored secret not
+found`, without the secret's id or the workspace.
+
 ## A builder panel says "cannot reach the data-converter service"
 
 The builder's live panels (Converter, Filter, File Watcher, …) are served by

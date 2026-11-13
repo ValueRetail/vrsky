@@ -32,6 +32,10 @@ Work through these checks in order:
 - Re-check the **host** and **credentials** you entered.
 - The source or destination must be **reachable from the platform network**. A
   host that works from your laptop may still be unreachable from VRSky.
+- `… holds a {secret:…} placeholder` means a setting refers to a stored
+  secret where only a password, key or token field may. Type the plain value
+  there; store credentials in their own fields. The same message stops a save
+  or a start.
 
 If it still fails, see the
 [operator troubleshooting guide](../operator/troubleshooting.md).
