@@ -95,7 +95,23 @@ restores nothing on any consumer.
   lookup makes every consumer retry that lookup, not only the owner. Each
   stops at its first lookup that works (not ours: no retry). That costs one
   small query per consumer per retry, only while the database is failing.
-- `RestoreRunning` retries any list error, not only "database down": at boot
-  the table can be missing for a moment while migrations run. It blocks
-  `Run` while it retries, as the single list query did; start commands are
-  handled meanwhile because the subscriptions are already in place.
+- `RestoreRunning` retries only a list error that `IsTransientDBError` calls
+  the database not answering (review: a permission error retried for 6 h
+  would only spam). It blocks `Run` while it retries, as the single list
+  query did; start commands are handled meanwhile because the subscriptions
+  are already in place. In the remote agent gateway that also holds off the
+  membership loop, which starts after restore; noted in backlog 229.
+- Retries are keyed by tenant and connection (review). Every consumer sees
+  every command, so a start or stop naming the wrong tenant for a connection
+  can be in flight beside the right tenant's retry; it must neither take
+  the retry's place nor end it. `StopLocked` names no tenant and ends every
+  tenant's retry for the connection; `StopForTenantLocked` ends only its
+  own tenant's, also when it refuses the stop for another tenant's claim.
+- A retry whose attempt is refused because another start holds the claim
+  keeps looping until that claim is gone (review): the start it queued on
+  the claim runs under the retry's context, and would be refused if the
+  loop had ended. The loop removes itself from the pending map in the same
+  critical section that decides to end.
+- A host name that does not resolve counts as the database not answering
+  (`net.Error`), as it did in Front Systems: for the database source a
+  mistyped host is retried for up to 6 h. Kept, and documented.

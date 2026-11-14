@@ -224,7 +224,7 @@ type pendingRetry struct {
 	again bool
 }
 
-// stopWatch counts the stops for a connection while starts through
+// stopWatch counts the stops for a tenant's connection while starts through
 // StartRetrying are running for it, so a start that fails after a stop is
 // not retried.
 type stopWatch struct {
@@ -240,10 +240,11 @@ type stopWatch struct {
 // context, and keep nothing that outlives its return under it (pollers run
 // under a context of their own). It returns once the first attempt is done.
 //
-// One retry loop runs per connection. A transient failure while one is
-// pending for the same tenant leaves it to that loop; one for another tenant
-// is logged and not retried. A permanent failure ends a pending retry for the
-// same tenant.
+// One retry loop runs per tenant and connection: a transient failure while
+// one is pending leaves it to that loop. Loops are kept apart by tenant, so a
+// start naming the wrong tenant for a connection can neither take the right
+// tenant's place nor end its retry. A permanent failure ends the pending
+// retry of its own tenant.
 func (g *StartGuard) StartRetrying(ctx context.Context, opts RetryOptions, tenantID, connectionID string, start func(ctx context.Context) error) {
 	logger := opts.Logger
 	if logger == nil {
@@ -257,9 +258,10 @@ func (g *StartGuard) StartRetrying(ctx context.Context, opts RetryOptions, tenan
 		}
 		return
 	}
+	key := statusKey{tenantID: tenantID, connectionID: connectionID}
 
 	mu.Lock()
-	w := g.watchLocked(connectionID)
+	w := g.watchLocked(key)
 	stops := w.stops
 	mu.Unlock()
 
@@ -267,14 +269,14 @@ func (g *StartGuard) StartRetrying(ctx context.Context, opts RetryOptions, tenan
 
 	mu.Lock()
 	stopped := w.stops != stops
-	g.unwatchLocked(connectionID, w)
+	g.unwatchLocked(key, w)
 	if err == nil {
 		mu.Unlock()
 		return
 	}
 	if !IsTransientStart(err) {
-		if e := g.retries[connectionID]; e != nil && e.tenantID == tenantID {
-			g.endRetryLocked(connectionID, e)
+		if e := g.retries[key]; e != nil {
+			g.endRetryLocked(key, e)
 		}
 		mu.Unlock()
 		// Debug: the consumer logged the failure itself, and every consumer
@@ -283,20 +285,18 @@ func (g *StartGuard) StartRetrying(ctx context.Context, opts RetryOptions, tenan
 		return
 	}
 	var why string
-	switch e := g.retries[connectionID]; {
+	switch e := g.retries[key]; {
 	case g.retryClosed:
 		why = "shutting down"
 	case stopped:
 		why = "a stop arrived while it ran"
 	case ctx.Err() != nil:
 		why = "its context ended"
-	case e != nil && e.tenantID == tenantID:
+	case e != nil:
 		e.again = true
 		mu.Unlock()
 		logger.Warn("Start failed; a retry is already pending", "error", err)
 		return
-	case e != nil:
-		why = "a retry for another tenant is pending"
 	}
 	if why != "" {
 		mu.Unlock()
@@ -306,28 +306,36 @@ func (g *StartGuard) StartRetrying(ctx context.Context, opts RetryOptions, tenan
 	rctx, cancel := context.WithCancel(ctx)
 	e := &pendingRetry{tenantID: tenantID, ctx: rctx, cancel: cancel, first: time.Now()}
 	if g.retries == nil {
-		g.retries = make(map[string]*pendingRetry)
+		g.retries = make(map[statusKey]*pendingRetry)
 	}
-	g.retries[connectionID] = e
+	g.retries[key] = e
 	g.retryWG.Add(1)
 	mu.Unlock()
 	logger.Warn("Start failed for a reason that may pass; retrying in the background", "error", err)
-	go g.retryLoop(e, connectionID, opts, mu, logger, start)
+	go g.retryLoop(e, key, opts, mu, logger, start)
 }
 
 // retryLoop retries the connection's start while e is its pending retry. It
 // runs on its own goroutine, counted by retryWG, and ends with e: everything
-// that ends e cancels its ctx.
-func (g *StartGuard) retryLoop(e *pendingRetry, connectionID string, opts RetryOptions, mu sync.Locker, logger *slog.Logger, start func(context.Context) error) {
+// that ends e cancels its ctx. The loop removes e itself in the critical
+// section that decides to end, so a start failing at the same moment either
+// finds e and leaves the retry to it (again) or finds none and starts a loop
+// of its own.
+func (g *StartGuard) retryLoop(e *pendingRetry, key statusKey, opts RetryOptions, mu sync.Locker, logger *slog.Logger, start func(context.Context) error) {
 	defer g.retryWG.Done()
-	defer func() {
-		mu.Lock()
-		if g.retries[connectionID] == e {
-			delete(g.retries, connectionID)
+	defer e.cancel()
+	// end removes e if it is still the pending retry. The caller holds mu.
+	end := func() {
+		if g.retries[key] == e {
+			delete(g.retries, key)
 		}
+	}
+	// stop ends the loop for a reason found outside the lock.
+	stop := func() {
+		mu.Lock()
+		end()
 		mu.Unlock()
-		e.cancel()
-	}()
+	}
 	for {
 		mu.Lock()
 		e.attempts++
@@ -337,26 +345,30 @@ func (g *StartGuard) retryLoop(e *pendingRetry, connectionID string, opts RetryO
 		select {
 		case <-e.ctx.Done():
 			t.Stop()
+			stop()
 			logger.Info("Start retries ended: stopped, started, or shutting down")
 			return
 		case <-t.C:
 		}
 		if g.BeforeRetryAttempt != nil {
-			g.BeforeRetryAttempt(connectionID)
+			g.BeforeRetryAttempt(key.connectionID)
 		}
 
 		var err error
 		if opts.DB != nil {
-			running, rerr := ConnectionRunning(e.ctx, opts.DB, connectionID, e.tenantID)
+			running, rerr := ConnectionRunning(e.ctx, opts.DB, key.connectionID, key.tenantID)
 			switch {
 			case e.ctx.Err() != nil:
+				stop()
 				return
 			case rerr != nil && IsTransientDBError(rerr):
 				err = TransientStart(fmt.Errorf("check connection status: %w", rerr))
 			case rerr != nil:
+				stop()
 				logger.Warn("Start retries end: the connection's row could not be read", "error", rerr)
 				return
 			case !running:
+				stop()
 				logger.Info("Start retries end: the connection is no longer running")
 				return
 			}
@@ -374,23 +386,37 @@ func (g *StartGuard) retryLoop(e *pendingRetry, connectionID string, opts RetryO
 		}
 
 		mu.Lock()
-		current := g.retries[connectionID] == e && e.ctx.Err() == nil
-		again := e.again
-		mu.Unlock()
+		var why string
 		switch {
-		case !current:
-			return
-		case err == nil && !again:
-			// Activated (Activate ended e, so not current), or nothing to do:
-			// active already, or not this consumer's.
-			return
+		case g.retries[key] != e || e.ctx.Err() != nil:
+			// Ended by a stop, an activation, a permanent failure or Stop.
+			why = "-"
+		case err == nil && !e.again && g.starting[key.connectionID] == nil:
+			// Nothing to do: active already, or not this consumer's. A start
+			// still holding the claim may give up (one for another tenant
+			// finding the connection is not its own), and the start this
+			// attempt queued on it runs under e's context: the loop goes on
+			// until that claim is gone.
+			why = "-"
 		case err != nil && !IsTransientStart(err):
-			logger.Warn("Start retry failed for a reason a retry does not fix; retries end", "error", err)
-			return
+			why = "failed for a reason a retry does not fix"
+		case opts.Policy.givenUp(e.first):
+			why = "giving up"
 		}
-		if opts.Policy.givenUp(e.first) {
+		if why != "" {
+			end()
+		}
+		mu.Unlock()
+		switch why {
+		case "":
+		case "-":
+			return
+		case "giving up":
 			logger.Error("Start still failing; giving up. Stop and start the connection once the cause is fixed",
 				"error", err, "since", e.first)
+			return
+		default:
+			logger.Warn("Start retry "+why+"; retries end", "error", err)
 			return
 		}
 		if err != nil {
@@ -399,16 +425,16 @@ func (g *StartGuard) retryLoop(e *pendingRetry, connectionID string, opts RetryO
 	}
 }
 
-// watchLocked registers a start in progress for connectionID and returns
-// its stop counter. The caller holds the owner's lock.
-func (g *StartGuard) watchLocked(connectionID string) *stopWatch {
+// watchLocked registers a start in progress for key and returns its stop
+// counter. The caller holds the owner's lock.
+func (g *StartGuard) watchLocked(key statusKey) *stopWatch {
 	if g.watches == nil {
-		g.watches = make(map[string]*stopWatch)
+		g.watches = make(map[statusKey]*stopWatch)
 	}
-	w := g.watches[connectionID]
+	w := g.watches[key]
 	if w == nil {
 		w = &stopWatch{}
-		g.watches[connectionID] = w
+		g.watches[key] = w
 	}
 	w.users++
 	return w
@@ -416,45 +442,66 @@ func (g *StartGuard) watchLocked(connectionID string) *stopWatch {
 
 // unwatchLocked drops a start's use of w, and w once unused. The caller
 // holds the owner's lock.
-func (g *StartGuard) unwatchLocked(connectionID string, w *stopWatch) {
+func (g *StartGuard) unwatchLocked(key statusKey, w *stopWatch) {
 	w.users--
-	if w.users == 0 && g.watches[connectionID] == w {
-		delete(g.watches, connectionID)
+	if w.users == 0 && g.watches[key] == w {
+		delete(g.watches, key)
 	}
 }
 
-// endRetryLocked ends e and removes it if it is still the connection's
-// pending retry. The caller holds the owner's lock.
-func (g *StartGuard) endRetryLocked(connectionID string, e *pendingRetry) {
-	if g.retries[connectionID] == e {
-		delete(g.retries, connectionID)
+// endRetryLocked ends e and removes it if it is still key's pending retry.
+// The caller holds the owner's lock.
+func (g *StartGuard) endRetryLocked(key statusKey, e *pendingRetry) {
+	if g.retries[key] == e {
+		delete(g.retries, key)
 	}
 	e.cancel()
 }
 
-// stopRetryLocked is a stop's part in retries: a pending retry ends and a
-// start in progress through StartRetrying will not be retried. The caller
-// holds the owner's lock.
-func (g *StartGuard) stopRetryLocked(connectionID string) {
-	if e := g.retries[connectionID]; e != nil {
-		g.endRetryLocked(connectionID, e)
+// stopRetryLocked is a stop's part in retries: the pending retry ends and a
+// start in progress through StartRetrying will not be retried. With a
+// tenant, only that tenant's; with "" (StopLocked, which names none), every
+// tenant's. The caller holds the owner's lock.
+func (g *StartGuard) stopRetryLocked(tenantID, connectionID string) {
+	for key, e := range g.retries {
+		if key.connectionID == connectionID && (tenantID == "" || key.tenantID == tenantID) {
+			g.endRetryLocked(key, e)
+		}
 	}
-	if w := g.watches[connectionID]; w != nil {
-		w.stops++
+	for key, w := range g.watches {
+		if key.connectionID == connectionID && (tenantID == "" || key.tenantID == tenantID) {
+			w.stops++
+		}
 	}
 }
 
-// activatedLocked ends the connection's pending retry once a start has
+// otherTenantRetryLocked reports the tenant of a retry pending for the
+// connection under another tenant than tenantID, when tenantID has none.
+// The caller holds the owner's lock.
+func (g *StartGuard) otherTenantRetryLocked(tenantID, connectionID string) (string, bool) {
+	if _, ok := g.retries[statusKey{tenantID: tenantID, connectionID: connectionID}]; ok {
+		return "", false
+	}
+	for key := range g.retries {
+		if key.connectionID == connectionID {
+			return key.tenantID, true
+		}
+	}
+	return "", false
+}
+
+// activatedLocked ends the connection's pending retries once a start has
 // activated it. A retry whose own attempt activated is removed but not
 // cancelled here: its context is still the attempt's, and the loop cancels
 // it once the attempt returns. The caller holds the owner's lock.
 func (g *StartGuard) activatedLocked(connectionID string) {
-	e := g.retries[connectionID]
-	if e == nil {
-		return
-	}
-	delete(g.retries, connectionID)
-	if !e.attempting {
-		e.cancel()
+	for key, e := range g.retries {
+		if key.connectionID != connectionID {
+			continue
+		}
+		delete(g.retries, key)
+		if !e.attempting {
+			e.cancel()
+		}
 	}
 }

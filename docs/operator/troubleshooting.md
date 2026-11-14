@@ -194,8 +194,8 @@ as an answer, see the next section.
 
 ## A pipeline says `running` but its consumer did not start
 
-Since #725 every command-driven consumer retries a start that failed for a
-reason that passes. Its log shows `Start failed for a reason that may pass;
+Since #725 every command-driven consumer except the remote agent gateway
+retries a start that failed for a reason that passes. Its log shows `Start failed for a reason that may pass;
 retrying in the background`, then `Retrying start attempt=N`. What counts as
 passing: the management database not answering (connection refused or reset,
 a timeout, the server starting up or shutting down, too many connections)
@@ -212,14 +212,18 @@ retry waits runs at once.
 
 A start that fails for a reason a retry does not fix (bad config, a refused
 URL or address, credentials refused, a missing secret, a refused
-`{secret:…}` placeholder) is not retried. The consumer logs why at Error and
-the pipeline stays down: fix the cause and Stop/Start it. Most consumers do
+`{secret:…}` placeholder) is not retried. The consumer logs why and the
+pipeline stays down: fix the cause and Stop/Start it. Some consumers log a
+secret they cannot read only at Debug, as "Not a … consumer"; if nothing
+shows at Error, raise the log level or check the node's secrets. Most consumers do
 not write status `error` for a refused start yet (#822), so the status can
 still say `running`.
 
 At boot, `Could not list running pipelines to restore; trying again` means
-the consumer could not read which pipelines to bring back. It retries on the
-same schedule and restores them once the database answers. `nothing
+the consumer could not read which pipelines to bring back because the
+database did not answer. It retries on the same schedule and restores them
+once the database answers. Any other list error is logged once and nothing
+is restored. `nothing
 restored. Restart the consumer once the database answers` means it gave up
 (6 h) or shut down first: restart the pod.
 

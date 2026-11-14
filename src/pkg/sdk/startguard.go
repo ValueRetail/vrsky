@@ -131,12 +131,13 @@ type StartGuard struct {
 	written  map[statusKey]uint64
 	lanes    map[statusKey]*statusLane
 
-	// retries holds each connection's pending start retry (startretry.go),
-	// watches the stop counters of starts running through StartRetrying, and
-	// retryClosed is set by StopAllLocked, after which nothing is retried.
-	// All guarded by the owner's lock. retryWG counts the retry loops.
-	retries     map[string]*pendingRetry
-	watches     map[string]*stopWatch
+	// retries holds the pending start retry of each tenant's connection
+	// (startretry.go), watches the stop counters of starts running through
+	// StartRetrying, and retryClosed is set by StopAllLocked, after which
+	// nothing is retried. All guarded by the owner's lock. retryWG counts the
+	// retry loops.
+	retries     map[statusKey]*pendingRetry
+	watches     map[statusKey]*stopWatch
 	retryClosed bool
 	retryWG     sync.WaitGroup
 }
@@ -428,11 +429,18 @@ func (c *StartClaim) drop() {
 // that arrives after the stop is not refused while the abandoned one is still
 // working.
 //
-// It also ends a start retry pending for the connection (StartRetrying), and
-// a start running through StartRetrying now is not retried if it fails. That
-// does not count towards the result.
+// It also ends the start retries pending for the connection (StartRetrying),
+// for every tenant since it names none, and a start running through
+// StartRetrying now is not retried if it fails. That does not count towards
+// the result.
 func (g *StartGuard) StopLocked(connectionID string) bool {
-	g.stopRetryLocked(connectionID)
+	g.stopRetryLocked("", connectionID)
+	return g.stopClaimLocked(connectionID)
+}
+
+// stopClaimLocked is StopLocked's part for the claim. The caller holds the
+// owner's lock.
+func (g *StartGuard) stopClaimLocked(connectionID string) bool {
 	c, ok := g.starting[connectionID]
 	if !ok {
 		return false
@@ -453,8 +461,8 @@ func (g *StartGuard) StopAllLocked() {
 	}
 	g.starting = nil
 	g.retryClosed = true
-	for id, e := range g.retries {
-		g.endRetryLocked(id, e)
+	for key, e := range g.retries {
+		g.endRetryLocked(key, e)
 	}
 }
 
@@ -465,15 +473,17 @@ func (g *StartGuard) StopAllLocked() {
 // its active map.
 //
 // It refuses the stop with a *StopTenantMismatch when the subject's tenant is
-// not tenantID, when a start in progress or a start retry pending for the
-// connection is for another tenant, or when the latest Activate for it was
-// for another tenant. The caller then changes nothing (no cancel, no
+// not tenantID, when a start in progress for the connection is for another
+// tenant, when no start is in progress and a start retry is pending for the
+// connection under another tenant only, or when the latest Activate for it
+// was for another tenant. The caller then changes nothing (no cancel, no
 // delete, no status write), logs the error as a warning and returns. The one
-// thing a refused stop does is drop a start for its own tenant that
-// ReserveOrRetry queued on another tenant's claim: the stop is newer, as in
-// StopLocked.
+// thing a refused stop does is drop what is its own tenant's: a start that
+// ReserveOrRetry queued on another tenant's claim, and its tenant's pending
+// start retry. The stop is newer, as in StopLocked.
 //
-// Otherwise it does what StopLocked does and returns its result. A connection
+// Otherwise it does what StopLocked does, for its own tenant's retries only,
+// and returns its result. A connection
 // this owner neither started nor is starting passes, so a stop meant for
 // another consumer finds nothing here, as before. A start through Reserve
 // records no tenant, and stops for it are checked against the subject only.
@@ -484,14 +494,16 @@ func (g *StartGuard) StopForTenantLocked(subject, tenantID, connectionID string)
 	if c, ok := g.starting[connectionID]; ok {
 		if c.tenantID != "" && c.tenantID != tenantID {
 			delete(c.retry, tenantID)
+			g.stopRetryLocked(tenantID, connectionID)
 			return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: c.tenantID, Starting: true}
 		}
-	} else if e := g.retries[connectionID]; e != nil && e.tenantID != tenantID {
-		return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: e.tenantID, Starting: true}
+	} else if other, ok := g.otherTenantRetryLocked(tenantID, connectionID); ok {
+		return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: other, Starting: true}
 	} else if owner := g.owners[connectionID]; owner != "" && owner != tenantID {
 		return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: owner}
 	}
-	return g.StopLocked(connectionID), nil
+	g.stopRetryLocked(tenantID, connectionID)
+	return g.stopClaimLocked(connectionID), nil
 }
 
 // StopTenantMismatch is why StopForTenantLocked refused a stop. Its message

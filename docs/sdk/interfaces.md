@@ -138,6 +138,8 @@ func (s *X) tryStart(ctx context.Context, id, tenant string) error {
 - Retries wait 5 s, doubling to 5 min, with jitter (`sdk.RetryPolicy`), and
   give up 6 h after the first failure. Before each one the row is read
   (`sdk.ConnectionRunning`): a row that is no longer `running` ends them.
+- Retries are kept per tenant and connection: a start or stop naming another
+  tenant for the connection neither takes the retry's place nor ends it.
 - They also end on a stop for the connection's tenant (the stop handler's
   `StopForTenantLocked`), on `StopAllLocked` in `Stop`, when the start's
   context ends, on a permanent failure, and when any start activates the
@@ -148,8 +150,8 @@ func (s *X) tryStart(ctx context.Context, id, tenant string) error {
 - While a retry waits the row keeps saying `running`; the consumer writes
   nothing until a retry activates and writes `running` again.
 
-`sdk.RestoreRunning` retries its list query on the same schedule. A list
-that never worked is logged at Error, and `sdk.RestoreRunningErr` returns it
+`sdk.RestoreRunning` retries its list query on the same schedule when the
+database does not answer. A list that never worked is logged at Error, and `sdk.RestoreRunningErr` returns it
 as `sdk.ErrRestoreList` rather than as zero pipelines.
 
 ## Custom HTTP handlers

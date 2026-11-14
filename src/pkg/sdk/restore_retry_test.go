@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/lib/pq"
 )
 
 // RestoreRunningErr against a database whose list query fails (#725): a
@@ -19,7 +20,8 @@ import (
 // through the list counts as a failed list, not a short one.
 func TestRestoreRunningListFailure(t *testing.T) {
 	const listQuery = `SELECT id::text, tenant_id FROM connections`
-	down := errors.New("pq: the database system is starting up")
+	down := &pq.Error{Code: "57P03", Message: "the database system is starting up"}
+	badQuery := &pq.Error{Code: "42501", Message: "permission denied for table connections"}
 	rows := func() *sqlmock.Rows {
 		return sqlmock.NewRows([]string{"id", "tenant_id"}).AddRow("c1", "t1").AddRow("c2", "t2")
 	}
@@ -34,6 +36,7 @@ func TestRestoreRunningListFailure(t *testing.T) {
 		giveUp    time.Duration
 		cancel    bool // ctx is cancelled while it retries
 		wantErr   bool
+		wantBad   bool // the error is badQuery, not down
 		wantStart []string
 	}{
 		{
@@ -65,6 +68,15 @@ func TestRestoreRunningListFailure(t *testing.T) {
 			giveUp:  -1, // never: only ctx ends it
 			cancel:  true,
 			wantErr: true,
+		},
+		{
+			name: "an error other than the database down is not retried",
+			expect: func(m sqlmock.Sqlmock) {
+				m.ExpectQuery(listQuery).WillReturnError(badQuery)
+				m.ExpectQuery(listQuery).WillReturnRows(rows()) // must stay unused
+			},
+			wantErr: true,
+			wantBad: true,
 		},
 		{
 			name: "empty list is no error",
@@ -108,7 +120,11 @@ func TestRestoreRunningListFailure(t *testing.T) {
 			if tc.wantErr {
 				// After a cancel the last query may have failed with the
 				// context's error rather than down.
-				if !errors.Is(rerr, ErrRestoreList) || (!tc.cancel && !errors.Is(rerr, down)) {
+				want := error(down)
+				if tc.wantBad {
+					want = badQuery
+				}
+				if !errors.Is(rerr, ErrRestoreList) || (!tc.cancel && !errors.Is(rerr, want)) {
 					t.Fatalf("err = %v, want ErrRestoreList wrapping the query error", rerr)
 				}
 			} else if rerr != nil {

@@ -80,7 +80,7 @@ func TestStartRetrying_RowCheck(t *testing.T) {
 			id := add("running")
 			o := newRTOwner(t, failFirst(1, sdk.TransientStart(errDBDown)))
 			o.db = db
-			o.policy = sdk.RetryPolicy{Base: 200 * time.Millisecond, Max: 200 * time.Millisecond}
+			o.policy = sdk.RetryPolicy{Base: time.Second, Max: time.Second}
 			o.startConnection(context.Background(), id, tenant)
 			if sdk.PendingRetriesForTest(&o.g, &o.mu) != 1 {
 				t.Fatal("no retry pending after a transient failure")

@@ -1704,8 +1704,10 @@ Last updated 2026-10-28.
     through its own lanes (`lanes.go`) and is not on the guard, so a
     database blip at its start still leaves the connection `running` with
     nothing behind it until someone stops and starts it. It does get the
-    `RestoreRunning` list retry. Either move its lanes onto
-    `StartRetrying` or give them the same loop. Found in #725.
+    `RestoreRunning` list retry, which blocks `restoreRunning` while the
+    database is down, and so the membership loop that starts after it;
+    start that loop first. Either move its lanes onto `StartRetrying` or
+    give them the same loop. Found in #725.
 
 230. **Consumers read the connection at start without the start's
     context.** Several `getConfig`/`getConnection` lookups in the

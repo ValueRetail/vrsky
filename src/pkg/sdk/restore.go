@@ -33,8 +33,10 @@ var ErrRestoreList = errors.New("could not list running pipelines to restore")
 // Call it after the command subscriptions are in place, so nothing published
 // meanwhile is missed. Returns how many rows were offered to start.
 //
-// A list query that fails is tried again on the default RetryPolicy schedule
-// until it works, ctx ends or the policy gives up (#725). A list that never
+// A list query that fails because the database does not answer
+// (IsTransientDBError) is tried again on the default RetryPolicy schedule
+// until it works, ctx ends or the policy gives up (#725); it blocks the
+// caller meanwhile. Any other list error ends it at once. A list that never
 // worked is logged at Error and returns 0; RestoreRunningErr returns the
 // error too, for a caller that wants to tell it from "nothing running".
 func RestoreRunning(ctx context.Context, db *sql.DB, logger *slog.Logger, typeHint string,
@@ -57,15 +59,15 @@ func RestoreRunningErr(ctx context.Context, db *sql.DB, logger *slog.Logger, typ
 		logger = slog.Default()
 	}
 	first := time.Now()
-	var todo []restoreRow
+	var restore []restoreRow
 	for attempt := 1; ; attempt++ {
-		var err error
-		todo, err = listRunning(ctx, db, typeHint, logger)
-		if err == nil {
+		todo, lerr := listRunning(ctx, db, typeHint, logger)
+		if lerr == nil {
+			restore = todo
 			break
 		}
-		err = fmt.Errorf("%w: %w", ErrRestoreList, err)
-		if ctx.Err() != nil || policy.givenUp(first) {
+		err := fmt.Errorf("%w: %w", ErrRestoreList, lerr)
+		if ctx.Err() != nil || !IsTransientDBError(lerr) || policy.givenUp(first) {
 			logger.Error("Could not list running pipelines to restore; nothing restored. Restart the consumer once the database answers",
 				"type", typeHint, "error", err, "attempts", attempt)
 			return 0, err
@@ -82,11 +84,11 @@ func RestoreRunningErr(ctx context.Context, db *sql.DB, logger *slog.Logger, typ
 		case <-t.C:
 		}
 	}
-	for _, p := range todo {
+	for _, p := range restore {
 		start(ctx, p.id, p.tenant)
 	}
-	logger.Info("Restored running pipelines", "type", typeHint, "count", len(todo))
-	return len(todo), nil
+	logger.Info("Restored running pipelines", "type", typeHint, "count", len(restore))
+	return len(restore), nil
 }
 
 type restoreRow struct{ id, tenant string }

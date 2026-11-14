@@ -277,7 +277,9 @@ func TestStartRetrying_Stop(t *testing.T) {
 					})
 				}
 			} else {
-				o.policy = sdk.RetryPolicy{Base: 300 * time.Millisecond, Max: 300 * time.Millisecond}
+				// Long enough that the stop lands while the retry waits, even
+				// on a slow -race run.
+				o.policy = sdk.RetryPolicy{Base: 3 * time.Second, Max: 3 * time.Second}
 			}
 			o.publish("start", rtTenantA)
 			eventually(t, "the first attempt", func() bool { return o.attempts.Load() == 1 })
@@ -286,10 +288,17 @@ func TestStartRetrying_Stop(t *testing.T) {
 				o.publish("stop", tc.stopTenant)
 				o.waitStop()
 			}
-			if tc.wantActive {
+			switch {
+			case tc.wantActive:
 				eventually(t, "the retry to activate", func() bool { return o.activations.Load() == 1 })
+			case tc.beforeReserve:
+				o.settle()
+			default:
+				// Ended by the stop, well before its wait is over.
+				if !sdk.WaitRetriesForTest(&o.g, time.Second) {
+					t.Fatal("the stop did not end the waiting retry")
+				}
 			}
-			o.settle()
 			o.noLoopsLeft()
 			if got := o.activations.Load() == 1; got != tc.wantActive {
 				t.Fatalf("activated = %v, want %v (attempts %d)", got, tc.wantActive, o.attempts.Load())
@@ -307,7 +316,7 @@ func TestStartRetrying_Stop(t *testing.T) {
 func TestStartRetrying_ContextAndShutdown(t *testing.T) {
 	t.Run("context cancelled", func(t *testing.T) {
 		o := newRTOwner(t, failFirst(100, sdk.TransientStart(errDBDown)))
-		o.policy = sdk.RetryPolicy{Base: 300 * time.Millisecond, Max: 300 * time.Millisecond}
+		o.policy = sdk.RetryPolicy{Base: 3 * time.Second, Max: 3 * time.Second}
 		ctx, cancel := context.WithCancel(context.Background())
 		o.startConnection(ctx, rtConn, rtTenantA)
 		if sdk.PendingRetriesForTest(&o.g, &o.mu) != 1 {
@@ -315,14 +324,13 @@ func TestStartRetrying_ContextAndShutdown(t *testing.T) {
 		}
 		cancel()
 		o.noLoopsLeft()
-		time.Sleep(2 * o.policy.Max)
 		if got := o.attempts.Load(); got != 1 {
 			t.Fatalf("attempts = %d after the context ended, want 1", got)
 		}
 	})
 	t.Run("StopAllLocked", func(t *testing.T) {
 		o := newRTOwner(t, failFirst(100, sdk.TransientStart(errDBDown)))
-		o.policy = sdk.RetryPolicy{Base: 300 * time.Millisecond, Max: 300 * time.Millisecond}
+		o.policy = sdk.RetryPolicy{Base: 3 * time.Second, Max: 3 * time.Second}
 		o.publish("start", rtTenantA)
 		eventually(t, "the retry to be pending", func() bool { return sdk.PendingRetriesForTest(&o.g, &o.mu) == 1 })
 		o.shutdown()
@@ -332,7 +340,6 @@ func TestStartRetrying_ContextAndShutdown(t *testing.T) {
 		if n := sdk.PendingRetriesForTest(&o.g, &o.mu); n != 0 {
 			t.Fatalf("%d retries pending after StopAllLocked", n)
 		}
-		time.Sleep(2 * o.policy.Max)
 		if got := o.attempts.Load(); got != 2 {
 			t.Fatalf("attempts = %d, want 2 (one before, one after shutdown)", got)
 		}
@@ -344,16 +351,15 @@ func TestStartRetrying_ContextAndShutdown(t *testing.T) {
 // left to start.
 func TestStartRetrying_StartCommandWhileRetryPending(t *testing.T) {
 	o := newRTOwner(t, failFirst(1, sdk.TransientStart(errDBDown)))
-	o.policy = sdk.RetryPolicy{Base: time.Second, Max: time.Second}
+	o.policy = sdk.RetryPolicy{Base: 4 * time.Second, Max: 4 * time.Second}
 	o.publish("start", rtTenantA)
 	eventually(t, "the retry to be pending", func() bool { return sdk.PendingRetriesForTest(&o.g, &o.mu) == 1 })
 	o.publish("start", rtTenantA)
 	eventually(t, "the start command to activate", func() bool { return o.activations.Load() == 1 })
-	// Ended by the activation, well before its one-second wait is over.
-	if !sdk.WaitRetriesForTest(&o.g, 500*time.Millisecond) {
+	// Ended by the activation, well before its wait is over.
+	if !sdk.WaitRetriesForTest(&o.g, time.Second) {
 		t.Fatal("the pending retry did not end when the start command activated the connection")
 	}
-	time.Sleep(1500 * time.Millisecond)
 	if a, n := o.activations.Load(), o.attempts.Load(); a != 1 || n != 2 {
 		t.Fatalf("activations = %d, attempts = %d; want 1 and 2", a, n)
 	}
