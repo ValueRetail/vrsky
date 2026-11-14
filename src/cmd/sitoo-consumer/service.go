@@ -68,6 +68,9 @@ type sitooConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -245,8 +248,17 @@ func (s *sitooConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering while the config or its secrets are read) is retried in the
+// background (#725).
 func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger, Policy: s.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return s.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (s *sitooConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -254,10 +266,10 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// the same connection stops here instead of starting a second poller (#397).
 	// The claim carries the tenant so a stop naming another tenant is refused
 	// (#498); no retry, as before.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok }, nil)
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok }, nil)
 	if !ok {
 		logger.Warn("Sitoo poller already running or starting")
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
@@ -265,29 +277,29 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 	cfg, err := s.getSitooConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Sitoo consumer for this connection", "error", err)
-		return
+		return sdk.TransientIfDBDown(err)
 	}
 	if cfg.AccountID == 0 || cfg.SiteID == 0 || cfg.APIID == "" || cfg.APIPassword == "" {
 		logger.Error("Sitoo config incomplete (need account_id, site_id, api_id, api_password_secret_id)")
-		return
+		return errors.New("sitoo config incomplete")
 	}
 	// Poll interval <= 0 means webhook-only (no polling) — a valid mode.
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Info("Sitoo connection is webhook-only (no poll interval configured)")
-		return
+		return nil
 	}
 	if err := cfg.checkResource(); err != nil {
 		logger.Error("Sitoo resource invalid", "error", err)
-		return
+		return err
 	}
 	if err := cfg.checkBaseURL(s.allowPrivate); err != nil {
 		logger.Error("Sitoo base_url refused", "error", err)
-		return
+		return err
 	}
 	if cfg.Incremental {
 		if err := cfg.checkIncremental(); err != nil {
 			logger.Error("Sitoo incremental polling refused", "error", err)
-			return
+			return err
 		}
 		if cfg.overlapWiderThanAPoll() {
 			logger.Warn("Sitoo cursor_overlap is more than one poll can re-read; lower it or raise page_size",
@@ -300,11 +312,12 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 	if !claim.Activate(func() { s.active[connectionID] = cancel }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 
 	logger.Info("Starting Sitoo poller", "resource", cfg.effectiveResource(), "interval", cfg.PollIntervalSeconds)
 	go s.runPoller(ctx, connectionID, tenantID, cfg)
+	return nil
 }
 
 func (s *sitooConsumer) handleStopCommand(msg *nats.Msg) {

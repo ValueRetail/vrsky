@@ -43,6 +43,9 @@ type rabbitConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -159,8 +162,16 @@ func (c *rabbitConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering) is retried in the background (#725).
 func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	c.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &c.mu, DB: c.db, Logger: c.logger, Policy: c.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return c.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (c *rabbitConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -169,23 +180,26 @@ func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tena
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+	claim, ok := c.starts.ReserveOrRetryContext(ctx, &c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
 		func() { c.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("RabbitMQ consumer already running or starting")
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
 
-	cfg, ok := c.getConfig(connectionID, tenantID)
+	cfg, ok, err := c.loadConfig(connectionID, tenantID)
+	if err != nil {
+		return sdk.TransientIfDBDown(err)
+	}
 	if !ok {
 		logger.Debug("Not a RabbitMQ consumer for this connection, ignoring")
-		return
+		return nil
 	}
 	if cfg.URL == "" || cfg.Queue == "" {
 		logger.Error("RabbitMQ config incomplete (need url, queue)")
-		return
+		return errors.New("rabbitmq config incomplete (need url, queue)")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -193,7 +207,7 @@ func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tena
 	if !claim.Activate(func() { c.active[connectionID] = cancel }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 	// Through the guard's status order: a stop that cancelled the connection
 	// since Activate and wrote "stopped" first makes this a no-op (#423).
@@ -201,6 +215,7 @@ func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tena
 
 	logger.Info("Starting RabbitMQ consumer", "queue", cfg.Queue, "exchange", cfg.Exchange)
 	go c.consumeLoop(ctx, connectionID, tenantID, cfg, logger)
+	return nil
 }
 
 func (c *rabbitConsumer) handleStopCommand(msg *nats.Msg) {
@@ -308,8 +323,17 @@ func (c *rabbitConsumer) publishBody(ctx context.Context, connID, tenantID strin
 
 // getConfig loads the connection, resolves *_secret_id references, and extracts
 // the RabbitMQ consumer node config.
-// lint:tenant-ok — lookup is scoped by (id, tenant_id).
 func (c *rabbitConsumer) getConfig(connectionID, tenantID string) (*RabbitMQConfig, bool) {
+	cfg, ok, _ := c.loadConfig(connectionID, tenantID)
+	return cfg, ok
+}
+
+// loadConfig is getConfig that also returns the error behind a failed load
+// (the connection read or the secret lookup), so a start can tell the
+// database not answering from a connection that is simply not a RabbitMQ
+// consumer (#725). ok is false on every error.
+// lint:tenant-ok — lookup is scoped by (id, tenant_id).
+func (c *rabbitConsumer) loadConfig(connectionID, tenantID string) (*RabbitMQConfig, bool, error) {
 	var nodesJSON json.RawMessage
 	err := c.db.QueryRow(
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
@@ -317,13 +341,16 @@ func (c *rabbitConsumer) getConfig(connectionID, tenantID string) (*RabbitMQConf
 	).Scan(&nodesJSON)
 	if err != nil {
 		c.logger.Debug("connection not found", "error", err, "connection_id", connectionID)
-		return nil, false
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		c.logger.Warn("parse nodes", "error", err, "connection_id", connectionID)
-		return nil, false
+		return nil, false, nil
 	}
 	for _, n := range nodes {
 		var kind struct {
@@ -337,17 +364,17 @@ func (c *rabbitConsumer) getConfig(connectionID, tenantID string) (*RabbitMQConf
 		resolved, err := crypto.ResolveNodeSecrets(context.Background(), crypto.NewSQLSecretReader(c.db), tenantID, n.Config)
 		if err != nil {
 			c.logger.Error("resolve secrets", "error", err, "connection_id", connectionID)
-			return nil, false
+			return nil, false, err
 		}
 		var nc nodeConfig
 		if err := json.Unmarshal(resolved, &nc); err != nil {
 			continue
 		}
 		if nc.Type == "rabbitmq" && nc.RabbitMQ != nil {
-			return nc.RabbitMQ, true
+			return nc.RabbitMQ, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (c *rabbitConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {

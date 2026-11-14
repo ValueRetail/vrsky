@@ -68,6 +68,9 @@ type webhookConsumer struct {
 	// command, say) from both registering it, and lets a stop that arrives
 	// mid-start win (#397, #429). It works under mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	// tunnel tracks the on-demand cloudflared quick tunnel.
 	tunnel tunnelState
@@ -355,8 +358,16 @@ func (s *webhookConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering) is retried in the background (#725).
 func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger, Policy: s.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return s.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (s *webhookConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -364,12 +375,12 @@ func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, ten
 	// the same connection stops here (#397, #429). A start refused while
 	// another is in flight runs again if that one gives up without registering
 	// (#424).
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID,
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenantID, connectionID,
 		func() bool { _, ok := s.activeConnections[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		s.logger.Warn("Webhook already registered or registering", "connection_id", connectionID)
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once registered.
 	defer claim.Release()
@@ -377,12 +388,12 @@ func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, ten
 	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to fetch connection", "error", err, "connection_id", connectionID)
-		return
+		return sdk.TransientIfDBDown(err)
 	}
 
 	if !s.hasWebhookConsumer(conn) {
 		s.logger.Debug("Not a webhook consumer, ignoring", "connection_id", connectionID)
-		return
+		return nil
 	}
 
 	_, cancel := context.WithCancel(context.Background())
@@ -411,7 +422,7 @@ func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, ten
 	if !claim.Activate(func() { s.activeConnections[connectionID] = ac }) {
 		cancel()
 		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
-		return
+		return nil
 	}
 	// Through the guard's status order: a stop that unregistered the webhook
 	// since Activate and wrote "stopped" first makes this a no-op (#423).
@@ -424,6 +435,7 @@ func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, ten
 	s.logger.Info("Webhook registered",
 		"connection_id", connectionID,
 		"path", fmt.Sprintf("/webhook/%s", connectionID))
+	return nil
 }
 
 // handleStopCommand processes a stop command from NATS

@@ -40,6 +40,9 @@ type dbConsumer struct {
 	mu                sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	// SSE event subscribers
 	eventSubs   map[string][]chan DBEvent
@@ -181,8 +184,16 @@ func (s *dbConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database or
+// the source database not answering) is retried in the background (#725).
 func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger, Policy: s.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return s.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (s *dbConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -191,11 +202,11 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenantID, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		s.logger.Warn("DB consumer already active or starting", "connection_id", connectionID)
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
@@ -203,13 +214,13 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to fetch connection", "error", err)
-		return
+		return sdk.TransientIfDBDown(err)
 	}
 
 	dbConfig, ok := s.extractDBConfig(conn)
 	if !ok {
 		s.logger.Debug("Not a database consumer, ignoring", "connection_id", connectionID)
-		return
+		return nil
 	}
 
 	// Build connection string for source database
@@ -232,7 +243,7 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 			Type: "error", Message: "Failed to connect: " + err.Error(),
 			Time: time.Now().UTC().Format(time.RFC3339),
 		})
-		return
+		return err
 	}
 
 	if err := sourceDB.Ping(); err != nil {
@@ -242,7 +253,9 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 			Type: "error", Message: "Cannot reach database: " + err.Error(),
 			Time: time.Now().UTC().Format(time.RFC3339),
 		})
-		return
+		// A source that does not answer may come back; one that refuses the
+		// login or the database name will not.
+		return sdk.TransientIfDBDown(err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -260,7 +273,7 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 		cancel()
 		sourceDB.Close()
 		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
-		return
+		return nil
 	}
 
 	// Through the guard's status order: a stop that cancelled the connection
@@ -279,6 +292,7 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	go s.runConsumer(ctx, ac)
 
 	s.logger.Info("DB consumer started", "connection_id", connectionID, "host", dbConfig.Host, "database", dbConfig.Database)
+	return nil
 }
 
 func (s *dbConsumer) handleStopCommand(msg *nats.Msg) {

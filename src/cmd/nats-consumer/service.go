@@ -77,6 +77,9 @@ type natsConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -210,24 +213,45 @@ func (c *natsConsumer) restoreConnection(ctx context.Context, connectionID, tena
 	c.start(ctx, connectionID, tenantID, false)
 }
 
+// start runs one start, keeping mayCreate across its retries. A start that
+// fails for a reason that passes (the management database not answering) is
+// retried in the background (#725).
 func (c *natsConsumer) start(ctx context.Context, connectionID, tenantID string, mayCreate bool) {
+	c.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &c.mu, DB: c.db, Logger: c.logger, Policy: c.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return c.tryStart(ctx, connectionID, tenantID, mayCreate) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (c *natsConsumer) tryStart(ctx context.Context, connectionID, tenantID string, mayCreate bool) error {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here (#397); one refused while another is in
 	// flight runs again if that one gives up (#424).
-	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+	claim, ok := c.starts.ReserveOrRetryContext(ctx, &c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
 		func() { c.start(ctx, connectionID, tenantID, mayCreate) })
 	if !ok {
 		logger.Warn("NATS consumer already running or starting")
-		return
+		return nil
 	}
 	defer claim.Release()
 
 	cfg, mine, cfgErr := c.getConfig(ctx, connectionID, tenantID)
 	if !mine {
+		if cfgErr != nil {
+			// The connection could not be read; only the database not
+			// answering is worth a retry.
+			return sdk.TransientIfDBDown(cfgErr)
+		}
 		logger.Debug("Not a NATS consumer for this connection, ignoring")
-		return
+		return nil
+	}
+	if cfgErr != nil && sdk.IsTransientDBError(cfgErr) {
+		// The secret lookup hit a database that does not answer: not a bad
+		// config, so the connection must not end in status error (#725).
+		logger.Warn("Could not read the stored credentials; the database does not answer", "error", cfgErr)
+		return sdk.TransientStart(cfgErr)
 	}
 	if cfgErr == nil {
 		cfgErr = cfg.validate(c.allowPrivate)
@@ -239,18 +263,19 @@ func (c *natsConsumer) start(ctx context.Context, connectionID, tenantID string,
 	if !claim.Activate(func() { c.active[connectionID] = own }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 	if cfgErr != nil {
 		// Activated first so the error takes its place in the status order
-		// like any other end of the connection.
+		// like any other end of the connection. Permanent: fail records it.
 		c.fail(own, connectionID, tenantID, cfgErr, logger)
-		return
+		return nil
 	}
 	claim.RunningStatus().Write(func() { c.writeStatus(connectionID, tenantID, "running", "", logger) })
 
 	logger.Info("Starting NATS consumer", "nats", cfg)
 	go c.consumeLoop(loopCtx, own, connectionID, tenantID, cfg, mayCreate, logger)
+	return nil
 }
 
 func (c *natsConsumer) handleStopCommand(msg *nats.Msg) {
@@ -573,7 +598,8 @@ func (c *natsConsumer) forward(ctx context.Context, connID, tenantID string, m j
 // getConfig loads the connection's NATS consumer node. mine is false when the
 // connection has none. err is a configuration error for a node that is ours:
 // a plaintext credential, an unreadable block or a secret that will not
-// resolve.
+// resolve. When the connection cannot be read for a reason other than not
+// existing, mine is false and err is that read error (#725).
 // lint:tenant-ok — lookup is scoped by (id, tenant_id).
 func (c *natsConsumer) getConfig(ctx context.Context, connectionID, tenantID string) (cfg *NATSConfig, mine bool, err error) {
 	var nodesJSON json.RawMessage
@@ -582,7 +608,10 @@ func (c *natsConsumer) getConfig(ctx context.Context, connectionID, tenantID str
 		connectionID, tenantID,
 	).Scan(&nodesJSON); err != nil {
 		c.logger.Debug("connection not found", "error", err, "connection_id", connectionID)
-		return nil, false, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {

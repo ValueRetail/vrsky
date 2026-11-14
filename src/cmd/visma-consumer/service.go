@@ -47,6 +47,9 @@ type vismaConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -159,8 +162,17 @@ func (c *vismaConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering while the config or its secrets are read) is retried in the
+// background (#725).
 func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	c.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &c.mu, DB: c.db, Logger: c.logger, Policy: c.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return c.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (c *vismaConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -169,29 +181,29 @@ func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+	claim, ok := c.starts.ReserveOrRetryContext(ctx, &c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
 		func() { c.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
 	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Visma consumer for this connection", "error", err)
-		return
+		return sdk.TransientIfDBDown(err)
 	}
 	if cfg.BaseURL == "" || cfg.Scope == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.Resource == "" {
 		logger.Error("Visma config incomplete (need base_url, scope, resource, client_id, client_secret_secret_id)")
-		return
+		return errors.New("visma config incomplete")
 	}
 	if err := vismaurl.Check(cfg.BaseURL, cfg.TokenURL, c.allowPrivate); err != nil {
 		logger.Error("Visma connection not started: " + err.Error())
-		return
+		return err
 	}
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Error("Visma consumer needs poll_interval_seconds > 0")
-		return
+		return errors.New("visma consumer needs poll_interval_seconds > 0")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -199,11 +211,12 @@ func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	if !claim.Activate(func() { c.active[connectionID] = cancel }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 
 	logger.Info("Starting Visma poller", "resource", cfg.Resource, "interval", cfg.PollIntervalSeconds)
 	go c.runPoller(ctx, connectionID, tenantID, cfg)
+	return nil
 }
 
 func (c *vismaConsumer) handleStopCommand(msg *nats.Msg) {

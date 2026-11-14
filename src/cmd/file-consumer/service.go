@@ -61,6 +61,9 @@ type fileConsumer struct {
 	// by mu; a connection is never both starting and active.
 	starts sdk.StartGuard
 	mu     sync.RWMutex
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	// beforeStartWork, when set, runs once a start holds its reservation and
 	// before the database lookup. Tests use it to line up concurrent starts.
@@ -365,7 +368,16 @@ func (s *fileConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering) is retried in the background (#725).
 func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger, Policy: s.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return s.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (s *fileConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
 	// The boot restore and the start-command handler run on different
@@ -375,11 +387,11 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenantID, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		s.logger.Warn("File watcher already active or starting", "connection_id", connectionID)
-		return
+		return nil
 	}
 	// Frees the claim on every early return below, so a later start can try
 	// again. A no-op once Activate has moved it to activeConnections.
@@ -391,12 +403,12 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to fetch connection", "error", err, "connection_id", connectionID)
-		return
+		return sdk.TransientIfDBDown(err)
 	}
 
 	if !s.hasFileConsumer(conn) {
 		s.logger.Debug("Not a file consumer, ignoring", "connection_id", connectionID)
-		return
+		return nil
 	}
 
 	// Get watch directory from node config, fall back to {connectionId} inside
@@ -433,13 +445,13 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	if err != nil {
 		s.logger.Error("Refusing to start: watch directory is outside the workspace's own files",
 			"error", err, "connection_id", connectionID, "tenant_id", tenantID, "configured", watchDir)
-		return
+		return err
 	}
 	watchDir = resolved
 
 	if err := os.MkdirAll(watchDir, 0o755); err != nil {
 		s.logger.Error("Failed to create watch directory", "error", err, "dir", watchDir)
-		return
+		return err
 	}
 
 	// Decide which files in the folder are done before the connection shows
@@ -471,7 +483,7 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	if !claim.Activate(func() { s.activeConnections[connectionID] = ac }) {
 		cancel()
 		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
-		return
+		return nil
 	}
 	s.saveKnown(ctx, ac, s.logger.With("connection_id", connectionID, "watch_dir", watchDir))
 
@@ -489,6 +501,7 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	s.logger.Info("File watcher started",
 		"connection_id", connectionID,
 		"watch_dir", watchDir)
+	return nil
 }
 
 func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
