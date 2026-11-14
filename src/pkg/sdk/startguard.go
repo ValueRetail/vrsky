@@ -322,6 +322,11 @@ func (g *StartGuard) reserve(ctx context.Context, mu sync.Locker, tenantID, conn
 				busy.retry = make(map[string]func())
 			}
 			busy.retry[tenantID] = retry
+			// A retry attempt queued itself behind this claim: its loop must
+			// not end before Release has run it (startretry.go).
+			if e := g.retries[statusKey{tenantID: tenantID, connectionID: connectionID}]; e != nil && e.attempting {
+				e.queued = true
+			}
 		}
 		mu.Unlock()
 		return nil, false

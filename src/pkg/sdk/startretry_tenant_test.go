@@ -123,3 +123,75 @@ func TestStartRetrying_RetryBehindAnotherClaim(t *testing.T) {
 		t.Fatal("a retry loop is still running")
 	}
 }
+
+// B's Release drops its claim and runs A's queued start
+// only after unlocking. A's loop, deciding in between, sees no claim; it must
+// not end and cancel the context that queued start runs under (#725 review).
+// Forced here by holding the queued start until A's loop has decided.
+func TestStartRetrying_QueuedStartAfterClaimDrop(t *testing.T) {
+	var mu sync.Mutex
+	var g sdk.StartGuard
+	active := map[string]bool{}
+	var attemptsA atomic.Int32
+	var activated atomic.Bool
+	pol := sdk.RetryPolicy{Base: 50 * time.Millisecond, Max: 50 * time.Millisecond}
+	isActive := func() bool { return active["c1"] }
+	opts := sdk.RetryOptions{Mu: &mu, Logger: quietLogger, Policy: pol}
+
+	bHolds := make(chan struct{})
+	bRelease := make(chan struct{})
+	closureStarted := make(chan struct{})
+	var releaseOnce, closureOnce sync.Once
+	var startConn func(ctx context.Context, tenant string)
+	try := func(ctx context.Context, tenant string) error {
+		claim, ok := g.ReserveOrRetryContext(ctx, &mu, tenant, "c1", isActive, func() {
+			if tenant == rtTenantA {
+				first := false
+				closureOnce.Do(func() { first = true; close(closureStarted) })
+				if first {
+					// Hold the queued start until A's loop has decided.
+					deadline := time.Now().Add(500 * time.Millisecond)
+					for sdk.PendingRetriesForTest(&g, &mu) != 0 && time.Now().Before(deadline) {
+						time.Sleep(time.Millisecond)
+					}
+				}
+			}
+			startConn(ctx, tenant)
+		})
+		if !ok {
+			if tenant == rtTenantA {
+				// Refused behind B: let B give up, and return only once B's
+				// claim is dropped and its Release is running our closure.
+				releaseOnce.Do(func() { close(bRelease) })
+				select {
+				case <-closureStarted:
+				case <-time.After(time.Second):
+				}
+			}
+			return nil
+		}
+		defer claim.Release()
+		if tenant == rtTenantB {
+			close(bHolds)
+			<-bRelease
+			return nil // not B's
+		}
+		if attemptsA.Add(1) == 1 {
+			return sdk.TransientStart(errors.New("db down"))
+		}
+		if claim.Activate(func() { active["c1"] = true }) {
+			activated.Store(true)
+		}
+		return nil
+	}
+	startConn = func(ctx context.Context, tenant string) {
+		g.StartRetrying(ctx, opts, tenant, "c1", func(ctx context.Context) error { return try(ctx, tenant) })
+	}
+	startConn(context.Background(), rtTenantA)
+	go startConn(context.Background(), rtTenantB)
+	<-bHolds
+	time.Sleep(time.Second)
+	if !activated.Load() {
+		t.Fatalf("A never started (A attempts=%d, pending=%d)", attemptsA.Load(), sdk.PendingRetriesForTest(&g, &mu))
+	}
+}

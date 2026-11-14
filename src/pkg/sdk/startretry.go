@@ -222,6 +222,12 @@ type pendingRetry struct {
 	// reason that passes while this loop ran: the loop then goes on even if
 	// its own attempt found nothing to do.
 	again bool
+	// queued is set when the loop's attempt was refused by another start's
+	// claim and left its start queued there (ReserveOrRetryContext). That
+	// start runs under e's context once the claim is released, possibly just
+	// after the claim is gone from the guard, so the loop makes one more
+	// pass rather than end and cancel it.
+	queued bool
 }
 
 // stopWatch counts the stops for a tenant's connection while starts through
@@ -376,6 +382,7 @@ func (g *StartGuard) retryLoop(e *pendingRetry, key statusKey, opts RetryOptions
 		if err == nil {
 			mu.Lock()
 			e.again = false
+			e.queued = false
 			e.attempting = true
 			mu.Unlock()
 			logger.Info("Retrying start", "attempt", n)
@@ -391,7 +398,7 @@ func (g *StartGuard) retryLoop(e *pendingRetry, key statusKey, opts RetryOptions
 		case g.retries[key] != e || e.ctx.Err() != nil:
 			// Ended by a stop, an activation, a permanent failure or Stop.
 			why = "-"
-		case err == nil && !e.again && g.starting[key.connectionID] == nil:
+		case err == nil && !e.again && !e.queued && g.starting[key.connectionID] == nil:
 			// Nothing to do: active already, or not this consumer's. A start
 			// still holding the claim may give up (one for another tenant
 			// finding the connection is not its own), and the start this

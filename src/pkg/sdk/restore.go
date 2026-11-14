@@ -67,7 +67,12 @@ func RestoreRunningErr(ctx context.Context, db *sql.DB, logger *slog.Logger, typ
 			break
 		}
 		err := fmt.Errorf("%w: %w", ErrRestoreList, lerr)
-		if ctx.Err() != nil || !IsTransientDBError(lerr) || policy.givenUp(first) {
+		if !IsTransientDBError(lerr) && ctx.Err() == nil {
+			logger.Error("Could not list running pipelines to restore; nothing restored. The query failed for a reason a retry does not fix",
+				"type", typeHint, "error", err, "attempts", attempt)
+			return 0, err
+		}
+		if ctx.Err() != nil || policy.givenUp(first) {
 			logger.Error("Could not list running pipelines to restore; nothing restored. Restart the consumer once the database answers",
 				"type", typeHint, "error", err, "attempts", attempt)
 			return 0, err
