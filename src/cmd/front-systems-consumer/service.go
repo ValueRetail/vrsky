@@ -803,7 +803,7 @@ func (c *frontSystemsConsumer) getConfig(ctx context.Context, connectionID, tena
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return nil, time.Time{}, &startError{kind: startNotOurs, err: fmt.Errorf("connection not found: %w", err)}
-		case transientDBError(err):
+		case sdk.IsTransientDBError(err):
 			return nil, time.Time{}, &startError{kind: startTransient, err: fmt.Errorf("look up connection: %w", err)}
 		default: // e.g. an id that isn't a UUID (22P02)
 			return nil, time.Time{}, &startError{kind: startPermanent, err: fmt.Errorf("look up connection: %w", err),
@@ -834,7 +834,7 @@ func (c *frontSystemsConsumer) frontSystemsNode(ctx context.Context, nodesJSON j
 		}
 		resolved, rerr := crypto.ResolveNodeSecrets(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
-			if transientDBError(rerr) {
+			if sdk.IsTransientDBError(rerr) {
 				return nil, &startError{kind: startTransient, err: fmt.Errorf("resolve secrets: %w", rerr)}
 			}
 			return nil, &startError{kind: startPermanent, err: fmt.Errorf("resolve secrets: %w", rerr),
