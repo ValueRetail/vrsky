@@ -190,8 +190,17 @@ func TestStartRetrying_QueuedStartAfterClaimDrop(t *testing.T) {
 	startConn(context.Background(), rtTenantA)
 	go startConn(context.Background(), rtTenantB)
 	<-bHolds
-	time.Sleep(time.Second)
-	if !activated.Load() {
-		t.Fatalf("A never started (A attempts=%d, pending=%d)", attemptsA.Load(), sdk.PendingRetriesForTest(&g, &mu))
+	deadline := time.Now().Add(5 * time.Second)
+	for !activated.Load() {
+		if time.Now().After(deadline) {
+			t.Fatalf("A never started (A attempts=%d, pending=%d)", attemptsA.Load(), sdk.PendingRetriesForTest(&g, &mu))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !sdk.WaitRetriesForTest(&g, 5*time.Second) {
+		t.Fatal("a retry loop is still running")
+	}
+	if n := sdk.PendingRetriesForTest(&g, &mu); n != 0 {
+		t.Fatalf("%d retries still pending", n)
 	}
 }

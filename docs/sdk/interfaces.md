@@ -99,9 +99,11 @@ is not that answer. Acking then loses the message.
 
 A consumer that starts connections on `vrsky.commands.*.connection.start`
 (and from `sdk.RestoreRunning` at boot) claims each start with a
-`sdk.StartGuard`, so two starts of one connection never both run and a stop
-that lands mid-start wins. The comment on `StartGuard` in
-`src/pkg/sdk/startguard.go` has the full pattern.
+`sdk.StartGuard`, so two starts of one connection in the same process never
+both run and a stop that lands mid-start wins. The guard and its retries are
+per process: they know nothing of another replica or pod of the same
+consumer. The comment on `StartGuard` in `src/pkg/sdk/startguard.go` has the
+full pattern.
 
 Since #725 a start that fails for a reason that passes is retried in the
 background. Route every start through `StartRetrying` and reserve with the
@@ -138,8 +140,9 @@ func (s *X) tryStart(ctx context.Context, id, tenant string) error {
 - Retries wait 5 s, doubling to 5 min, with jitter (`sdk.RetryPolicy`), and
   give up 6 h after the first failure. Before each one the row is read
   (`sdk.ConnectionRunning`): a row that is no longer `running` ends them.
-- Retries are kept per tenant and connection: a start or stop naming another
-  tenant for the connection neither takes the retry's place nor ends it.
+- Retries are kept per tenant and connection, in this process: a start or
+  stop naming another tenant for the connection neither takes the retry's
+  place nor ends it. Another pod's retries are its own.
 - They also end on a stop for the connection's tenant (the stop handler's
   `StopForTenantLocked`), on `StopAllLocked` in `Stop`, when the start's
   context ends, on a permanent failure, and when any start activates the

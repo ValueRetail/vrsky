@@ -1707,7 +1707,7 @@ Last updated 2026-10-28.
     `RestoreRunning` list retry, which blocks `restoreRunning` while the
     database is down, and so the membership loop that starts after it;
     start that loop first. Either move its lanes onto `StartRetrying` or
-    give them the same loop. Found in #725.
+    give them the same loop. Found in #725. Filed as #874.
 
 230. **Consumers read the connection at start without the start's
     context.** Several `getConfig`/`getConnection` lookups in the
@@ -1715,7 +1715,7 @@ Last updated 2026-10-28.
     sap-s4hana, sitoo, cloud-storage, db) use `context.Background()` or no
     context, so a stop or shutdown does not cut a slow lookup short, and
     `RetryOptions`' row check is the only read that honours the retry's
-    context. Pass the `ctx` `tryStart` gets. Found in #725.
+    context. Pass the `ctx` `tryStart` gets. Found in #725. Filed as #875.
 
 ## Human
 

@@ -31,8 +31,11 @@ restores nothing on any consumer.
 4. A stop that lands between a retry's wait and its start wins: the retry's
    reserve is refused under the owner's lock (`ReserveOrRetryContext`). A
    start command that arrives while a retry waits runs at once; the guard
-   still lets only one start hold the claim, and its activation ends the
-   pending retry.
+   still lets only one start in this process hold the claim, and its
+   activation ends the pending retry. All of this is per process: the guard
+   and its retries are in-memory, and say nothing about another pod of the
+   same consumer (overlapping pods in a rolling update predate this change
+   and are tracked separately).
 5. `RestoreRunning` retries its list query on the same schedule and tells a
    failed list from an empty one: `RestoreRunningErr` returns the error,
    `RestoreRunning` logs it at Error and keeps its signature. A row iteration

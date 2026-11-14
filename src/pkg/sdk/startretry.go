@@ -47,7 +47,8 @@ import (
 // the connection's tenant (StopLocked, StopForTenantLocked), on StopAllLocked,
 // when the caller's ctx ends, when some start activates the connection, when
 // the row no longer says "running", on a permanent failure, and on giving up.
-// Each attempt is an ordinary start through the guard, so two never hold the
+// Each attempt is an ordinary start through the guard, so two in this process
+// (the guard is in-memory and knows nothing of other pods) never hold the
 // claim at once and a start command arriving meanwhile runs at once.
 //
 // While a retry waits the row keeps saying "running", as it did before when
