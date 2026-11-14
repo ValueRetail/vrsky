@@ -2680,6 +2680,7 @@
 </ul>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node runs a query when the connection starts and, with a poll interval, again on that interval. All rows of one run go out as one message: a JSON array of objects, one per row, with <code>columns</code>, <code>row_count</code> and <code>filename</code> (<code>&lt;table&gt;.json</code>, or <code>query_result.json</code>) in the metadata. A run that returns no rows publishes nothing.</p>
+<p>The start connects to the source database first. If it does not answer (connection refused, a timeout, a host name that does not resolve), the start is retried in the background: after about 5 s, doubling to 5 min, for up to 6 h, while the pipeline stays <code>running</code> (#725). A source that refuses the login or the database name is not retried; the consumer logs why and the pipeline stays down until it is fixed and started again. See <a href="../../operator/troubleshooting/#a-pipeline-says-running-but-its-consumer-did-not-start">troubleshooting</a>.</p>
 <ul>
 <li><code>database.table</code> — table to read; the query is then <code>SELECT * FROM &lt;table&gt;</code>.</li>
 <li><code>database.query</code> — a query to run instead of the table (overrides <code>table</code>).</li>

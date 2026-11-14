@@ -2504,6 +2504,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#starting-a-connection-command-driven-consumers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Starting a connection (command-driven consumers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#custom-http-handlers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2648,6 +2659,63 @@ is not that answer. Acking then loses the message.</p>
   <code>Deliver</code> runs and returns the error. A false answer acks.</li>
 </ul>
 <p><code>harness.RunConfigReadCases</code> checks all of this against a sqlmock database.</p>
+<h2 id="starting-a-connection-command-driven-consumers">Starting a connection (command-driven consumers)<a class="headerlink" href="#starting-a-connection-command-driven-consumers" title="Permanent link">&para;</a></h2>
+<p>A consumer that starts connections on <code>vrsky.commands.*.connection.start</code>
+(and from <code>sdk.RestoreRunning</code> at boot) claims each start with a
+<code>sdk.StartGuard</code>, so two starts of one connection in the same process never
+both run and a stop that lands mid-start wins. The guard and its retries are
+per process: they know nothing of another replica or pod of the same
+consumer. The comment on <code>StartGuard</code> in <code>src/pkg/sdk/startguard.go</code> has the
+full pattern.</p>
+<p>Since #725 a start that fails for a reason that passes is retried in the
+background. Route every start through <code>StartRetrying</code> and reserve with the
+context it hands you:</p>
+<div class="highlight"><pre><span></span><code><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">X</span><span class="p">)</span><span class="w"> </span><span class="nx">startConnection</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">tenant</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">s</span><span class="p">.</span><span class="nx">starts</span><span class="p">.</span><span class="nx">StartRetrying</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">sdk</span><span class="p">.</span><span class="nx">RetryOptions</span><span class="p">{</span><span class="nx">Mu</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">,</span><span class="w"> </span><span class="nx">DB</span><span class="p">:</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">Logger</span><span class="p">:</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">logger</span><span class="p">},</span><span class="w"> </span><span class="nx">tenant</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span>
+<span class="w">        </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">tryStart</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">tenant</span><span class="p">)</span><span class="w"> </span><span class="p">})</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">X</span><span class="p">)</span><span class="w"> </span><span class="nx">tryStart</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">tenant</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">claim</span><span class="p">,</span><span class="w"> </span><span class="nx">ok</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">starts</span><span class="p">.</span><span class="nx">ReserveOrRetryContext</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">,</span><span class="w"> </span><span class="nx">tenant</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">isActive</span><span class="p">,</span>
+<span class="w">        </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">startConnection</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">tenant</span><span class="p">)</span><span class="w"> </span><span class="p">})</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">!</span><span class="nx">ok</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="c1">// active or starting already</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">claim</span><span class="p">.</span><span class="nx">Release</span><span class="p">()</span>
+<span class="w">    </span><span class="nx">cfg</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">getConfig</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">tenant</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">sdk</span><span class="p">.</span><span class="nx">TransientIfDBDown</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span><span class="w"> </span><span class="c1">// only a database that doesn't answer is retried</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="p">...</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>Return <code>nil</code> for every start that did not fail: activated, refused,
+  abandoned because a stop took the claim, not your node.</li>
+<li>Mark what a retry may fix with <code>sdk.TransientStart(err)</code>;
+  <code>sdk.TransientIfDBDown(err)</code> does it for a database that does not answer
+  (<code>sdk.IsTransientDBError</code>). Anything unmarked is permanent and fails the
+  start once, as before: bad config, a refused address, credentials refused,
+  a missing secret, a refused <code>{secret:}</code> placeholder.</li>
+<li>Retries wait 5 s, doubling to 5 min, with jitter (<code>sdk.RetryPolicy</code>), and
+  give up 6 h after the first failure. Before each one the row is read
+  (<code>sdk.ConnectionRunning</code>): a row that is no longer <code>running</code> ends them.</li>
+<li>Retries are kept per tenant and connection, in this process: a start or
+  stop naming another tenant for the connection neither takes the retry's
+  place nor ends it. Another pod's retries are its own.</li>
+<li>They also end on a stop for the connection's tenant (the stop handler's
+  <code>StopForTenantLocked</code>), on <code>StopAllLocked</code> in <code>Stop</code>, when the start's
+  context ends, on a permanent failure, and when any start activates the
+  connection. A stop that lands just before a retry's reserve wins, because
+  <code>ReserveOrRetryContext</code> checks the context under your lock.</li>
+<li>Keep nothing that outlives <code>tryStart</code> under its <code>ctx</code>: run pollers under
+  a context of their own, as every consumer here does.</li>
+<li>While a retry waits the row keeps saying <code>running</code>; the consumer writes
+  nothing until a retry activates and writes <code>running</code> again.</li>
+</ul>
+<p><code>sdk.RestoreRunning</code> retries its list query on the same schedule when the
+database does not answer. A list that never worked is logged at Error, and <code>sdk.RestoreRunningErr</code> returns it
+as <code>sdk.ErrRestoreList</code> rather than as zero pipelines.</p>
 <h2 id="custom-http-handlers">Custom HTTP handlers<a class="headerlink" href="#custom-http-handlers" title="Permanent link">&para;</a></h2>
 <p><code>BaseProducer.RegisterHTTPHandler(pattern, handler)</code> (callable in <code>Configure</code>)
 serves an extra handler on the auxiliary HTTP port (<code>WORKER_HTTP_PORT</code>, or
