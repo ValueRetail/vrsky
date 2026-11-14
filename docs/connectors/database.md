@@ -15,6 +15,8 @@ The database connector (`config.type: "database"`) reads rows from a PostgreSQL 
 
 A consumer node runs a query when the connection starts and, with a poll interval, again on that interval. All rows of one run go out as one message: a JSON array of objects, one per row, with `columns`, `row_count` and `filename` (`<table>.json`, or `query_result.json`) in the metadata. A run that returns no rows publishes nothing.
 
+The start connects to the source database first. If it does not answer (connection refused, a timeout), the start is retried in the background: after about 5 s, doubling to 5 min, for up to 6 h, while the pipeline stays `running` (#725). A source that refuses the login or the database name is not retried; the consumer logs why and the pipeline stays down until it is fixed and started again. See [troubleshooting](../operator/troubleshooting.md#a-pipeline-says-running-but-its-consumer-did-not-start).
+
 - `database.table` — table to read; the query is then `SELECT * FROM <table>`.
 - `database.query` — a query to run instead of the table (overrides `table`).
 - `database.poll_interval_seconds` — seconds between runs; `0` (the default) runs once.
