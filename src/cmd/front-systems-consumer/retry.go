@@ -3,18 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"math/rand/v2"
-	"net"
 	"net/http"
-	"syscall"
 	"time"
-
-	"github.com/lib/pq"
 
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
@@ -30,7 +23,10 @@ import (
 //
 // So a transient failure is retried in the background, after 5 s doubling to
 // 5 min, with jitter, for as long as the row says "running", up to
-// retryGiveUp. While a retry waits, the route answers 503 rather than 410.
+// retryGiveUp. The timing and the database error split are the SDK's
+// (sdk.RetryPolicy, sdk.IsTransientDBError), shared with every consumer
+// since #725; the loop stays here, because the webhook route's 503, the
+// "error" writes and the #574 queue handling hang off its pending starts. While a retry waits, the route answers 503 rather than 410.
 // Retries end on a stop command for the connection's tenant, when the row is
 // gone or no longer "running", when some start activates the connection, and
 // on Stop. Every attempt goes through the StartGuard like any other start, so
@@ -42,14 +38,8 @@ import (
 // shows it and the connection can be started again once it's fixed. Giving up
 // after retryGiveUp does the same.
 
-const (
-	defaultRetryBase   = 5 * time.Second
-	defaultRetryMax    = 5 * time.Minute
-	defaultRetryGiveUp = 6 * time.Hour
-
-	// statusWriteTimeout bounds the row check and the "error" write.
-	statusWriteTimeout = 10 * time.Second
-)
+// statusWriteTimeout bounds the row check and the "error" write.
+const statusWriteTimeout = 10 * time.Second
 
 // startOutcome is how one start attempt ended.
 type startOutcome int
@@ -287,33 +277,24 @@ func (c *frontSystemsConsumer) retryLoop(connectionID string, p *pendingStart) {
 	}
 }
 
+// retryPolicy is the SDK's start retry schedule (#725) with this consumer's
+// timing; zero fields mean the SDK defaults, the same as before.
+func (c *frontSystemsConsumer) retryPolicy() sdk.RetryPolicy {
+	return sdk.RetryPolicy{Base: c.retryBase, Max: c.retryMax, GiveUp: c.retryGiveUp}
+}
+
 // retryDelay is the wait before retry n (from 1): retryBase doubled per
 // retry up to retryMax, then between half of that and all of it, so
 // connections that failed together don't retry together.
 func (c *frontSystemsConsumer) retryDelay(n int) time.Duration {
-	base, maxDelay := c.retryBase, c.retryMax
-	if base <= 0 {
-		base = defaultRetryBase
-	}
-	if maxDelay <= 0 {
-		maxDelay = defaultRetryMax
-	}
-	d := base
-	for i := 1; i < n && d < maxDelay; i++ {
-		d *= 2
-	}
-	if d > maxDelay {
-		d = maxDelay
-	}
-	half := d / 2
-	return half + rand.N(d-half+1)
+	return c.retryPolicy().Delay(n)
 }
 
 func (c *frontSystemsConsumer) giveUpAfter() time.Duration {
 	if c.retryGiveUp > 0 {
 		return c.retryGiveUp
 	}
-	return defaultRetryGiveUp
+	return sdk.DefaultStartRetryGiveUp
 }
 
 // rowRunning reports whether the connection's row still says "running", and
@@ -464,30 +445,4 @@ func failureClass(err error) string {
 		return "timed out"
 	}
 	return "Front Systems could not be reached"
-}
-
-// transientDBError reports whether err looks like the database not
-// answering (connection lost or refused, timeout, server starting or
-// shutting down, too many connections) rather than a problem with the data.
-func transientDBError(err error) bool {
-	if err == nil || errors.Is(err, sql.ErrNoRows) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, driver.ErrBadConn) ||
-		errors.Is(err, sql.ErrConnDone) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
-		return true
-	}
-	var ne net.Error
-	if errors.As(err, &ne) {
-		return true
-	}
-	var pe *pq.Error
-	if errors.As(err, &pe) {
-		switch pe.Code.Class() {
-		case "08", "53", "57", "40": // connection, resources, operator intervention, rollback
-			return true
-		}
-	}
-	return false
 }

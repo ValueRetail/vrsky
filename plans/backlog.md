@@ -932,8 +932,8 @@ Last updated 2026-10-28.
     (5 to 30 s; a slow uploader, or a rename that comes late) still goes out
     under its temp name, and again under its final name. Skip the same names in
     `pollOnce`. Found in #562.
-135. **The other consumers still give up on a failed start, and a failed
-    restore list restores nothing.** #503 retries a Front Systems start that
+135. ~~**The other consumers still give up on a failed start, and a failed
+    restore list restores nothing.**~~ (#725) #503 retries a Front Systems start that
     fails for a reason that passes (`src/cmd/front-systems-consumer/retry.go`).
     Every other command-driven consumer still gives up when its start fails
     (a database blip at boot restore, a partner API down) while the row says
@@ -1698,6 +1698,24 @@ Last updated 2026-10-28.
     root of the node config (`docs/SECURITY.md`, mTLS). A template that
     followed the table would set mTLS where nothing reads it. Found in #853.
     Filed as #871.
+
+229. **The remote agent gateway does not retry a failed start.** #725 put
+    the start retry next to `StartGuard`, but `cmd/remote-agent` starts
+    through its own lanes (`lanes.go`) and is not on the guard, so a
+    database blip at its start still leaves the connection `running` with
+    nothing behind it until someone stops and starts it. It does get the
+    `RestoreRunning` list retry, which blocks `restoreRunning` while the
+    database is down, and so the membership loop that starts after it;
+    start that loop first. Either move its lanes onto `StartRetrying` or
+    give them the same loop. Found in #725. Filed as #874.
+
+230. **Consumers read the connection at start without the start's
+    context.** Several `getConfig`/`getConnection` lookups in the
+    command-driven consumers (brightpearl, business-central, visma,
+    sap-s4hana, sitoo, cloud-storage, db) use `context.Background()` or no
+    context, so a stop or shutdown does not cut a slow lookup short, and
+    `RetryOptions`' row check is the only read that honours the retry's
+    context. Pass the `ctx` `tryStart` gets. Found in #725. Filed as #875.
 
 ## Human
 

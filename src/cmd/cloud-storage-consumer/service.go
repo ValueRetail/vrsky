@@ -76,6 +76,9 @@ type cloudConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -215,8 +218,17 @@ func (s *cloudConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering) is retried in the background (#725). The refusals of a config
+// (refuseStart) are not.
 func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger, Policy: s.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return s.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (s *cloudConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -225,32 +237,39 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("cloud-storage poller already running or starting")
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
 
-	cfg, ok := s.getConfig(connectionID, tenantID)
+	cfg, ok, err := s.loadConfig(connectionID, tenantID)
 	if !ok {
+		if err != nil {
+			// The connection or its secrets could not be read: retried only
+			// when the database did not answer.
+			return sdk.TransientIfDBDown(err)
+		}
 		logger.Debug("Not a cloud-storage consumer for this connection, ignoring")
-		return
+		return nil
 	}
+	// The refusals below are permanent: the config is wrong, and a retry
+	// reads the same config.
 	if cfg.Bucket == "" {
 		s.refuseStart(claim, connectionID, tenantID, logger, "cloud-storage config incomplete (need bucket)", nil)
-		return
+		return errors.New("cloud-storage config incomplete (need bucket)")
 	}
 	if cfg.AfterAction == "move" && cfg.MovePrefix == "" {
 		s.refuseStart(claim, connectionID, tenantID, logger, "after_action=move requires move_prefix", nil)
-		return
+		return errors.New("after_action=move requires move_prefix")
 	}
 	if err := cfg.validateMoveOutsideListing(); err != nil {
 		if cfg.Mode != "event" {
 			s.refuseStart(claim, connectionID, tenantID, logger, "invalid move_prefix", err)
-			return
+			return fmt.Errorf("invalid move_prefix: %w", err)
 		}
 		// Event mode starts anyway. A move there always writes
 		// move_prefix/<base name>, so a moved object that comes back as a new
@@ -265,7 +284,7 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	if cfg.Mode == "event" {
 		if err := cfg.validateEventConfig(); err != nil {
 			s.refuseStart(claim, connectionID, tenantID, logger, "invalid event-mode config", err)
-			return
+			return fmt.Errorf("invalid event-mode config: %w", err)
 		}
 	}
 
@@ -275,7 +294,7 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	if !claim.Activate(func() { s.active[connectionID] = ac }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 	// Through the guard's status order: a stop that cancelled the connection
 	// since Activate and wrote "stopped" first makes this a no-op (#423).
@@ -285,11 +304,12 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 		logger.Info("Starting cloud-storage event loop",
 			"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "event_target", cfg.eventTarget())
 		go s.runEventLoop(ctx, ac, connectionID, tenantID, cfg)
-		return
+		return nil
 	}
 	logger.Info("Starting cloud-storage poller",
 		"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "prefix", cfg.Prefix, "after_action", cfg.AfterAction)
 	go s.runPoller(ctx, ac, connectionID, tenantID, cfg)
+	return nil
 }
 
 // activeConn is one start's entry in the active map. The poller gets the same
@@ -1003,6 +1023,15 @@ func (s *cloudConsumer) publishObject(ctx context.Context, connID, tenantID, buc
 // and extracts the cloud-storage consumer node config.
 // lint:tenant-ok — lookup is scoped by (id, tenant_id).
 func (s *cloudConsumer) getConfig(connectionID, tenantID string) (*cloudConfig, bool) {
+	cfg, ok, _ := s.loadConfig(connectionID, tenantID)
+	return cfg, ok
+}
+
+// loadConfig is getConfig that also returns why it found nothing, when it
+// failed rather than when the connection simply has no cloud-storage node:
+// the lookup, the node parse or the secrets failing. A start tells a database
+// that did not answer from the rest by it (#725).
+func (s *cloudConsumer) loadConfig(connectionID, tenantID string) (*cloudConfig, bool, error) {
 	var nodesJSON json.RawMessage
 	err := s.db.QueryRow(
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
@@ -1010,13 +1039,13 @@ func (s *cloudConsumer) getConfig(connectionID, tenantID string) (*cloudConfig, 
 	).Scan(&nodesJSON)
 	if err != nil {
 		s.logger.Debug("connection not found", "error", err, "connection_id", connectionID)
-		return nil, false
+		return nil, false, fmt.Errorf("read connection: %w", err)
 	}
 
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		s.logger.Warn("parse nodes", "error", err, "connection_id", connectionID)
-		return nil, false
+		return nil, false, fmt.Errorf("parse nodes: %w", err)
 	}
 	for _, n := range nodes {
 		var kind struct {
@@ -1030,7 +1059,7 @@ func (s *cloudConsumer) getConfig(connectionID, tenantID string) (*cloudConfig, 
 		resolved, err := crypto.ResolveNodeSecrets(context.Background(), crypto.NewSQLSecretReader(s.db), tenantID, n.Config)
 		if err != nil {
 			s.logger.Error("resolve secrets", "error", err, "connection_id", connectionID)
-			return nil, false
+			return nil, false, fmt.Errorf("resolve secrets: %w", err)
 		}
 		var nc nodeConfig
 		if err := json.Unmarshal(resolved, &nc); err != nil {
@@ -1038,10 +1067,10 @@ func (s *cloudConsumer) getConfig(connectionID, tenantID string) (*cloudConfig, 
 		}
 		if nc.Type == "cloud_storage" && nc.Cloud != nil {
 			nc.Cloud.nodeID = n.ID
-			return nc.Cloud, true
+			return nc.Cloud, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (s *cloudConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {

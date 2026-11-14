@@ -48,6 +48,9 @@ type salesforceConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -183,8 +186,16 @@ func (s *salesforceConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering) is retried in the background (#725).
 func (s *salesforceConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger, Policy: s.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return s.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (s *salesforceConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -193,11 +204,11 @@ func (s *salesforceConsumer) startConnection(ctx context.Context, connectionID, 
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("Salesforce poller already running or starting")
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
@@ -205,11 +216,16 @@ func (s *salesforceConsumer) startConnection(ctx context.Context, connectionID, 
 	cfg, err := s.getSalesforceConfig(connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Salesforce consumer for this connection", "error", err)
-		return
+		// The database not answering is worth a retry; a connection that is
+		// gone or has no Salesforce node is not this consumer's.
+		if sdk.IsTransientDBError(err) {
+			return sdk.TransientStart(err)
+		}
+		return nil
 	}
 	if cfg.InstanceURL == "" || cfg.OAuthGrantID == "" || cfg.SOQL == "" {
 		logger.Error("Salesforce config incomplete (need instance_url, oauth_grant_id, soql)")
-		return
+		return errors.New("salesforce config incomplete (need instance_url, oauth_grant_id, soql)")
 	}
 	if cfg.APIVersion == "" {
 		cfg.APIVersion = defaultAPIVersion
@@ -220,7 +236,7 @@ func (s *salesforceConsumer) startConnection(ctx context.Context, connectionID, 
 	if !claim.Activate(func() { s.active[connectionID] = cancel }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 	// Through the guard's status order: a stop that cancelled the connection
 	// since Activate and wrote "stopped" first makes this a no-op (#423).
@@ -228,6 +244,7 @@ func (s *salesforceConsumer) startConnection(ctx context.Context, connectionID, 
 
 	logger.Info("Starting Salesforce poller", "instance_url", cfg.InstanceURL, "interval", cfg.PollIntervalSeconds)
 	go s.runPoller(ctx, connectionID, tenantID, cfg)
+	return nil
 }
 
 func (s *salesforceConsumer) handleStopCommand(msg *nats.Msg) {

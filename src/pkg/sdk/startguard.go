@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -68,6 +69,11 @@ import (
 // landing just after Activate does not leave the database saying "running"
 // (#423).
 //
+// A start that fails for a reason that passes is retried in the background
+// when the consumer routes its starts through StartRetrying and reserves with
+// ReserveOrRetryContext (#725, startretry.go). The stop methods above end
+// those retries too.
+//
 // The zero value is ready to use. A StartGuard must not be copied after first
 // use.
 type StartGuard struct {
@@ -87,6 +93,12 @@ type StartGuard struct {
 	// to hold one write (a poller's final status, say) while a newer start
 	// writes "running". Nil in production.
 	BeforeStatusWrite func(connectionID string)
+
+	// BeforeRetryAttempt, when set, runs on a retry loop's goroutine once
+	// its wait is over, before it reads the row and starts (#725). Tests use
+	// it to land a stop between the wait and the retry's reserve. Nil in
+	// production.
+	BeforeRetryAttempt func(connectionID string)
 
 	// starting holds the claim of every start in progress, by connection ID.
 	// Guarded by the owner's lock.
@@ -118,6 +130,16 @@ type StartGuard struct {
 	statusMu sync.Mutex
 	written  map[statusKey]uint64
 	lanes    map[statusKey]*statusLane
+
+	// retries holds the pending start retry of each tenant's connection
+	// (startretry.go), watches the stop counters of starts running through
+	// StartRetrying, and retryClosed is set by StopAllLocked, after which
+	// nothing is retried. All guarded by the owner's lock. retryWG counts the
+	// retry loops.
+	retries     map[statusKey]*pendingRetry
+	watches     map[statusKey]*stopWatch
+	retryClosed bool
+	retryWG     sync.WaitGroup
 }
 
 // statusKey is one tenant's connection, the unit status writes are ordered in.
@@ -272,7 +294,24 @@ func (g *StartGuard) Reserve(mu sync.Locker, connectionID string, active func() 
 // filters on; RunningStatus takes its place in that tenant's order for the
 // connection.
 func (g *StartGuard) ReserveOrRetry(mu sync.Locker, tenantID, connectionID string, active func() bool, retry func()) (*StartClaim, bool) {
+	return g.reserve(context.Background(), mu, tenantID, connectionID, active, retry)
+}
+
+// ReserveOrRetryContext is ReserveOrRetry for a start that runs under ctx,
+// as a start through StartRetrying does (#725). It also refuses, keeping no
+// retry, when ctx has ended, checked under mu: a stop ends a pending retry's
+// context under that lock, so a retry whose wait was over just before the
+// stop cannot claim the connection after it. A nil ctx is never done.
+func (g *StartGuard) ReserveOrRetryContext(ctx context.Context, mu sync.Locker, tenantID, connectionID string, active func() bool, retry func()) (*StartClaim, bool) {
+	return g.reserve(ctx, mu, tenantID, connectionID, active, retry)
+}
+
+func (g *StartGuard) reserve(ctx context.Context, mu sync.Locker, tenantID, connectionID string, active func() bool, retry func()) (*StartClaim, bool) {
 	mu.Lock()
+	if ctx != nil && ctx.Err() != nil {
+		mu.Unlock()
+		return nil, false
+	}
 	if active() {
 		mu.Unlock()
 		return nil, false
@@ -283,6 +322,11 @@ func (g *StartGuard) ReserveOrRetry(mu sync.Locker, tenantID, connectionID strin
 				busy.retry = make(map[string]func())
 			}
 			busy.retry[tenantID] = retry
+			// A retry attempt queued itself behind this claim: its loop must
+			// not end before Release has run it (startretry.go).
+			if e := g.retries[statusKey{tenantID: tenantID, connectionID: connectionID}]; e != nil && e.attempting {
+				e.queued = true
+			}
 		}
 		mu.Unlock()
 		return nil, false
@@ -324,6 +368,8 @@ func (c *StartClaim) Activate(insert func()) bool {
 	}
 	c.guard.owners[c.connectionID] = c.tenantID
 	c.running = c.guard.nextLocked(c.tenantID, c.connectionID)
+	// Active now: a retry waiting for the connection has nothing left to do.
+	c.guard.activatedLocked(c.connectionID)
 	c.drop()
 	c.mu.Unlock()
 
@@ -387,7 +433,19 @@ func (c *StartClaim) drop() {
 // one it passes to Reserve. The claim is removed as well as marked, so a start
 // that arrives after the stop is not refused while the abandoned one is still
 // working.
+//
+// It also ends the start retries pending for the connection (StartRetrying),
+// for every tenant since it names none, and a start running through
+// StartRetrying now is not retried if it fails. That does not count towards
+// the result.
 func (g *StartGuard) StopLocked(connectionID string) bool {
+	g.stopRetryLocked("", connectionID)
+	return g.stopClaimLocked(connectionID)
+}
+
+// stopClaimLocked is StopLocked's part for the claim. The caller holds the
+// owner's lock.
+func (g *StartGuard) stopClaimLocked(connectionID string) bool {
 	c, ok := g.starting[connectionID]
 	if !ok {
 		return false
@@ -399,13 +457,18 @@ func (g *StartGuard) StopLocked(connectionID string) bool {
 }
 
 // StopAllLocked does what StopLocked does for every start in progress, for a
-// consumer shutting down. The caller holds the owner's lock.
+// consumer shutting down, and ends every pending start retry; nothing is
+// retried after it. The caller holds the owner's lock.
 func (g *StartGuard) StopAllLocked() {
 	for _, c := range g.starting {
 		c.stopped = true
 		c.retry = nil
 	}
 	g.starting = nil
+	g.retryClosed = true
+	for key, e := range g.retries {
+		g.endRetryLocked(key, e)
+	}
 }
 
 // StopForTenantLocked is StopLocked for a stop command, checked against the
@@ -416,13 +479,16 @@ func (g *StartGuard) StopAllLocked() {
 //
 // It refuses the stop with a *StopTenantMismatch when the subject's tenant is
 // not tenantID, when a start in progress for the connection is for another
-// tenant, or when the latest Activate for it was for another tenant. The
-// caller then changes nothing (no cancel, no delete, no status write), logs
-// the error as a warning and returns. The one thing a refused stop does is
-// drop a start for its own tenant that ReserveOrRetry queued on another
-// tenant's claim: the stop is newer, as in StopLocked.
+// tenant, when no start is in progress and a start retry is pending for the
+// connection under another tenant only, or when the latest Activate for it
+// was for another tenant. The caller then changes nothing (no cancel, no
+// delete, no status write), logs the error as a warning and returns. The one
+// thing a refused stop does is drop what is its own tenant's: a start that
+// ReserveOrRetry queued on another tenant's claim, and its tenant's pending
+// start retry. The stop is newer, as in StopLocked.
 //
-// Otherwise it does what StopLocked does and returns its result. A connection
+// Otherwise it does what StopLocked does, for its own tenant's retries only,
+// and returns its result. A connection
 // this owner neither started nor is starting passes, so a stop meant for
 // another consumer finds nothing here, as before. A start through Reserve
 // records no tenant, and stops for it are checked against the subject only.
@@ -433,12 +499,16 @@ func (g *StartGuard) StopForTenantLocked(subject, tenantID, connectionID string)
 	if c, ok := g.starting[connectionID]; ok {
 		if c.tenantID != "" && c.tenantID != tenantID {
 			delete(c.retry, tenantID)
+			g.stopRetryLocked(tenantID, connectionID)
 			return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: c.tenantID, Starting: true}
 		}
+	} else if other, ok := g.otherTenantRetryLocked(tenantID, connectionID); ok {
+		return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: other, Starting: true}
 	} else if owner := g.owners[connectionID]; owner != "" && owner != tenantID {
 		return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: owner}
 	}
-	return g.StopLocked(connectionID), nil
+	g.stopRetryLocked(tenantID, connectionID)
+	return g.stopClaimLocked(connectionID), nil
 }
 
 // StopTenantMismatch is why StopForTenantLocked refused a stop. Its message

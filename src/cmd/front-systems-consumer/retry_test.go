@@ -23,6 +23,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
@@ -669,8 +670,8 @@ func TestTransientDBError(t *testing.T) {
 		{"nil", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := transientDBError(tc.err); got != tc.want {
-				t.Errorf("transientDBError(%v) = %v, want %v", tc.err, got, tc.want)
+			if got := sdk.IsTransientDBError(tc.err); got != tc.want {
+				t.Errorf("sdk.IsTransientDBError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
@@ -703,7 +704,7 @@ func TestRetryDelay(t *testing.T) {
 			}
 		})
 	}
-	if d := (&frontSystemsConsumer{}).retryDelay(1); d < defaultRetryBase/2 || d > defaultRetryBase {
-		t.Errorf("default first delay %v, want within [%v, %v]", d, defaultRetryBase/2, defaultRetryBase)
+	if d := (&frontSystemsConsumer{}).retryDelay(1); d < sdk.DefaultStartRetryBase/2 || d > sdk.DefaultStartRetryBase {
+		t.Errorf("default first delay %v, want within [%v, %v]", d, sdk.DefaultStartRetryBase/2, sdk.DefaultStartRetryBase)
 	}
 }

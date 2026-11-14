@@ -188,7 +188,46 @@ database lists as `running` back by itself when it starts (`Restored running
 pipelines count=N` in its log, within seconds of the pod being Ready). A
 webhook source is reachable again as soon as its consumer is up. If a
 pipeline did not come back, its consumer logged why at start (a config that
-no longer resolves, a missing secret); fix that and Stop/Start it.
+no longer resolves, a missing secret); fix that and Stop/Start it. A
+database that does not answer at that moment is retried rather than taken
+as an answer, see the next section.
+
+## A pipeline says `running` but its consumer did not start
+
+Since #725 every command-driven consumer except the remote agent gateway
+retries a start that failed for a reason that passes. Its log shows
+`Start failed for a reason that may pass; retrying in the background`, then
+`Retrying start attempt=N`. What counts as passing: the management database not answering (connection refused or reset,
+a timeout, the server starting up or shutting down, too many connections)
+while the start reads the connection or its secrets, and for the database
+source, the source database not answering. The first retry comes after about
+5 s, the wait doubles up to 5 min, and the consumer gives up 6 h after the
+first failure (`Start still failing; giving up`). The status stays `running`
+while it retries; nothing is written until the start works.
+
+The retries end on their own when the connection is stopped, when its row no
+longer says `running`, and when the consumer shuts down; a new pod restores
+the connection again. A start command (Stop/Start, or Start alone) while a
+retry waits runs at once. Retries live in the consumer process that saw the
+failure: each pod has its own, and knows nothing of another pod's.
+
+A start that fails for a reason a retry does not fix (bad config, a refused
+URL or address, credentials refused, a missing secret, a refused
+`{secret:…}` placeholder) is not retried. The consumer logs why and the
+pipeline stays down: fix the cause and Stop/Start it. Some consumers log a
+secret they cannot read only at Debug, as "Not a … consumer"; if nothing
+shows at Error, raise the log level or check the node's secrets. Most
+consumers do not write status `error` for a refused start yet (#822), so the
+status can still say `running`.
+
+At boot, `Could not list running pipelines to restore; trying again` means
+the consumer could not read which pipelines to bring back because the
+database did not answer. It retries on the same schedule and restores them
+once the database answers. Any other list error is logged once
+(`The query failed for a reason a retry does not fix`) and nothing is
+restored. The line
+`nothing restored. Restart the consumer once the database answers`
+means it gave up (6 h) or shut down first: restart the pod.
 
 Deploying from the builder keeps the connection id and the webhook URL.
 Deleting a connection does not — the builder asks before creating a new one.

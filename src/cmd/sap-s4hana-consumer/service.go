@@ -57,6 +57,9 @@ type sapConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -184,8 +187,17 @@ func (c *sapConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering while the config or its secrets are read) is retried in the
+// background (#725).
 func (c *sapConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	c.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &c.mu, DB: c.db, Logger: c.logger, Policy: c.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return c.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (c *sapConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -194,29 +206,29 @@ func (c *sapConsumer) startConnection(ctx context.Context, connectionID, tenantI
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+	claim, ok := c.starts.ReserveOrRetryContext(ctx, &c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
 		func() { c.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
 	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not an SAP S/4HANA consumer for this connection", "error", err)
-		return
+		return sdk.TransientIfDBDown(err)
 	}
 	if err := cfg.validate(); err != nil {
 		logger.Error("SAP S/4HANA config incomplete", "error", err)
-		return
+		return err
 	}
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Error("SAP S/4HANA consumer needs poll_interval_seconds > 0")
-		return
+		return errors.New("sap s4hana consumer needs poll_interval_seconds > 0")
 	}
 	if err := cfg.checkURLs(c.allowPrivate); err != nil {
 		logger.Error("SAP S/4HANA address refused", "error", err)
-		return
+		return err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -224,11 +236,12 @@ func (c *sapConsumer) startConnection(ctx context.Context, connectionID, tenantI
 	if !claim.Activate(func() { c.active[connectionID] = cancel }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 
 	logger.Info("Starting SAP S/4HANA poller", "service", cfg.Service, "entity_set", cfg.EntitySet, "interval", cfg.PollIntervalSeconds)
 	go c.runPoller(ctx, connectionID, tenantID, cfg)
+	return nil
 }
 
 func (c *sapConsumer) handleStopCommand(msg *nats.Msg) {

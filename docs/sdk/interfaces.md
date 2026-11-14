@@ -95,6 +95,68 @@ is not that answer. Acking then loses the message.
 
 `harness.RunConfigReadCases` checks all of this against a sqlmock database.
 
+## Starting a connection (command-driven consumers)
+
+A consumer that starts connections on `vrsky.commands.*.connection.start`
+(and from `sdk.RestoreRunning` at boot) claims each start with a
+`sdk.StartGuard`, so two starts of one connection in the same process never
+both run and a stop that lands mid-start wins. The guard and its retries are
+per process: they know nothing of another replica or pod of the same
+consumer. The comment on `StartGuard` in `src/pkg/sdk/startguard.go` has the
+full pattern.
+
+Since #725 a start that fails for a reason that passes is retried in the
+background. Route every start through `StartRetrying` and reserve with the
+context it hands you:
+
+```go
+func (s *X) startConnection(ctx context.Context, id, tenant string) {
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger}, tenant, id,
+		func(ctx context.Context) error { return s.tryStart(ctx, id, tenant) })
+}
+
+func (s *X) tryStart(ctx context.Context, id, tenant string) error {
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenant, id, isActive,
+		func() { s.startConnection(ctx, id, tenant) })
+	if !ok {
+		return nil // active or starting already
+	}
+	defer claim.Release()
+	cfg, err := s.getConfig(ctx, id, tenant)
+	if err != nil {
+		return sdk.TransientIfDBDown(err) // only a database that doesn't answer is retried
+	}
+	...
+}
+```
+
+- Return `nil` for every start that did not fail: activated, refused,
+  abandoned because a stop took the claim, not your node.
+- Mark what a retry may fix with `sdk.TransientStart(err)`;
+  `sdk.TransientIfDBDown(err)` does it for a database that does not answer
+  (`sdk.IsTransientDBError`). Anything unmarked is permanent and fails the
+  start once, as before: bad config, a refused address, credentials refused,
+  a missing secret, a refused `{secret:}` placeholder.
+- Retries wait 5 s, doubling to 5 min, with jitter (`sdk.RetryPolicy`), and
+  give up 6 h after the first failure. Before each one the row is read
+  (`sdk.ConnectionRunning`): a row that is no longer `running` ends them.
+- Retries are kept per tenant and connection, in this process: a start or
+  stop naming another tenant for the connection neither takes the retry's
+  place nor ends it. Another pod's retries are its own.
+- They also end on a stop for the connection's tenant (the stop handler's
+  `StopForTenantLocked`), on `StopAllLocked` in `Stop`, when the start's
+  context ends, on a permanent failure, and when any start activates the
+  connection. A stop that lands just before a retry's reserve wins, because
+  `ReserveOrRetryContext` checks the context under your lock.
+- Keep nothing that outlives `tryStart` under its `ctx`: run pollers under
+  a context of their own, as every consumer here does.
+- While a retry waits the row keeps saying `running`; the consumer writes
+  nothing until a retry activates and writes `running` again.
+
+`sdk.RestoreRunning` retries its list query on the same schedule when the
+database does not answer. A list that never worked is logged at Error, and `sdk.RestoreRunningErr` returns it
+as `sdk.ErrRestoreList` rather than as zero pipelines.
+
 ## Custom HTTP handlers
 
 `BaseProducer.RegisterHTTPHandler(pattern, handler)` (callable in `Configure`)

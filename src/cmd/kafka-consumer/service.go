@@ -48,6 +48,9 @@ type kafkaConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -169,8 +172,16 @@ func (k *kafkaConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering) is retried in the background (#725).
 func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	k.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &k.mu, DB: k.db, Logger: k.logger, Policy: k.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return k.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (k *kafkaConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := k.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -179,23 +190,26 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := k.starts.ReserveOrRetry(&k.mu, tenantID, connectionID, func() bool { _, ok := k.active[connectionID]; return ok },
+	claim, ok := k.starts.ReserveOrRetryContext(ctx, &k.mu, tenantID, connectionID, func() bool { _, ok := k.active[connectionID]; return ok },
 		func() { k.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("Kafka consumer already running or starting")
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
 
-	cfg, ok := k.getKafkaConfig(connectionID, tenantID)
+	cfg, ok, err := k.loadKafkaConfig(connectionID, tenantID)
+	if err != nil {
+		return sdk.TransientIfDBDown(err)
+	}
 	if !ok {
 		logger.Debug("Not a Kafka consumer for this connection, ignoring")
-		return
+		return nil
 	}
 	if len(cfg.Brokers) == 0 || cfg.Topic == "" || cfg.ConsumerGroup == "" {
 		logger.Error("Kafka config incomplete (need brokers, topic, consumer_group)")
-		return
+		return errors.New("kafka config incomplete (need brokers, topic, consumer_group)")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -203,7 +217,7 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	if !claim.Activate(func() { k.active[connectionID] = cancel }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 	// Through the guard's status order: a stop that cancelled the connection
 	// since Activate and wrote "stopped" first makes this a no-op (#423).
@@ -211,6 +225,7 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 
 	logger.Info("Starting Kafka consumer", "brokers", cfg.Brokers, "topic", cfg.Topic, "group", cfg.ConsumerGroup, "auth", cfg.AuthType)
 	go k.consumeLoop(ctx, connectionID, tenantID, cfg, logger)
+	return nil
 }
 
 func (k *kafkaConsumer) handleStopCommand(msg *nats.Msg) {
@@ -320,8 +335,17 @@ func (k *kafkaConsumer) publishMessage(ctx context.Context, connID, tenantID str
 
 // getKafkaConfig loads the connection, resolves *_secret_id references, and
 // extracts the Kafka consumer node config.
-// lint:tenant-ok — lookup is scoped by (id, tenant_id).
 func (k *kafkaConsumer) getKafkaConfig(connectionID, tenantID string) (*KafkaConfig, bool) {
+	cfg, ok, _ := k.loadKafkaConfig(connectionID, tenantID)
+	return cfg, ok
+}
+
+// loadKafkaConfig is getKafkaConfig that also returns the error behind a
+// failed load (the connection read or the secret lookup), so a start can tell
+// the database not answering from a connection that is simply not a Kafka
+// consumer (#725). ok is false on every error.
+// lint:tenant-ok — lookup is scoped by (id, tenant_id).
+func (k *kafkaConsumer) loadKafkaConfig(connectionID, tenantID string) (*KafkaConfig, bool, error) {
 	var nodesJSON json.RawMessage
 	err := k.db.QueryRow(
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
@@ -329,13 +353,16 @@ func (k *kafkaConsumer) getKafkaConfig(connectionID, tenantID string) (*KafkaCon
 	).Scan(&nodesJSON)
 	if err != nil {
 		k.logger.Debug("connection not found", "error", err, "connection_id", connectionID)
-		return nil, false
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		k.logger.Warn("parse nodes", "error", err, "connection_id", connectionID)
-		return nil, false
+		return nil, false, nil
 	}
 	for _, n := range nodes {
 		var kind struct {
@@ -349,17 +376,17 @@ func (k *kafkaConsumer) getKafkaConfig(connectionID, tenantID string) (*KafkaCon
 		resolved, err := crypto.ResolveNodeSecrets(context.Background(), crypto.NewSQLSecretReader(k.db), tenantID, n.Config)
 		if err != nil {
 			k.logger.Error("resolve secrets", "error", err, "connection_id", connectionID)
-			return nil, false
+			return nil, false, err
 		}
 		var nc nodeConfig
 		if err := json.Unmarshal(resolved, &nc); err != nil {
 			continue
 		}
 		if nc.Type == "kafka" && nc.Kafka != nil {
-			return nc.Kafka, true
+			return nc.Kafka, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (k *kafkaConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {

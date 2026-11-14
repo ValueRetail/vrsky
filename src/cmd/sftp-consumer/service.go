@@ -86,6 +86,9 @@ type sftpConsumer struct {
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
+	// retryPolicy times the retries of a failed start (#725); the zero value
+	// is the SDK default. Tests shorten it.
+	retryPolicy sdk.RetryPolicy
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -219,8 +222,17 @@ func (s *sftpConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails for a reason that passes (the management database not
+// answering) is retried in the background (#725). The start does not dial the
+// SFTP server; the poller does, with its own backoff.
 func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
+	s.starts.StartRetrying(ctx, sdk.RetryOptions{Mu: &s.mu, DB: s.db, Logger: s.logger, Policy: s.retryPolicy}, tenantID, connectionID,
+		func(ctx context.Context) error { return s.tryStart(ctx, connectionID, tenantID) })
+}
+
+// tryStart is one start attempt. It returns nil unless the start failed; a
+// failure marked sdk.TransientStart is retried, any other is not.
+func (s *sftpConsumer) tryStart(ctx context.Context, connectionID, tenantID string) error {
 	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -229,31 +241,34 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetryContext(ctx, &s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("SFTP poller already running or starting")
-		return
+		return nil
 	}
 	// Frees the claim on every early return below; a no-op once active.
 	defer claim.Release()
 
-	cfg, ok := s.getSFTPConfig(connectionID, tenantID)
+	cfg, ok, err := s.loadSFTPConfig(connectionID, tenantID)
+	if err != nil {
+		return sdk.TransientIfDBDown(err)
+	}
 	if !ok {
 		logger.Debug("Not an SFTP consumer for this connection, ignoring")
-		return
+		return nil
 	}
 	if cfg.Host == "" || cfg.Username == "" || cfg.RemoteDir == "" {
 		logger.Error("SFTP config incomplete (need host, username, remote_dir)")
-		return
+		return errors.New("sftp config incomplete (need host, username, remote_dir)")
 	}
 	if cfg.Password == "" && cfg.PrivateKey == "" {
 		logger.Error("SFTP config has no credentials (set a password or a private key)")
-		return
+		return errors.New("sftp config has no credentials (set a password or a private key)")
 	}
 	if cfg.moveIntoWatchedDir() {
 		logger.Error("invalid move_dir: it is the same directory as remote_dir, so moved files would be found and moved again at every poll", "move_dir", cfg.MoveDir, "remote_dir", cfg.RemoteDir)
-		return
+		return errors.New("sftp move_dir is the same directory as remote_dir")
 	}
 	if cfg.HostKey == "" {
 		logger.Warn("SFTP host_key not pinned; server identity will not be verified (set host_key in production)")
@@ -265,7 +280,7 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 	if !claim.Activate(func() { s.active[connectionID] = ac }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
-		return
+		return nil
 	}
 	// Through the guard's status order: a stop that cancelled the connection
 	// since Activate and wrote "stopped" first makes this a no-op (#423).
@@ -273,6 +288,7 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 
 	logger.Info("Starting SFTP poller", "host", cfg.Host, "remote_dir", cfg.RemoteDir, "after_action", cfg.AfterAction)
 	go s.runPoller(ctx, ac, connectionID, tenantID, cfg)
+	return nil
 }
 
 // activeConn is one start's entry in the active map. The poller gets the same
@@ -846,8 +862,17 @@ func (s *sftpConsumer) publishFile(ctx context.Context, connID, tenantID, filena
 
 // getSFTPConfig loads the connection, resolves *_secret_id references to
 // plaintext, and extracts the SFTP consumer node config.
-// lint:tenant-ok — lookup is scoped by (id, tenant_id).
 func (s *sftpConsumer) getSFTPConfig(connectionID, tenantID string) (*SFTPConfig, bool) {
+	cfg, ok, _ := s.loadSFTPConfig(connectionID, tenantID)
+	return cfg, ok
+}
+
+// loadSFTPConfig is getSFTPConfig that also returns the error behind a failed
+// load (the connection read or the secret lookup), so a start can tell the
+// database not answering from a connection that is simply not an SFTP
+// consumer (#725). ok is false on every error.
+// lint:tenant-ok — lookup is scoped by (id, tenant_id).
+func (s *sftpConsumer) loadSFTPConfig(connectionID, tenantID string) (*SFTPConfig, bool, error) {
 	var nodesJSON json.RawMessage
 	err := s.db.QueryRow(
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
@@ -855,13 +880,16 @@ func (s *sftpConsumer) getSFTPConfig(connectionID, tenantID string) (*SFTPConfig
 	).Scan(&nodesJSON)
 	if err != nil {
 		s.logger.Debug("connection not found", "error", err, "connection_id", connectionID)
-		return nil, false
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		s.logger.Warn("parse nodes", "error", err, "connection_id", connectionID)
-		return nil, false
+		return nil, false, nil
 	}
 	for _, n := range nodes {
 		var kind struct {
@@ -875,7 +903,7 @@ func (s *sftpConsumer) getSFTPConfig(connectionID, tenantID string) (*SFTPConfig
 		resolved, err := crypto.ResolveNodeSecrets(context.Background(), crypto.NewSQLSecretReader(s.db), tenantID, n.Config)
 		if err != nil {
 			s.logger.Error("resolve secrets", "error", err, "connection_id", connectionID)
-			return nil, false
+			return nil, false, err
 		}
 		var nc nodeConfig
 		if err := json.Unmarshal(resolved, &nc); err != nil {
@@ -883,10 +911,10 @@ func (s *sftpConsumer) getSFTPConfig(connectionID, tenantID string) (*SFTPConfig
 		}
 		if nc.Type == "sftp" && nc.SFTP != nil {
 			nc.SFTP.nodeID = n.ID
-			return nc.SFTP, true
+			return nc.SFTP, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (s *sftpConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {
