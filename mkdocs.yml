@@ -84,6 +84,7 @@ nav:
       - Apache Kafka: connectors/kafka.md
       - RabbitMQ: connectors/rabbitmq.md
       - NATS JetStream (external): connectors/nats.md
+      - Published into VRSky: connectors/direct.md
       - Salesforce: connectors/salesforce.md
       - Sitoo (POS): connectors/sitoo.md
       - Front Systems (POS): connectors/front-systems.md
