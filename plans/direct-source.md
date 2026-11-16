@@ -61,9 +61,12 @@ Basket's envelope in a second one).
 - The wizard's `asList` field option existed only for this template's NATS
   server field. With that field gone no template uses it, so it is removed
   rather than left untested.
-- No sample-data preview for this source: nothing writes `last_payload` for
-  it (the SDK consumer does that, and there is none). The builder falls back
-  to the deployed-connection sample, which stays empty. Noted on the docs page.
+- No sample-data preview or field discovery for this source: nothing writes
+  `last_payload` for it (the SDK consumer does that, and there is none), and
+  the sample-data endpoint falls back to the newest payload of another
+  pipeline in the workspace. The builder says so instead of calling it.
+- The deploy drift guard skipped any rule without a service; it now fails on
+  one unless it is in `serviceless` (only `consumer/direct`).
 
 ## Found on the way (backlog, not fixed here)
 
