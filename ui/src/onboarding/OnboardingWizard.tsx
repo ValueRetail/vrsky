@@ -15,6 +15,7 @@ import { config } from '../config/env'
 import { useAuthStore } from '../store/authStore'
 import { materializeSecrets } from '../utils/secrets'
 import SecretInput from '../components/Pipeline/SecretInput'
+import { directSubject } from '../components/Pipeline/directSource'
 import { TEMPLATES, type PipelineTemplate, type TemplateField } from './templates'
 import { markOnboarded } from './state'
 
@@ -54,6 +55,7 @@ const label: React.CSSProperties = { display: 'block', fontSize: '12px', fontWei
 const help: React.CSSProperties = { fontSize: '12px', color: '#6b7280', marginTop: '4px' }
 const input: React.CSSProperties = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }
 const primaryBtn: React.CSSProperties = { padding: '9px 18px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }
+const codeBox: React.CSSProperties = { display: 'block', background: '#f3f4f6', padding: '9px 11px', borderRadius: '6px', fontSize: '12px', wordBreak: 'break-all' }
 const ghostBtn: React.CSSProperties = { padding: '9px 16px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '7px', fontSize: '14px', cursor: 'pointer' }
 // The /welcome route renders outside RootLayout, and <body> is overflow:hidden,
 // so the wizard needs its own full-height scroll container or tall content clips.
@@ -101,9 +103,7 @@ export default function OnboardingWizard() {
     setConfigs((prev) => {
       const next = JSON.parse(JSON.stringify(prev)) as Record<string, Record<string, unknown>>
       const n = Number(value)
-      getObj(next[f.nodeId], f.objectPath)[f.key] = f.asList
-        ? value.trim() === '' ? [] : [value.trim()]
-        : f.numeric && value.trim() !== '' && Number.isFinite(n) ? n : value
+      getObj(next[f.nodeId], f.objectPath)[f.key] = f.numeric && value.trim() !== '' && Number.isFinite(n) ? n : value
       return next
     })
   }
@@ -124,11 +124,9 @@ export default function OnboardingWizard() {
     return template.fields.filter((f) => {
       const obj = readObj(configs[f.nodeId] || {}, f.objectPath)
       const v = obj[f.key]
-      const filled = f.asList
-        ? Array.isArray(v) && v.some((x) => typeof x === 'string' && x.trim() !== '')
-        : f.numeric
-          ? typeof v === 'number' && Number.isFinite(v)
-          : typeof v === 'string' && v.trim() !== ''
+      const filled = f.numeric
+        ? typeof v === 'number' && Number.isFinite(v)
+        : typeof v === 'string' && v.trim() !== ''
       if (f.secret) {
         const bound = obj[`${f.key}_secret_id`]
         return !filled && !(typeof bound === 'string' && bound !== '')
@@ -169,9 +167,12 @@ export default function OnboardingWizard() {
       // Drop the user straight onto the builder canvas with the freshly-deployed
       // pipeline loaded — no dashboard→Edit detour. Webhook-source templates
       // first show the done screen (which surfaces the webhook URL + sample
-      // send) and open the canvas from there.
+      // send) and open the canvas from there; so do direct-source templates,
+      // whose publisher needs the connection id before anything arrives.
       if (template.webhookSource) {
         setWebhookUrl(`${config.webhookIngressUrl}/webhook/${id}`)
+        setStep('done')
+      } else if (template.directSource) {
         setStep('done')
       } else {
         navigate(`/connections/${id}/edit`)
@@ -271,11 +272,7 @@ export default function OnboardingWizard() {
                     <label style={label}>{f.label}</label>
                     <input
                       style={input}
-                      value={
-                        Array.isArray(obj[f.key])
-                          ? String((obj[f.key] as unknown[])[0] ?? '')
-                          : obj[f.key] === undefined || obj[f.key] === null ? '' : String(obj[f.key])
-                      }
+                      value={obj[f.key] === undefined || obj[f.key] === null ? '' : String(obj[f.key])}
                       inputMode={f.numeric ? 'numeric' : undefined}
                       placeholder={f.placeholder}
                       onChange={(e) => setFieldValue(f, e.target.value)}
@@ -329,6 +326,22 @@ export default function OnboardingWizard() {
                   {sampleResult}
                 </span>
               )}
+            </div>
+          )}
+
+          {template.directSource && deployedId && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={label}>Connection id</div>
+              <code data-testid="direct-connection-id" style={codeBox}>{deployedId}</code>
+              {currentTenant?.id && (
+                <>
+                  <div style={{ ...label, marginTop: '10px' }}>Workspace id</div>
+                  <code data-testid="direct-workspace-id" style={codeBox}>{currentTenant.id}</code>
+                </>
+              )}
+              <div style={{ ...label, marginTop: '10px' }}>Subject the publisher writes to (stream VRSKY_DATA)</div>
+              <code style={codeBox}>{directSubject(currentTenant?.id, deployedId)}</code>
+              <p style={help}>{template.directSource.publisherSetup}</p>
             </div>
           )}
 

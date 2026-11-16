@@ -121,6 +121,21 @@ describe('webhook templates can demonstrate themselves', () => {
   })
 })
 
+describe('direct-source templates tell the publisher where to write', () => {
+  // A direct source has no settings and no URL: nothing arrives until the
+  // outside publisher is pointed at this connection. A template with such a
+  // source and no directSource text would deploy a pipeline that waits for
+  // ever, and the done screen would never show the connection id.
+  each((t) => {
+    const src = t.nodes.find((n) => n.type === 'consumer')!
+    const isDirect = src.config.type === 'direct'
+    expect(Boolean(t.directSource), `${t.id}: a direct source and directSource must come together`).toBe(isDirect)
+    if (!isDirect) return
+    expect(t.directSource!.publisherSetup.trim(), `${t.id}: directSource.publisherSetup is empty`).not.toBe('')
+    expect(t.fields.filter((f) => f.nodeId === src.id), `${t.id}: a direct source has nothing to fill in`).toEqual([])
+  })
+})
+
 describe('gallery cards are presentable', () => {
   each((t) => {
     for (const k of ['name', 'summary', 'icon', 'sourceLabel', 'destLabel'] as const) {
@@ -336,9 +351,18 @@ describe('Bifrost sales → Retailhero (#817)', () => {
     ])
   })
 
-  it('reads the NATS source and posts JSON over HTTP', () => {
-    expect(node('src').config.type).toBe('nats')
+  it('takes what Basket publishes into the pipeline and posts JSON over HTTP', () => {
+    // Basket writes finished envelopes into VRSKY_DATA itself (Bifrost ADR
+    // 0002). A NATS source would read Basket's envelope as a body and wrap it
+    // in a second one, so the filter would never see the event.
+    expect(node('src').config).toEqual({ type: 'direct' })
     expect(node('dst').config).toMatchObject({ type: 'http', http: { method: 'POST', headers: { 'Content-Type': 'application/json' } } })
+  })
+
+  it("tells the user to give Basket the connection id and this workspace's id", () => {
+    const setup = t().directSource?.publisherSetup ?? ''
+    expect(setup).toContain('BASKET_VRSKY_INTEGRATION_ID')
+    expect(setup).toMatch(/tenant must be this workspace's id/)
   })
 
   it('forwards only till sales and returns, because Retailhero refuses a batch on any other event type', () => {
@@ -347,10 +371,6 @@ describe('Bifrost sales → Retailhero (#817)', () => {
     expect(rules).toContainEqual({ field: 'source.kind', operator: 'equals', value: 'pos' })
     expect(rules).toContainEqual({ field: 'event_id', operator: 'is_not_empty', value: '' })
     expect(node('flt').config.logic).toBe('and')
-  })
-
-  it('reads the whole stream on first start, which the operation ID makes safe', () => {
-    expect((node('src').config.nats as Record<string, unknown>).deliver_policy).toBe('all')
   })
 
   it('derives the operation ID from the event type, the Basket event ID and revision 1, with no random part', () => {
