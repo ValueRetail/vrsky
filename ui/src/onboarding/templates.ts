@@ -563,7 +563,7 @@ export const TEMPLATES: PipelineTemplate[] = [
     ],
     directSource: {
       publisherSetup:
-        "Set Basket's BASKET_VRSKY_INTEGRATION_ID to the connection id above. Basket's tenant must be this workspace's id: VRSky looks up the pipeline and its stored secrets under the envelope's tenant.",
+        "Set Basket's BASKET_VRSKY_INTEGRATION_ID to the connection id above. Basket's tenant must be this workspace's id: VRSky resolves the pipeline's stored secrets, the intake credential among them, under the envelope's tenant. Stopping the pipeline in VRSky does not stop deliveries; stop Basket's publishing.",
     },
     fields: [
       {

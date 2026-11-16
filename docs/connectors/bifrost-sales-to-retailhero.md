@@ -202,7 +202,9 @@ Settled, with the contract pinned for this path on 2026-11-11:
   payload, `tenant_id` the workspace id and `integration_id` the connection
   id. The template's source is `direct`, so the payload the filter sees is
   the bare Basket event, as in `basket/docs/events/`. A live run through the
-  filter, converter and HTTP producer showed it.
+  filter, converter and HTTP producer, with an idle webhook source standing
+  in for `direct`, showed it; `src/cmd/data-filter/bifrost_sales_test.go`
+  holds the filter half against an envelope written as Basket sends it.
 - **Money**: `unit_price` is the ex-VAT unit price before discount, and
   Retailhero uses the exact `line_ex_vat`, `line_vat` and `line_inc_vat` when
   the event has them.

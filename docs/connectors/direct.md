@@ -41,8 +41,12 @@ Give each message a stable `Nats-Msg-Id` (Basket uses the event id).
 destination's own idempotency (an operation id, a dedupe field) is what holds
 after that.
 
-A payload over 256 KiB goes through the claim check (`payload_ref`), as for
-any other source.
+VRSky does not offload a large payload for this source: nothing of VRSky's
+touches the message before the first node. Keep messages small (Basket's
+events are far below 256 KiB) or have the publisher write the payload to the
+payload store itself and send `payload_ref` and `payload_size`, as VRSky's own
+connectors do above 256 KiB. A message over NATS's maximum payload is refused
+at publish.
 
 ## Starting and stopping
 
@@ -59,9 +63,10 @@ Basket, stop its VRSky publishing) or delete the connection.
 ## Notes
 
 - **No sample data.** VRSky keeps a preview of a source's last message only
-  when one of its own connectors read it, so "Load structure" and "Fetch
-  sample" have nothing to show for this source. Type field paths by hand, or
-  copy them from the publisher's documentation.
+  when one of its own connectors read it, so the builder offers no sample or
+  field discovery for this source. Type field paths by hand, or copy them
+  from the publisher's documentation. (The sample endpoint falls back to
+  another pipeline's last payload, so the builder does not call it here.)
 - **Who may publish.** VRSky does not check who wrote a message, and the
   workers find the connection by `integration_id` without checking that the
   envelope's tenant owns it. Give a publisher NATS credentials for its own

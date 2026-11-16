@@ -44,6 +44,12 @@ describe('DirectSourceInfo', () => {
     expect(screen.getByText(/deploy the pipeline to get its connection id/i)).toBeInTheDocument()
   })
 
+  it('warns that stopping the pipeline does not stop the publisher', () => {
+    tenant = { id: 'ws-123' }
+    render(<DirectSourceInfo deployedConnectionId="conn-9" />)
+    expect(screen.getByText(/stopping this pipeline does not stop deliveries/i)).toBeInTheDocument()
+  })
+
   it('does not invent a workspace id when none is loaded', () => {
     tenant = null
     render(<DirectSourceInfo deployedConnectionId="conn-9" />)
@@ -51,3 +57,4 @@ describe('DirectSourceInfo', () => {
     expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument()
   })
 })
+

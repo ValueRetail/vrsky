@@ -44,6 +44,11 @@ export default function DirectSourceInfo({ deployedConnectionId }: { deployedCon
         </p>
       </div>
 
+      <p className="text-xs text-amber-700 dark:text-amber-300">
+        Stopping this pipeline does not stop deliveries: messages the publisher sends are still processed. Stop the
+        publisher to stop the flow.
+      </p>
+
       {!deployedConnectionId && (
         <p className="text-xs text-neutral-600 dark:text-neutral-300">
           Deploy the pipeline to get its connection id.

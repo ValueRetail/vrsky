@@ -5,6 +5,12 @@
  * pipeline workers take the messages from the connection's subject.
  */
 
+/** Why the builder offers no sample or field discovery for this source: no
+ *  connector of VRSky's reads it, so it never has a last payload, and the
+ *  sample-data endpoint would fall back to another pipeline's. */
+export const DIRECT_NO_SAMPLE =
+  'An outside publisher writes into this source, so VRSky keeps no sample of it. Type the field paths by hand.'
+
 /** The JetStream stream the publisher writes into. */
 export const DIRECT_SOURCE_STREAM = 'VRSKY_DATA'
 

@@ -15,7 +15,7 @@ import { config } from '../config/env'
 import { useAuthStore } from '../store/authStore'
 import { materializeSecrets } from '../utils/secrets'
 import SecretInput from '../components/Pipeline/SecretInput'
-import { directSubject } from '../components/Pipeline/directSource'
+import { DIRECT_SOURCE_STREAM, directSubject } from '../components/Pipeline/directSource'
 import { TEMPLATES, type PipelineTemplate, type TemplateField } from './templates'
 import { markOnboarded } from './state'
 
@@ -339,7 +339,7 @@ export default function OnboardingWizard() {
                   <code data-testid="direct-workspace-id" style={codeBox}>{currentTenant.id}</code>
                 </>
               )}
-              <div style={{ ...label, marginTop: '10px' }}>Subject the publisher writes to (stream VRSKY_DATA)</div>
+              <div style={{ ...label, marginTop: '10px' }}>Subject the publisher writes to (stream {DIRECT_SOURCE_STREAM})</div>
               <code style={codeBox}>{directSubject(currentTenant?.id, deployedId)}</code>
               <p style={help}>{template.directSource.publisherSetup}</p>
             </div>
