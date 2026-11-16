@@ -147,6 +147,33 @@ func TestValidateNodeConfigs_NonXMLTransformsNeedNothingExtra(t *testing.T) {
 	}
 }
 
+// A direct source is written into VRSKY_DATA by an outside publisher (Bifrost
+// Basket, Bifrost ADR 0002). There is nothing to configure, so a bare
+// {"type":"direct"} must save and start.
+func TestValidateNodeConfigs_ADirectSourceNeedsNoSettings(t *testing.T) {
+	v := NewValidator()
+	conn := pipeline(`{"type":"direct"}`, okHTTPDest)
+	if err := v.ValidateDAG(conn); err != nil {
+		t.Fatalf("a pipeline with a direct source could not be saved: %v", err)
+	}
+	if err := v.ValidateNodeConfigs(conn); err != nil {
+		t.Fatalf("a pipeline with a direct source could not be started: %v", err)
+	}
+}
+
+// Only the source end can be published into. A destination of type direct
+// would accept messages and deliver them nowhere.
+func TestValidateNodeConfigs_DirectIsNotADestination(t *testing.T) {
+	v := NewValidator()
+	err := v.ValidateNodeConfigs(pipeline(okFileSource, `{"type":"direct"}`))
+	if err == nil {
+		t.Fatal("a destination of type direct was accepted, so its messages would go nowhere")
+	}
+	if !strings.Contains(err.Error(), `"direct" is not a valid destination type`) {
+		t.Errorf("the refusal should say direct is not a destination, got: %v", err)
+	}
+}
+
 // Saving an incomplete pipeline must stay possible: nodes exist on the canvas
 // before their type is chosen, and ValidateDAG runs on every save.
 func TestValidateDAG_StillAcceptsAnUnconfiguredPipeline(t *testing.T) {

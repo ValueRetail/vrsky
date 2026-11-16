@@ -18,6 +18,7 @@ import SecretInput from './SecretInput'
 import SFTPConsumerConfig from './SFTPConsumerConfig'
 import CloudStorageConfigEditor from './CloudStorageConfigEditor'
 import NatsConfigEditor from './NatsConfigEditor'
+import DirectSourceInfo from './DirectSourceInfo'
 import BifrostCatalogueConfigEditor from './BifrostCatalogueConfigEditor'
 import WebhookSignatureConfig from './WebhookSignatureConfig'
 import OAuthGrantSelector from './OAuthGrantSelector'
@@ -3151,6 +3152,7 @@ export default function PropertyEditor({
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
                 { value: 'nats', label: 'NATS JetStream (external)' },
+                { value: 'direct', label: 'Published into VRSky' },
                 { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
                 { value: 'sitoo', label: 'Sitoo (POS)' },
                 { value: 'front_systems', label: 'Front Systems (POS)' },
@@ -3385,6 +3387,8 @@ export default function PropertyEditor({
             {/* Keyed by node: the editor keeps the typed server list in its own
                 state, which must not carry over to another NATS node. */}
             {config.type === 'nats' && <NatsConfigEditor key={node.id} config={config} setConfig={setConfig} />}
+
+            {config.type === 'direct' && <DirectSourceInfo deployedConnectionId={deployedConnectionId} />}
 
             {config.type === 'cloud_storage' && (
               <CloudStorageConfigEditor config={config} setConfig={setConfig} role="consumer" />

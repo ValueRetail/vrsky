@@ -94,6 +94,14 @@ var nodeConfigRules = map[nodeKind]nodeConfigRule{
 		{"nats.stream", "the JetStream stream to read is required"},
 		{"nats.durable", "the durable consumer name is required"},
 	}},
+	// Published into VRSky: an outside publisher (Bifrost Basket, Bifrost ADR
+	// 0002) writes finished envelopes into VRSKY_DATA on
+	// vrsky.data.<tenant>.pipeline.<connection id> itself. No service claims
+	// the node and nothing is launched at start; data-filter, data-converter
+	// and the producers take the messages from there, as they take any
+	// consumer's. Hence no service and no settings. TestNodeConfigRulesAreDeployed
+	// skips a rule without a service.
+	{"consumer", "direct"}: {"", nil},
 
 	// --- generic destinations ------------------------------------------------
 	{"producer", "http"}: {"http-producer", []configRequirement{{

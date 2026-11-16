@@ -34,6 +34,9 @@ export type ConnectorKeys = {
 export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
   // webhook-consumer: listens; nothing to configure.
   'consumer/http': { block: 'http', keys: [], required: [], numeric: [] },
+  // direct ("Published into VRSky"): an outside publisher writes into
+  // VRSKY_DATA itself; nothing reads a setting, so there is no block to fill.
+  'consumer/direct': { block: 'direct', keys: [], required: [], numeric: [] },
   // http-producer (src/cmd/http-producer)
   'producer/http': {
     block: 'http',
