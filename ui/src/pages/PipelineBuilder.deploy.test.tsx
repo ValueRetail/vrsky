@@ -153,6 +153,21 @@ describe('PipelineBuilder deploy', () => {
     expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBe(CONN)
   })
 
+  it('shows a direct source the subject its publisher must write to, with both ids', async () => {
+    const c = canvas({}, true)
+    c.nodes[0].data.config = { type: 'direct' }
+    seed(c)
+    post.mockResolvedValueOnce({ data: { data: { id: CONN } } } as never).mockResolvedValueOnce({ data: {} } as never)
+    showBuilder()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+    const body = post.mock.calls[0][1] as { nodes: Array<{ id: string; config: unknown }> }
+    expect(body.nodes[0].config).toEqual({ type: 'direct' })
+    expect(await screen.findByText(`vrsky.data.tenant-1.pipeline.${CONN}`)).toBeInTheDocument()
+  })
+
   it('updates a linked pipeline in place: stop, update, start, same id', async () => {
     seed(canvas({ deployedConnectionId: CONN, deployedName: 'Orders' }, true))
     post.mockResolvedValue({ data: {} } as never)

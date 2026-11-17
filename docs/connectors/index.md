@@ -15,6 +15,7 @@ set by `config.type` on the node. Sources are **consumers**, destinations are
 | [Apache Kafka](kafka.md) | ✓ | ✓ | `kafka` |
 | [RabbitMQ](rabbitmq.md) | ✓ | ✓ | `rabbitmq` |
 | [NATS JetStream (external)](nats.md) | ✓ | — | `nats` |
+| [Published into VRSky](direct.md) | ✓ (outside publisher) | — | `direct` |
 | [Salesforce](salesforce.md) | ✓ | ✓ | `salesforce` |
 | [Sitoo (POS)](sitoo.md) | ✓ (poll + webhook) | ✓ | `sitoo` |
 | [Front Systems (POS)](front-systems.md) | ✓ (webhook) | ✓ | `front_systems` |

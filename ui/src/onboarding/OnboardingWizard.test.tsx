@@ -168,9 +168,9 @@ describe('deploying', () => {
     expect(nodes.find((n) => n.id === 'dst')!.config.database!.port).toBe(5433)
   })
 
-  it('sends a list field as a one-entry list and a filter node with its type', async () => {
-    // The NATS source reads servers as an array: a plain string fails to
-    // unmarshal and the connection stops with an error at start.
+  it('sends a direct source with no settings, and a filter node with its type', async () => {
+    // Basket publishes into the pipeline itself, so the source node carries
+    // only its type; the wizard asks nothing about it.
     const { container } = render(<OnboardingWizard />)
     pick('Bifrost Basket')
     expect(deployButton()).toBeDisabled()
@@ -179,12 +179,9 @@ describe('deploying', () => {
     fireEvent.click(deployButton())
     await waitFor(() => expect(post).toHaveBeenCalled())
 
-    const nodes = post.mock.calls[0][1].nodes as { id: string; type: string; config: { nats: { servers: unknown[]; password?: unknown; password_secret_id?: unknown }; mappings: { value: unknown }[] } }[]
+    const nodes = post.mock.calls[0][1].nodes as { id: string; type: string; config: { type?: string; mappings: { value: unknown }[] } }[]
     expect(nodes.map((n) => n.type)).toEqual(['consumer', 'filter', 'converter', 'producer'])
-    expect(nodes[0].config.nats.servers).toHaveLength(1)
-    expect(typeof nodes[0].config.nats.servers[0]).toBe('string')
-    expect(nodes[0].config.nats.password).toBeUndefined()
-    expect(nodes[0].config.nats.password_secret_id).toBe('sec-123')
+    expect(nodes[0].config).toEqual({ type: 'direct' })
     expect(nodes[2].config.mappings[3].value).not.toBe('')
   })
 
@@ -253,6 +250,22 @@ describe('after a successful deploy', () => {
 
     expect(await screen.findByText('https://hooks.test/webhook/conn-9')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /send a sample event/i })).toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("shows a direct-source template the connection id and workspace id its publisher needs", async () => {
+    // Nothing reaches the pipeline until Basket is given these, so the wizard
+    // must not navigate away before showing them.
+    const { container } = render(<OnboardingWizard />)
+    pick('Bifrost Basket')
+    fillEveryField(container)
+    await waitFor(() => expect(deployButton()).toBeEnabled())
+    fireEvent.click(deployButton())
+
+    expect(await screen.findByTestId('direct-connection-id')).toHaveTextContent('conn-9')
+    expect(screen.getByTestId('direct-workspace-id')).toHaveTextContent('tenant-1')
+    expect(screen.getByText('vrsky.data.tenant-1.pipeline.conn-9')).toBeInTheDocument()
+    expect(screen.getByText(/BASKET_VRSKY_INTEGRATION_ID/)).toBeInTheDocument()
     expect(navigate).not.toHaveBeenCalled()
   })
 

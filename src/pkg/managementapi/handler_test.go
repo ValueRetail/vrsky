@@ -444,6 +444,50 @@ func TestStartConnection_Valid(t *testing.T) {
 	}
 }
 
+// A direct source has no connector service to launch or wait for: the
+// outside publisher writes into VRSKY_DATA and the pipeline workers take it
+// from there. Start must mark the connection running straight away.
+func TestStartConnection_ADirectSourceStartsWithNothingToLaunch(t *testing.T) {
+	handler, mockRepo := setupTestHandler()
+	ctx := contextWithTenant("tenant-1")
+	handler.SetOrchestratorFactory(func(_ *Connection) PipelineOrchestrator { return &fakeOrchestrator{} })
+
+	mockRepo.connections["basket-conn"] = &Connection{
+		ID:       "basket-conn",
+		TenantID: "tenant-1",
+		Name:     "basket sales",
+		Status:   "stopped",
+		Nodes: []*Node{
+			{ID: "src", Type: "consumer", Config: json.RawMessage(`{"type":"direct"}`), Enabled: true},
+			{ID: "dst", Type: "producer", Config: json.RawMessage(`{"type":"http","http":{"url":"https://example.test/intake"}}`), Enabled: true},
+		},
+		Edges: []*Edge{{ID: "e1", Source: "src", Target: "dst"}},
+	}
+
+	r := httptest.NewRequest("POST", "/api/v1/connections/basket-conn/start", nil)
+	r = r.WithContext(ctx)
+	r.SetPathValue("id", "basket-conn")
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.StartConnection(w, r)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("starting a connection with a direct source did not return: start is waiting for a service that does not exist")
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("starting a connection with a direct source was refused: %d %s", w.Code, w.Body.String())
+	}
+	if got := mockRepo.connections["basket-conn"].Status; got != "running" {
+		t.Errorf("the connection is %q after start, want running", got)
+	}
+}
+
 // Implement required Repository method
 func (m *MockRepository) GetConnectionByNameAndTenant(ctx context.Context, name, tenantID string) (*Connection, error) {
 	for _, conn := range m.connections {

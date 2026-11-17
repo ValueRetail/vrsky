@@ -415,6 +415,22 @@ describe('validatePipelineConnections', () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it('accepts a direct source, which has no settings, as the input', () => {
+      // "Published into VRSky": an outside publisher writes into the pipeline
+      // itself, so the node carries only its type.
+      const input = createNode('input', 'input', 'Published into VRSky')
+      input.data.config = { type: 'direct' }
+      const output = createNode('output', 'output', 'HTTP Producer')
+      output.data.config = { type: 'http', http: { url: 'https://example.test/intake' } }
+      const filter = createNode('filter', 'filter')
+      const edges = [createEdge('input', 'filter'), createEdge('filter', 'output')]
+
+      const result = validatePipelineConnections([input, filter, output], edges)
+
+      expect(result.valid).toBe(true)
+      expect(result.errors).toHaveLength(0)
+    })
+
     it('validates consumer -> filter -> producer pipeline', () => {
       const nodes = [
         createNode('input', 'input'),

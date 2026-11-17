@@ -47,9 +47,6 @@ export type TemplateField = {
   secret?: boolean
   /** Store the value as a number (ports, intervals): the connector reads an int. */
   numeric?: boolean
-  /** Store the value as a one-element list: the connector reads an array (the
-   *  NATS source's `servers`). The field shows and edits that one entry. */
-  asList?: boolean
   placeholder?: string
 }
 
@@ -69,6 +66,11 @@ export type PipelineTemplate = {
   webhookSource?: boolean
   /** Body POSTed by the "send sample event" button (webhook templates). */
   samplePayload?: unknown
+  /** Set when the source is `direct`: another system publishes into the
+   *  pipeline itself. The done screen then shows the connection id, the
+   *  workspace id and the subject, and `publisherSetup` says where the
+   *  publisher takes them. */
+  directSource?: { publisherSetup: string }
 }
 
 // Credential fields shared by both retail templates, for the node that talks
@@ -468,21 +470,19 @@ export const TEMPLATES: PipelineTemplate[] = [
     id: 'bifrost-sales-to-retailhero',
     name: 'POS sales → Retailhero (Bifrost Basket → Retailhero)',
     summary:
-      'Beta: against a Proposed Retailhero contract. Sends each Bifrost till sale and return from the tenant JetStream to Retailhero POS reconciliation, one batch per event, with an operation ID derived from the Basket event and the till journal position.',
+      "Beta: against a Proposed Retailhero contract. Bifrost's Basket service publishes each till sale and return into this pipeline, which sends it to Retailhero POS reconciliation, one batch per event, with an operation ID derived from the Basket event and the till journal position.",
     icon: '🧾',
-    sourceLabel: 'Bifrost Basket (NATS JetStream)',
+    sourceLabel: 'Bifrost Basket (published into VRSky)',
     destLabel: 'Retailhero (HTTP intake)',
     nodes: [
       {
         id: 'src',
         type: 'consumer',
-        // deliver_policy all: the first start reads what the stream still
-        // holds. Safe here because Retailhero keys every sale on its
-        // operation ID; a repeat is answered with the original result.
-        config: {
-          type: 'nats',
-          nats: { servers: [], auth_type: 'user_password', username: '', password: '', stream: '', durable: '', deliver_policy: 'all' },
-        },
+        // Basket publishes finished VRSky envelopes into VRSKY_DATA on
+        // vrsky.data.<workspace>.pipeline.<connection id> itself (Bifrost ADR
+        // 0002), with the Basket event as the payload. Nothing to configure;
+        // the filter below sees the event as Basket wrote it.
+        config: { type: 'direct' },
       },
       {
         id: 'flt',
@@ -561,17 +561,11 @@ export const TEMPLATES: PipelineTemplate[] = [
       { source: 'flt', target: 'conv' },
       { source: 'conv', target: 'dst' },
     ],
+    directSource: {
+      publisherSetup:
+        "Set Basket's BASKET_VRSKY_INTEGRATION_ID to the connection id above. Basket's tenant must be this workspace's id: VRSky resolves the pipeline's stored secrets, the intake credential among them, under the envelope's tenant. Stopping the pipeline in VRSky does not stop deliveries; stop Basket's publishing.",
+    },
     fields: [
-      {
-        nodeId: 'src', objectPath: 'nats', key: 'servers', asList: true,
-        label: 'Bifrost NATS server',
-        help: "The tenant JetStream server Bifrost publishes Basket events to, tls://host:4222. It must be reachable from VRSky and not a private address.",
-        placeholder: 'tls://nats.bifrost.example:4222',
-      },
-      { nodeId: 'src', objectPath: 'nats', key: 'username', label: 'NATS user', help: 'The user VRSky reads the stream as. It needs the permissions listed on the NATS connector page.', placeholder: 'vrsky-reader' },
-      { nodeId: 'src', objectPath: 'nats', key: 'password', label: 'NATS password', help: 'Stored encrypted, never saved in plain text.', secret: true, placeholder: 'password' },
-      { nodeId: 'src', objectPath: 'nats', key: 'stream', label: 'Stream', help: 'The JetStream stream that holds the Basket events.', placeholder: 'VRSKY_DATA' },
-      { nodeId: 'src', objectPath: 'nats', key: 'durable', label: 'Durable name', help: 'A name for the consumer VRSky creates on the stream. One per pipeline.', placeholder: 'vrsky-retailhero-sales' },
       {
         nodeId: 'conv', objectPath: 'mappings.3', key: 'value',
         label: 'Retailhero journal ID',

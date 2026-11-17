@@ -18,6 +18,7 @@ import SecretInput from './SecretInput'
 import SFTPConsumerConfig from './SFTPConsumerConfig'
 import CloudStorageConfigEditor from './CloudStorageConfigEditor'
 import NatsConfigEditor from './NatsConfigEditor'
+import DirectSourceInfo from './DirectSourceInfo'
 import BifrostCatalogueConfigEditor from './BifrostCatalogueConfigEditor'
 import WebhookSignatureConfig from './WebhookSignatureConfig'
 import OAuthGrantSelector from './OAuthGrantSelector'
@@ -26,6 +27,7 @@ import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
 import { SchemaTree } from './SchemaTree'
 import { discoverSchema, type SchemaField } from './schemaDiscovery'
+import { DIRECT_NO_SAMPLE } from './directSource'
 import { projectSchemaThroughFilter } from './schema'
 import { onKeyActivate, treeNodeKeyDown } from '../../utils/a11y'
 import TestConnectionButton from './TestConnectionButton'
@@ -1558,6 +1560,10 @@ function FilterConfig({
         const result = await resp.json()
         if (result.ok) { setSampleData(result.data); setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3))) }
         else { setDataError(result.error || 'No Brightpearl data to sample yet') }
+      } else if (consumerType === 'direct') {
+        // No last payload of its own; the sample endpoint would fall back to
+        // another pipeline's.
+        setDataError(DIRECT_NO_SAMPLE)
       } else {
         // Remaining types — Front Systems (push-only, webhook) + http webhooks —
         // can't be sampled pre-deploy, so read the deployed connection's last
@@ -2207,6 +2213,8 @@ function ConverterConfig({
         const resp = await fetch('http://localhost:9280/sample-data/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bp, tenant_id: currentTenant?.id }) })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Brightpearl data yet'))
+      } else if (consumerType === 'direct') {
+        setPreviewInput('// ' + DIRECT_NO_SAMPLE)
       } else {
         // Front Systems (push-only) + http webhooks: only a deployed connection
         // has a sample.
@@ -3151,6 +3159,7 @@ export default function PropertyEditor({
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
                 { value: 'nats', label: 'NATS JetStream (external)' },
+                { value: 'direct', label: 'Published into VRSky' },
                 { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
                 { value: 'sitoo', label: 'Sitoo (POS)' },
                 { value: 'front_systems', label: 'Front Systems (POS)' },
@@ -3385,6 +3394,8 @@ export default function PropertyEditor({
             {/* Keyed by node: the editor keeps the typed server list in its own
                 state, which must not carry over to another NATS node. */}
             {config.type === 'nats' && <NatsConfigEditor key={node.id} config={config} setConfig={setConfig} />}
+
+            {config.type === 'direct' && <DirectSourceInfo deployedConnectionId={deployedConnectionId} />}
 
             {config.type === 'cloud_storage' && (
               <CloudStorageConfigEditor config={config} setConfig={setConfig} role="consumer" />

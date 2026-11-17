@@ -147,6 +147,33 @@ func TestValidateNodeConfigs_NonXMLTransformsNeedNothingExtra(t *testing.T) {
 	}
 }
 
+// A direct source is written into VRSKY_DATA by an outside publisher (Bifrost
+// Basket, Bifrost ADR 0002). There is nothing to configure, so a bare
+// {"type":"direct"} must save and start.
+func TestValidateNodeConfigs_ADirectSourceNeedsNoSettings(t *testing.T) {
+	v := NewValidator()
+	conn := pipeline(`{"type":"direct"}`, okHTTPDest)
+	if err := v.ValidateDAG(conn); err != nil {
+		t.Fatalf("a pipeline with a direct source could not be saved: %v", err)
+	}
+	if err := v.ValidateNodeConfigs(conn); err != nil {
+		t.Fatalf("a pipeline with a direct source could not be started: %v", err)
+	}
+}
+
+// Only the source end can be published into. A destination of type direct
+// would accept messages and deliver them nowhere.
+func TestValidateNodeConfigs_DirectIsNotADestination(t *testing.T) {
+	v := NewValidator()
+	err := v.ValidateNodeConfigs(pipeline(okFileSource, `{"type":"direct"}`))
+	if err == nil {
+		t.Fatal("a destination of type direct was accepted, so its messages would go nowhere")
+	}
+	if !strings.Contains(err.Error(), `"direct" is not a valid destination type`) {
+		t.Errorf("the refusal should say direct is not a destination, got: %v", err)
+	}
+}
+
 // Saving an incomplete pipeline must stay possible: nodes exist on the canvas
 // before their type is chosen, and ValidateDAG runs on every save.
 func TestValidateDAG_StillAcceptsAnUnconfiguredPipeline(t *testing.T) {
@@ -218,8 +245,14 @@ func TestNodeConfigRulesCoverUI(t *testing.T) {
 //
 // Empty this map as the services ship; do not add to it to silence a failure.
 // It is currently empty, which is the state to keep it in: every type the UI
-// offers has a service that runs it.
+// offers has a service that runs it, or is in serviceless below.
 var deployExceptions = map[string]string{}
+
+// serviceless are the node kinds no connector service serves, on purpose.
+// A "direct" source is written into VRSKY_DATA by an outside publisher; the
+// pipeline workers take it from there. Any other rule without a service is a
+// mistake, and TestNodeConfigRulesAreDeployed fails on it.
+var serviceless = map[nodeKind]bool{{"consumer", "direct"}: true}
 
 // The other half of the ADR 0004 invariant: "a node type with no service in that
 // table is a type the platform silently cannot run — that is the failure #205
@@ -241,7 +274,14 @@ func TestNodeConfigRulesAreDeployed(t *testing.T) {
 	// Every service a validator rule promises must actually be deployed.
 	seen := make(map[string]bool)
 	for kind, rule := range nodeConfigRules {
-		if rule.service == "" || seen[rule.service] {
+		if rule.service == "" {
+			if !serviceless[kind] {
+				t.Errorf("node type %s/%s has no service, so nothing would run it (#205). Name its service, "+
+					"or add it to serviceless if an outside publisher feeds it.", kind.node, kind.config)
+			}
+			continue
+		}
+		if seen[rule.service] {
 			continue
 		}
 		seen[rule.service] = true

@@ -1717,6 +1717,26 @@ Last updated 2026-10-28.
     `RetryOptions`' row check is the only read that honours the retry's
     context. Pass the `ctx` `tryStart` gets. Found in #725. Filed as #875.
 
+231. **The pipeline workers do not check an envelope's tenant against the
+    connection.** data-filter, data-converter and http-producer read the
+    connection by `integration_id` alone (`WHERE id = $1`); only the
+    secrets are resolved under the envelope's `tenant_id`. With a `direct`
+    source an outside system publishes into `VRSKY_DATA`, so what keeps a
+    message out of another workspace's pipeline is the publisher's NATS
+    permission on `vrsky.data.<tenant>.>`, not VRSky. Drop (and count) an
+    envelope whose tenant does not own the connection, and whose subject
+    tenant differs from its `tenant_id`. Tenant isolation, so a human
+    reviews it. Found while adding the `direct` source.
+
+232. **Stopping a connection with a `direct` source does not stop it.** The
+    workers process every message on the connection's subject whatever its
+    status; for other sources stop works because VRSky's own consumer stops.
+    With an outside publisher nothing stops. Either the workers skip (and
+    ack, or hold) messages of a connection that is not running, read from
+    the same cached row they already load, or the stop is refused with a
+    message saying to stop the publisher. Changes pipeline delivery
+    semantics. Found while adding the `direct` source.
+
 ## Human
 
 5. ~~**Grant the deploy identity Cost Management Reader** on both resource

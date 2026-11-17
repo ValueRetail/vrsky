@@ -24,6 +24,7 @@ import { config } from '../config/env'
 import { subscribeWorkerEvents, type EventWorker } from '../services/workerEvents'
 import RemoteAgentPanel from '../components/Pipeline/RemoteAgentPanel'
 import { remoteAgentDetail, remoteAgentEnds, type RemoteAgentEnd } from '../components/Pipeline/remoteAgentEnds'
+import { directSubject } from '../components/Pipeline/directSource'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
 import { useNodeDrag } from '../hooks/useNodeDrag'
 import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
@@ -44,7 +45,7 @@ const fileApiHeaders = (): Record<string, string> => {
 
 export default function PipelineBuilder() {
   const navigate = useNavigate()
-  const { user, isAuthenticated, logout } = useAuthStore()
+  const { user, isAuthenticated, logout, currentTenant } = useAuthStore()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
 
@@ -564,6 +565,8 @@ export default function PipelineBuilder() {
       if (consumerType === 'file') consumerDetail = (consumerNode?.data?.config?.file as FileCfg | undefined)?.path || ''
       if (consumerType === 'http') consumerDetail = `${config.webhookIngressUrl}/webhook/${connectionId}`
       if (consumerType === 'remote_agent') consumerDetail = remoteAgentDetail(consumerNode?.data?.config)
+      // The publisher needs the subject, which carries both ids.
+      if (consumerType === 'direct') consumerDetail = directSubject(currentTenant?.id, connectionId)
       if (consumerType === 'database') {
         const dc = (consumerNode?.data?.config?.database as DbCfg | undefined) || {}
         consumerDetail = `${dc.host || ''}:${dc.port || 5432}/${dc.database || ''} → ${dc.table || dc.query || ''}`

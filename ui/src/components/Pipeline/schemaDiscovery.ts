@@ -4,6 +4,8 @@
 import apiClient from '../../services/api'
 import { inferSchema, fieldsFromColumns, sqlTypeToBadge, sfTypeToBadge, type SchemaField } from './schema'
 
+import { DIRECT_NO_SAMPLE } from './directSource'
+
 export type { SchemaField } from './schema'
 
 interface DBColumn {
@@ -188,6 +190,11 @@ export async function discoverSchema(
       if (!data.ok) throw new Error((data.error as string) || 'No Brightpearl data to sample yet')
       return inferSchema(data.data)
     }
+
+    case 'direct':
+      // Nothing of VRSky's reads this source, so it never gets a last payload,
+      // and the sample-data endpoint would answer with another pipeline's.
+      throw new Error(DIRECT_NO_SAMPLE)
 
     default: {
       // Front Systems (push-only) + http/webhook: the only sample is a deployed
