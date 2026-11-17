@@ -1644,6 +1644,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../direct/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Published into VRSky
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../salesforce/" class="md-nav__link">
         
   
@@ -2661,8 +2689,8 @@ sends each sale and return a Bifrost till records to Retailhero's POS reconcilia
 (C3), so Retailhero can reconcile what the tills sold against its own stock.
 It is a beta: the Retailhero side is a Proposed contract and its HTTP intake
 is not built yet (see <a href="#open-questions">what is still open</a>).</p>
-<div class="highlight"><pre><span></span><code>Bifrost tenant JetStream ──► filter ──► converter ──► HTTP producer ──► Retailhero C3 intake
-   (nats source)          till sales     batch of one    POST JSON
+<div class="highlight"><pre><span></span><code>Basket ──► VRSKY_DATA ──► filter ──► converter ──► HTTP producer ──► Retailhero C3 intake
+        (direct source)  till sales  batch of one    POST JSON
 </code></pre></div>
 <h2 id="how-it-sits-beside-till-business-central">How it sits beside till → Business Central<a class="headerlink" href="#how-it-sits-beside-till-business-central" title="Permanent link">&para;</a></h2>
 <p>Bifrost's <code>docs/sales-to-bc.md</code> describes a temporary road: the till posts each
@@ -2680,7 +2708,7 @@ Business Central. This template is a different road for a different purpose.</p>
 <tr>
 <td>Starts at</td>
 <td>the till's outbox, over a signed webhook</td>
-<td>Basket's <code>basket.sale-recorded</code> and <code>basket.return-recorded</code> events on the tenant JetStream</td>
+<td>Basket's <code>basket.sale-recorded</code> and <code>basket.return-recorded</code> events, which Basket publishes into the pipeline</td>
 </tr>
 <tr>
 <td>Ends at</td>
@@ -2703,10 +2731,12 @@ Business Central. This template is a different road for a different purpose.</p>
 nodes, and switching off the BC webhook does not touch this pipeline.</p>
 <h2 id="what-the-pipeline-does">What the pipeline does<a class="headerlink" href="#what-the-pipeline-does" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>Source.</strong> A NATS JetStream source reads the stream Bifrost publishes
-   Basket events to (<a href="../nats/">NATS connector</a>). It uses a durable consumer
-   with <code>deliver_policy: all</code>, so the first start reads what the stream still
-   holds. That is safe because every sale carries a fixed operation ID (below).</li>
+<li><strong>Source.</strong> Basket publishes each event into the pipeline itself
+   (<a href="../direct/">Published into VRSky</a>, Bifrost ADR 0002): a VRSky envelope on
+   <code>VRSKY_DATA</code>, subject <code>vrsky.data.&lt;workspace id&gt;.pipeline.&lt;connection id&gt;</code>,
+   with the Basket event as the payload, the workspace id as <code>tenant_id</code> and
+   the connection id as <code>integration_id</code>. VRSky runs nothing for this source;
+   the filter takes the event as Basket wrote it.</li>
 <li><strong>Filter.</strong> Only <code>basket.sale-recorded</code> and <code>basket.return-recorded</code>
    events whose <code>source.kind</code> is <code>pos</code> pass (<code>event_type</code> <em>is one of</em> the two).
    Retailhero refuses a whole batch on an event type its profile does not map
@@ -2841,8 +2871,8 @@ ID, which stays the same on every delivery and is also the JetStream
 sends an amendment or a void, because a paid sale is corrected only by a
 return (kassasystemforskrifta § 2-7). So:</p>
 <ul>
-<li>a redelivery from Bifrost's stream, a retry of the HTTP call, or a restart
-  that reads the event again all send the same ID;</li>
+<li>Basket publishing the event again, a redelivery from <code>VRSKY_DATA</code>, or a
+  retry of the HTTP call all send the same ID;</li>
 <li>Retailhero answers a repeat of an operation with the original result
   (C3 contract, idempotency), so a sale is counted once;</li>
 <li>two different sales never share an ID, because their event IDs differ.</li>
@@ -2866,14 +2896,6 @@ operation ID is what holds after that.</p>
 </thead>
 <tbody>
 <tr>
-<td>Bifrost NATS server, user, password</td>
-<td>where and as whom VRSky reads. The password is stored as a secret.</td>
-</tr>
-<tr>
-<td>Stream, durable name</td>
-<td>the stream that holds Basket events, and a name for the consumer VRSky creates</td>
-</tr>
-<tr>
 <td>Retailhero journal ID</td>
 <td>the journal Retailhero registered for this till source</td>
 </tr>
@@ -2887,9 +2909,18 @@ operation ID is what holds after that.</p>
 </tr>
 </tbody>
 </table>
-<p>Before you start it: the NATS user needs the permissions listed on the
-<a href="../nats/#notes">NATS page</a>. The connection does not start without the intake
-credential. A wrong or expired credential is answered <code>401</code>, which is retried
+<p>After deploy the wizard shows the connection id, the workspace id and the
+subject. On Basket's side:</p>
+<ul>
+<li>set <code>BASKET_VRSKY_INTEGRATION_ID</code> to the connection id;</li>
+<li>Basket's tenant must be this workspace's id. VRSky resolves the pipeline's
+  stored secrets (the intake credential) under the envelope's tenant, so with
+  another tenant the destination cannot read its credential.</li>
+</ul>
+<p>Nothing arrives until Basket publishes. Stopping the connection in VRSky
+does not stop deliveries; stop Basket's publishing instead (see
+<a href="../direct/#starting-and-stopping">Published into VRSky</a>).</p>
+<p>The connection does not start without the intake credential. A wrong or expired credential is answered <code>401</code>, which is retried
 and then dead-lettered, so nothing is lost; replay from the DLQ once the
 credential is fixed.</p>
 <h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
@@ -2901,12 +2932,6 @@ guessed in the template; each one is a place where it will change.</p>
    (Retailhero#2678) has not fixed the route or whether it folds both into one
    call. Retailhero's profile accepts <code>operationId</code> as a member of an entry,
    as this template sends it.</li>
-<li><strong>What is on the stream.</strong> The template assumes each message body is the
-   bare Basket event JSON, as in the examples in Bifrost's
-   <code>basket/docs/events/</code>. Bifrost's ADR 0002 says events travel in a VRSky
-   transport envelope on <code>VRSKY_DATA</code>. If the body is that envelope, the
-   converter must read the event from its <code>payload</code>. The stream name, subjects
-   and credentials for the tenant's JetStream are also not documented.</li>
 <li><strong>Fields Bifrost events do not carry</strong>, as the profile lists them (and asks
    Bifrost#248 for): the stock location apart from the store; the currency
    scale and the currencies a store sells in (NOK only is accepted); the unit
@@ -2917,6 +2942,9 @@ guessed in the template; each one is a place where it will change.</p>
 <p>Pipelines deployed from this template before #851/#852 keep their old filter
 and converter: they send sales only, without <code>journalPosition</code>. Deploy the
 template again to get the new nodes.</p>
+<p>Pipelines deployed from this template with the NATS source read Basket's
+envelope as a message body and wrap it in a second one, so the filter never
+sees the event. Deploy the template again to get the <code>direct</code> source.</p>
 <p>Settled, with the contract pinned for this path on 2026-11-11:</p>
 <ul>
 <li><strong>Authentication</strong> is a bearer credential from a stored secret (#850, PR
@@ -2929,6 +2957,14 @@ template again to get the new nodes.</p>
   paid sale is corrected only by a return (kassasystemforskrifta § 2-7).</li>
 <li><strong>Returns</strong> (#852): <code>basket.return-recorded</code> passes the filter and goes out
   with <code>bifrost-return-&lt;event_id&gt;-r1</code>.</li>
+<li><strong>What arrives</strong> (was open question 2): Basket publishes the VRSky
+  envelope into <code>VRSKY_DATA</code> itself (Bifrost ADR 0002), with the event as the
+  payload, <code>tenant_id</code> the workspace id and <code>integration_id</code> the connection
+  id. The template's source is <code>direct</code>, so the payload the filter sees is
+  the bare Basket event, as in <code>basket/docs/events/</code>. A live run through the
+  filter, converter and HTTP producer, with an idle webhook source standing
+  in for <code>direct</code>, showed it; <code>src/cmd/data-filter/bifrost_sales_test.go</code>
+  holds the filter half against an envelope written as Basket sends it.</li>
 <li><strong>Money</strong>: <code>unit_price</code> is the ex-VAT unit price before discount, and
   Retailhero uses the exact <code>line_ex_vat</code>, <code>line_vat</code> and <code>line_inc_vat</code> when
   the event has them.</li>
