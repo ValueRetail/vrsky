@@ -27,7 +27,12 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
-const bifrostJournal = "J-TEST-01"
+const (
+	bifrostJournal = "J-TEST-01"
+	// The day-close journal is the sales journal plus -Z (#880); the wizard
+	// writes it so. T07 is the register in Bifrost's day-close sample.
+	bifrostDayCloseJournal = "T07-Z"
+)
 
 func bifrostFixture(t *testing.T, name string) []byte {
 	t.Helper()
@@ -38,20 +43,32 @@ func bifrostFixture(t *testing.T, name string) []byte {
 	return raw
 }
 
-// bifrostConfig is the template's converter config with the wizard's journal
-// ID filled in.
+// bifrostConfig is the template's sales converter config with the wizard's
+// journal ID filled in.
 func bifrostConfig(t *testing.T) *ConverterNodeConfig {
 	t.Helper()
-	cfg := loadTemplateConfig(t, "bifrost-sales-to-retailhero.json")
+	return bifrostConfigWithJournal(t, "bifrost-sales-to-retailhero.json", bifrostJournal)
+}
+
+// bifrostDayCloseConfig is the template's day-close converter config (#880)
+// with the journal the wizard writes there filled in.
+func bifrostDayCloseConfig(t *testing.T) *ConverterNodeConfig {
+	t.Helper()
+	return bifrostConfigWithJournal(t, "bifrost-day-close-to-retailhero.json", bifrostDayCloseJournal)
+}
+
+func bifrostConfigWithJournal(t *testing.T, file, journal string) *ConverterNodeConfig {
+	t.Helper()
+	cfg := loadTemplateConfig(t, file)
 	filled := false
 	for i := range cfg.Mappings {
 		if m := &cfg.Mappings[i]; m.Type == "static" && m.Target == "journalId" {
-			m.Value = bifrostJournal
+			m.Value = journal
 			filled = true
 		}
 	}
 	if !filled {
-		t.Fatal("the template has no static journalId mapping for the wizard to fill")
+		t.Fatalf("%s has no static journalId mapping for the wizard to fill", file)
 	}
 	return cfg
 }
@@ -393,5 +410,132 @@ func TestPreview_ReportsAMissingRequiredField(t *testing.T) {
 	handlePreview(rec, httptest.NewRequest(http.MethodPost, "/preview/conn-1", bytes.NewReader(body)))
 	if !strings.Contains(rec.Body.String(), `"journalPosition": "42"`) {
 		t.Errorf("preview with the field = %s, want journalPosition \"42\"", rec.Body.String())
+	}
+}
+
+// --- The till's day close (#880) --------------------------------------------
+// basket-day-closed.v1.json is copied unchanged from ValueRetail/Bifrost
+// basket/docs/events/basket-day-closed.v1.json (Bifrost#538, main at d8c8d44).
+
+// The day-close sample through the day-close converter is one
+// BIFROST-BASKET-v1 batch on the -Z journal, at the Z number, with the event
+// unchanged as the only entry's event.
+func TestTemplate_BifrostDayClose_WrapsTheEventAsOneBatchOnTheZJournal(t *testing.T) {
+	event := bifrostFixture(t, "basket-day-closed.v1.json")
+	got := throughJetStream(t, bifrostDayCloseConfig(t), inputEnvelope(event, 1), 1)
+	if len(got) != 1 {
+		t.Fatalf("want one batch for one day close, got %d", len(got))
+	}
+	batch := decodeJSON(t, got[0].Payload)
+	assertJSONEqual(t, "batch", batch, decodeJSON(t, bifrostFixture(t, "intake-day-close-batch.json")))
+
+	b := batch.(map[string]interface{})
+	if b["journalId"] != "T07-Z" {
+		t.Errorf("journalId = %#v; a day close goes on the sales journal's -Z twin, T07-Z", b["journalId"])
+	}
+	entries := b["entries"].([]interface{})
+	if len(entries) != 1 {
+		t.Fatalf("want one entry, got %d", len(entries))
+	}
+	entry := entries[0].(map[string]interface{})
+	assertJSONEqual(t, "event", entry["event"], decodeJSON(t, event))
+	if entry["journalPosition"] != "1" {
+		t.Errorf("journalPosition = %#v, want the Z number as the string \"1\"", entry["journalPosition"])
+	}
+	for k := range b {
+		switch k {
+		case "profileVersion", "schemaVersion", "sourceInstanceId", "journalId", "entries":
+		default:
+			t.Errorf("unexpected batch member %q: Retailhero refuses the whole batch on one", k)
+		}
+	}
+	for k := range entry {
+		switch k {
+		case "operationId", "journalPosition", "event":
+		default:
+			t.Errorf("unexpected entry member %q: Retailhero refuses the whole batch on one", k)
+		}
+	}
+}
+
+// The day close's operation ID is bifrost-day-close-<event_id>, the same on
+// every delivery of one event and different for another, so a redelivered Z
+// report is counted once.
+func TestTemplate_BifrostDayClose_OperationIDFollowsTheEventID(t *testing.T) {
+	cfg := bifrostDayCloseConfig(t)
+	opID := func(payload []byte) string {
+		t.Helper()
+		got := throughJetStream(t, cfg, inputEnvelope(payload, 1), 1)
+		batch := decodeJSON(t, got[0].Payload).(map[string]interface{})
+		return batch["entries"].([]interface{})[0].(map[string]interface{})["operationId"].(string)
+	}
+	event := bifrostFixture(t, "basket-day-closed.v1.json")
+	var ev map[string]interface{}
+	if err := json.Unmarshal(event, &ev); err != nil {
+		t.Fatal(err)
+	}
+	ev["event_id"] = "6d0c5954-79ad-572e-806b-ffffffffffff"
+	other, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		payload []byte
+		want    string
+	}{
+		{"the sample", event, "bifrost-day-close-6d0c5954-79ad-572e-806b-31625e8b6b0a"},
+		{"the sample again, as a redelivery", event, "bifrost-day-close-6d0c5954-79ad-572e-806b-31625e8b6b0a"},
+		{"another event", other, "bifrost-day-close-6d0c5954-79ad-572e-806b-ffffffffffff"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := opID(c.payload)
+			if got != c.want {
+				t.Errorf("operation ID = %q, want %q", got, c.want)
+			}
+			if len(got) > 128 {
+				t.Errorf("operation ID is %d bytes; Retailhero identifiers are at most 128", len(got))
+			}
+		})
+	}
+}
+
+// A day close without a Z number has no journal position, and Retailhero
+// would refuse the batch. Nothing is published; the message fails with the
+// field named, so it is retried and then dead-lettered.
+func TestTemplate_BifrostDayClose_WithoutAZNumberIsNotSent(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(ev map[string]interface{})
+	}{
+		{"z_number missing", func(ev map[string]interface{}) { delete(ev["data"].(map[string]interface{}), "z_number") }},
+		{"z_number null", func(ev map[string]interface{}) { ev["data"].(map[string]interface{})["z_number"] = nil }},
+		{"z_number empty", func(ev map[string]interface{}) { ev["data"].(map[string]interface{})["z_number"] = "" }},
+		{"no data", func(ev map[string]interface{}) { delete(ev, "data") }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var ev map[string]interface{}
+			if err := json.Unmarshal(bifrostFixture(t, "basket-day-closed.v1.json"), &ev); err != nil {
+				t.Fatal(err)
+			}
+			c.edit(ev)
+			payload, err := json.Marshal(ev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, herr := throughHandler(t, bifrostDayCloseConfig(t), inputEnvelope(payload, 1))
+			if herr == nil {
+				t.Fatal("the message was acked; it must fail so it is retried and dead-lettered")
+			}
+			if !strings.Contains(herr.Error(), `"data.z_number"`) || !strings.Contains(herr.Error(), "required field missing") {
+				t.Errorf("error %q does not name data.z_number as a missing required field", herr)
+			}
+			if len(out) != 0 {
+				t.Errorf("a batch was published for a day close Retailhero would refuse: %s", out[0].Payload)
+			}
+		})
 	}
 }

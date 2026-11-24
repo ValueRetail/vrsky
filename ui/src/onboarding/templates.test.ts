@@ -10,11 +10,13 @@
 import { describe, it, expect } from 'vitest'
 import { SECRET_FIELDS } from '../utils/secrets'
 import { connectorKeysFor, CONVERTER_MAPPING_TYPES } from '../types/nodeConfig'
-import { TEMPLATES, type PipelineTemplate } from './templates'
+import { TEMPLATES, type PipelineTemplate, type TemplateField } from './templates'
 import sitooToBusinessCentral from './testdata/sitoo-to-business-central.json'
 import businessCentralToSitoo from './testdata/business-central-to-sitoo.json'
 import bifrostSalesConverter from './testdata/bifrost-sales-to-retailhero.json'
 import bifrostSalesFilter from './testdata/bifrost-sales-filter.json'
+import bifrostDayCloseConverter from './testdata/bifrost-day-close-to-retailhero.json'
+import bifrostDayCloseFilter from './testdata/bifrost-day-close-filter.json'
 import retailheroToBifrost from './testdata/retailhero-to-bifrost.json'
 
 // Walks a dot-path without creating anything, mirroring the wizard's readObj.
@@ -31,6 +33,16 @@ function at(root: Record<string, unknown>, path: string): unknown {
 const each = (fn: (t: PipelineTemplate) => void) =>
   TEMPLATES.forEach((t) => it(t.id, () => fn(t)))
 
+// Every place a field's value is written: the field itself, then its copies
+// (#880), which carry the field's key. The checks below hold a copy to the
+// same rules as the field, since the wizard writes both.
+type Placement = { f: TemplateField; nodeId: string; objectPath: string; key: string; suffix?: string }
+const placements = (t: PipelineTemplate): Placement[] =>
+  t.fields.flatMap((f) => [
+    { f, nodeId: f.nodeId, objectPath: f.objectPath, key: f.key },
+    ...(f.copies ?? []).map((c) => ({ f, nodeId: c.nodeId, objectPath: c.objectPath, key: f.key, suffix: c.suffix })),
+  ])
+
 describe('the catalog is not empty', () => {
   it('ships templates, and each has a unique id', () => {
     expect(TEMPLATES.length).toBeGreaterThan(0)
@@ -45,8 +57,8 @@ describe('every field points at a node that exists', () => {
   // pipeline deploys with an empty URL or no credential at all.
   each((t) => {
     const nodeIds = new Set(t.nodes.map((n) => n.id))
-    for (const f of t.fields) {
-      expect(nodeIds, `field ${f.key} targets unknown node ${f.nodeId}`).toContain(f.nodeId)
+    for (const p of placements(t)) {
+      expect(nodeIds, `field ${p.key} targets unknown node ${p.nodeId}`).toContain(p.nodeId)
     }
   })
 })
@@ -101,12 +113,12 @@ describe('no template ships a hardcoded credential', () => {
   // baked into the catalog is a credential committed to the repo, and every
   // tenant using that template would share it.
   each((t) => {
-    for (const f of t.fields.filter((f) => f.secret)) {
-      const obj = at(t.nodes.find((n) => n.id === f.nodeId)!.config as Record<string, unknown>, f.objectPath)
-      const pre = obj && typeof obj === 'object' ? (obj as Record<string, unknown>)[f.key] : undefined
+    for (const p of placements(t).filter((p) => p.f.secret)) {
+      const obj = at(t.nodes.find((n) => n.id === p.nodeId)!.config as Record<string, unknown>, p.objectPath)
+      const pre = obj && typeof obj === 'object' ? (obj as Record<string, unknown>)[p.key] : undefined
       expect(
         pre === undefined || pre === '',
-        `${t.id}: secret field "${f.key}" ships with the value ${JSON.stringify(pre)} baked in`
+        `${t.id}: secret field "${p.key}" ships with the value ${JSON.stringify(pre)} baked in on node ${p.nodeId}`
       ).toBe(true)
     }
   })
@@ -132,7 +144,7 @@ describe('direct-source templates tell the publisher where to write', () => {
     expect(Boolean(t.directSource), `${t.id}: a direct source and directSource must come together`).toBe(isDirect)
     if (!isDirect) return
     expect(t.directSource!.publisherSetup.trim(), `${t.id}: directSource.publisherSetup is empty`).not.toBe('')
-    expect(t.fields.filter((f) => f.nodeId === src.id), `${t.id}: a direct source has nothing to fill in`).toEqual([])
+    expect(placements(t).filter((p) => p.nodeId === src.id), `${t.id}: a direct source has nothing to fill in`).toEqual([])
   })
 })
 
@@ -200,7 +212,7 @@ describe('every key the connector needs is there or asked for', () => {
       if (!ck) continue
       const s = settings(n, ck.block)
       for (const k of ck.required) {
-        const asked = t.fields.some((f) => f.nodeId === n.id && f.key === k && f.objectPath === ck.block)
+        const asked = placements(t).some((p) => p.nodeId === n.id && p.key === k && p.objectPath === ck.block)
         const pre = s[k]
         const present = Array.isArray(pre) ? pre.length > 0 : pre !== undefined && pre !== ''
         expect(present || asked, `${t.id}: node ${n.id} needs "${k}", which is neither pre-filled nor a wizard field`).toBe(true)
@@ -221,11 +233,11 @@ describe('numbers stay numbers', () => {
           expect(typeof s[k], `${t.id}: node ${n.id} pre-fills "${k}" as ${typeof s[k]}`).toBe('number')
         }
       }
-      for (const f of t.fields.filter((f) => f.nodeId === n.id)) {
+      for (const p of placements(t).filter((p) => p.nodeId === n.id)) {
         expect(
-          Boolean(f.numeric),
-          `${t.id}: wizard field "${f.key}" must be ${ck.numeric.includes(f.key) ? '' : 'not '}marked numeric`
-        ).toBe(ck.numeric.includes(f.key))
+          Boolean(p.f.numeric),
+          `${t.id}: wizard field "${p.key}" must be ${ck.numeric.includes(p.key) ? '' : 'not '}marked numeric`
+        ).toBe(ck.numeric.includes(p.key))
       }
     }
   })
@@ -233,7 +245,7 @@ describe('numbers stay numbers', () => {
 
 describe('every wizard field lands on a key the connector reads', () => {
   each((t) => {
-    for (const f of t.fields) {
+    for (const f of placements(t)) {
       const n = t.nodes.find((n) => n.id === f.nodeId)
       if (!n) continue // reported by "every field points at a node that exists"
       const ck = connectorKeysFor(n.type, n.config)
@@ -283,12 +295,28 @@ describe('converter mappings use types the converter implements', () => {
 
 describe('a wizard value inside a converter mapping is a static value', () => {
   each((t) => {
+    for (const p of placements(t)) {
+      const n = t.nodes.find((n) => n.id === p.nodeId)
+      if (n?.type !== 'converter' || !p.objectPath.startsWith('mappings.')) continue
+      const m = at(n.config, p.objectPath) as Mapping | undefined
+      expect(m?.type, `${t.id}: field "${p.f.label}" writes into a ${m?.type} mapping on ${p.nodeId}, which ignores "value"`).toBe('static')
+      expect(p.key, `${t.id}: field "${p.f.label}" sets "${p.key}" on a static mapping`).toBe('value')
+    }
+  })
+})
+
+describe('a copy of a wizard value is a second place, not the same one', () => {
+  // A suffix on a secret would store a credential nobody issued, and on a
+  // number it would turn the number into text the connector refuses. A copy
+  // onto the field's own place would be overwritten with the suffix.
+  each((t) => {
     for (const f of t.fields) {
-      const n = t.nodes.find((n) => n.id === f.nodeId)
-      if (n?.type !== 'converter' || !f.objectPath.startsWith('mappings.')) continue
-      const m = at(n.config, f.objectPath) as Mapping | undefined
-      expect(m?.type, `${t.id}: field "${f.label}" writes into a ${m?.type} mapping, which ignores "value"`).toBe('static')
-      expect(f.key, `${t.id}: field "${f.label}" sets "${f.key}" on a static mapping`).toBe('value')
+      for (const c of f.copies ?? []) {
+        expect(c.nodeId === f.nodeId && c.objectPath === f.objectPath, `${t.id}: field "${f.label}" copies onto itself`).toBe(false)
+        if (c.suffix === undefined) continue
+        expect(c.suffix, `${t.id}: field "${f.label}" has an empty suffix`).not.toBe('')
+        expect(Boolean(f.secret || f.numeric), `${t.id}: field "${f.label}" puts a suffix on a secret or numeric value`).toBe(false)
+      }
     }
   })
 })
@@ -335,20 +363,61 @@ describe('Bifrost sales → Retailhero (#817)', () => {
   const t = () => TEMPLATES.find((t) => t.id === 'bifrost-sales-to-retailhero')!
   const node = (id: string) => t().nodes.find((n) => n.id === id)!
 
-  it('deploys the converter and filter the Go tests check', () => {
+  it('deploys the converters and filters the Go tests check', () => {
     // src/cmd/data-converter/bifrost_sales_test.go and
     // src/cmd/data-filter/bifrost_sales_test.go read these files.
     expect(node('conv').config).toEqual(bifrostSalesConverter)
     expect(node('flt').config).toEqual(bifrostSalesFilter)
+    expect(node('conv-z').config).toEqual(bifrostDayCloseConverter)
+    expect(node('flt-z').config).toEqual(bifrostDayCloseFilter)
   })
 
-  it('runs source, filter, converter, destination in that order', () => {
-    expect(t().nodes.map((n) => `${n.id}:${n.type}`)).toEqual(['src:consumer', 'flt:filter', 'conv:converter', 'dst:producer'])
+  it('runs source, filter, converter, destination for sales, and a branch of its own for the day close (#880)', () => {
+    expect(t().nodes.map((n) => `${n.id}:${n.type}`)).toEqual([
+      'src:consumer', 'flt:filter', 'conv:converter', 'dst:producer',
+      'flt-z:filter', 'conv-z:converter', 'dst-z:producer',
+    ])
     expect(t().edges).toEqual([
       { source: 'src', target: 'flt' },
       { source: 'flt', target: 'conv' },
       { source: 'conv', target: 'dst' },
+      { source: 'src', target: 'flt-z' },
+      { source: 'flt-z', target: 'conv-z' },
+      { source: 'conv-z', target: 'dst-z' },
     ])
+  })
+
+  it('forwards only a till day close on the day-close branch', () => {
+    const rules = node('flt-z').config.rules as { field: string; operator: string; value: string }[]
+    expect(rules).toEqual([
+      { field: 'event_type', operator: 'equals', value: 'basket.day-closed' },
+      { field: 'source.kind', operator: 'equals', value: 'pos' },
+      { field: 'event_id', operator: 'is_not_empty', value: '' },
+    ])
+    expect(node('flt-z').config.logic).toBe('and')
+  })
+
+  it('sends a day close as bifrost-day-close-<event_id> at its Z number, which it requires', () => {
+    const entries = (node('conv-z').config.mappings as Mapping[]).find((m) => m.type === 'each')!
+    const ms = entries.mappings as { target?: string; type?: string; source?: string; expression?: string; required?: boolean }[]
+    expect(ms.find((m) => m.target === 'operationId')).toMatchObject({ type: 'template', expression: 'bifrost-day-close-{event_id}' })
+    expect(ms.find((m) => m.target === 'journalPosition')).toEqual({ type: 'to_string', source: 'data.z_number', target: 'journalPosition', required: true })
+  })
+
+  it('writes the journal ID with -Z onto the day-close journal, and asks for nothing new', () => {
+    expect(t().fields.map((f) => f.label)).toEqual(['Retailhero journal ID', 'Retailhero intake URL', 'Retailhero intake credential'])
+    const f = t().fields.find((f) => f.label === 'Retailhero journal ID')!
+    expect(f.copies).toEqual([{ nodeId: 'conv-z', objectPath: 'mappings.3', suffix: '-Z' }])
+    const m = at(node('conv-z').config, 'mappings.3') as { type?: string; target?: string; value?: unknown }
+    expect(m).toMatchObject({ type: 'static', target: 'journalId', value: '' })
+  })
+
+  it('sends day closes to the same intake with the same credential', () => {
+    expect(node('dst-z').config).toEqual(node('dst').config)
+    for (const key of ['url', 'token']) {
+      const f = t().fields.find((f) => f.nodeId === 'dst' && f.key === key)!
+      expect(f.copies, key).toEqual([{ nodeId: 'dst-z', objectPath: 'http' }])
+    }
   })
 
   it('takes what Basket publishes into the pipeline and posts JSON over HTTP', () => {
@@ -357,6 +426,7 @@ describe('Bifrost sales → Retailhero (#817)', () => {
     // in a second one, so the filter would never see the event.
     expect(node('src').config).toEqual({ type: 'direct' })
     expect(node('dst').config).toMatchObject({ type: 'http', http: { method: 'POST', headers: { 'Content-Type': 'application/json' } } })
+    expect(t().edges.filter((e) => e.source === 'src').map((e) => e.target)).toEqual(['flt', 'flt-z'])
   })
 
   it("tells the user to give Basket the connection id and this workspace's id", () => {

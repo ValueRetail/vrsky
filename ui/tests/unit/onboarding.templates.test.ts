@@ -61,6 +61,15 @@ describe('onboarding templates', () => {
           }
         }
         expect(cur && typeof cur === 'object', `${t.id}.${f.key}: objectPath "${f.objectPath}" is not an object`).toBe(true)
+        // A copy (#880) is written the same way; a typo in its path would
+        // make the wizard create a stray object instead.
+        for (const c of f.copies ?? []) {
+          let at: unknown = nodeConfig(t, c.nodeId)
+          for (const part of c.objectPath ? c.objectPath.split('.') : []) {
+            at = at && typeof at === 'object' ? (at as Record<string, unknown>)[part] : undefined
+          }
+          expect(at && typeof at === 'object', `${t.id}.${f.key}: copy path ${c.nodeId}/"${c.objectPath}" is not an object`).toBe(true)
+        }
         expect(f.label.length).toBeGreaterThan(0)
         expect(f.help.length).toBeGreaterThan(0)
         if (f.secret) {
