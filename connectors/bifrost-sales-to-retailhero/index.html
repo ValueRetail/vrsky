@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2101,6 +2101,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-day-close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The day close
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#one-event-one-operation-id" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2634,6 +2645,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-day-close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The day close
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#one-event-one-operation-id" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2685,12 +2707,15 @@
 
 <h1 id="bifrost-sales-retailhero-template">Bifrost sales → Retailhero (template)<a class="headerlink" href="#bifrost-sales-retailhero-template" title="Permanent link">&para;</a></h1>
 <p>The onboarding template <strong>POS sales → Retailhero (Bifrost Basket → Retailhero)</strong>
-sends each sale and return a Bifrost till records to Retailhero's POS reconciliation
-(C3), so Retailhero can reconcile what the tills sold against its own stock.
+sends each sale and return a Bifrost till records, and each day close (Z
+report), to Retailhero's POS reconciliation (C3), so Retailhero can reconcile
+what the tills sold against its own stock.
 It is a beta: the Retailhero side is a Proposed contract and its HTTP intake
 is not built yet (see <a href="#open-questions">what is still open</a>).</p>
-<div class="highlight"><pre><span></span><code>Basket ──► VRSKY_DATA ──► filter ──► converter ──► HTTP producer ──► Retailhero C3 intake
-        (direct source)  till sales  batch of one    POST JSON
+<div class="highlight"><pre><span></span><code>Basket ──► VRSKY_DATA ─┬─► filter ──► converter ──► HTTP producer ──┬─► Retailhero C3 intake
+        (direct source) │   till sales  batch of one    POST JSON      │
+                        └─► filter ──► converter ──► HTTP producer ──┘
+                            day close   batch on &lt;journal&gt;-Z
 </code></pre></div>
 <h2 id="how-it-sits-beside-till-business-central">How it sits beside till → Business Central<a class="headerlink" href="#how-it-sits-beside-till-business-central" title="Permanent link">&para;</a></h2>
 <p>Bifrost's <code>docs/sales-to-bc.md</code> describes a temporary road: the till posts each
@@ -2708,7 +2733,7 @@ Business Central. This template is a different road for a different purpose.</p>
 <tr>
 <td>Starts at</td>
 <td>the till's outbox, over a signed webhook</td>
-<td>Basket's <code>basket.sale-recorded</code> and <code>basket.return-recorded</code> events, which Basket publishes into the pipeline</td>
+<td>Basket's <code>basket.sale-recorded</code>, <code>basket.return-recorded</code> and <code>basket.day-closed</code> events, which Basket publishes into the pipeline</td>
 </tr>
 <tr>
 <td>Ends at</td>
@@ -2736,13 +2761,14 @@ nodes, and switching off the BC webhook does not touch this pipeline.</p>
    <code>VRSKY_DATA</code>, subject <code>vrsky.data.&lt;workspace id&gt;.pipeline.&lt;connection id&gt;</code>,
    with the Basket event as the payload, the workspace id as <code>tenant_id</code> and
    the connection id as <code>integration_id</code>. VRSky runs nothing for this source;
-   the filter takes the event as Basket wrote it.</li>
+   both filters take the event as Basket wrote it.</li>
 <li><strong>Filter.</strong> Only <code>basket.sale-recorded</code> and <code>basket.return-recorded</code>
    events whose <code>source.kind</code> is <code>pos</code> pass (<code>event_type</code> <em>is one of</em> the two).
    Retailhero refuses a whole batch on an event type its profile does not map
    (<code>basket.created</code>, <code>basket.priced</code>, ...), and on an event that did not come
    from a POS. <code>basket.completed</code> and <code>basket.cancelled</code> map to no fact:
-   Retailhero only reports them back as skipped. They are not sent.</li>
+   Retailhero only reports them back as skipped. They are not sent. A day
+   close goes the other branch (<a href="#the-day-close">below</a>).</li>
 <li><strong>Converter.</strong> Wraps the event, unchanged, as the single entry of a
    <code>BIFROST-BASKET-v1</code> batch (table below). An event without
    <code>data.journal_sequence</code> is not converted: it is retried and then
@@ -2863,13 +2889,72 @@ Its <code>data</code> is the till's completed return (<code>credit_note_number</
 <code>return_reference</code> and <code>original_sale_reference</code>. Bifrost publishes only
 returns whose refund was approved. Totals are positive as refunded;
 Retailhero signs them.</p>
+<h2 id="the-day-close">The day close<a class="headerlink" href="#the-day-close" title="Permanent link">&para;</a></h2>
+<p>Basket publishes a till's day close (Z report) as <code>basket.day-closed</code>
+(ValueRetail/Bifrost#538). Retailhero takes it on the same route as sales and
+returns, on a journal of its own: the sales journal with <code>-Z</code> appended
+(<code>T07-Z</code> for <code>T07</code>, ValueRetail/Retailhero#3535). It runs on a second branch
+of the pipeline, <code>flt-z</code> → <code>conv-z</code> → <code>dst-z</code>, beside the sales branch, which
+is unchanged. Each node takes one predecessor, so the branches cannot share a
+producer; <code>dst-z</code> has the same URL and credential as <code>dst</code>.</p>
+<ul>
+<li><strong>Filter.</strong> <code>event_type</code> <em>equals</em> <code>basket.day-closed</code>, <code>source.kind</code> is
+  <code>pos</code>, and <code>event_id</code> is not empty. A sale or return does not pass it, and a
+  day close does not pass the sales filter.</li>
+<li><strong>Converter.</strong> The same wrapper as a sale:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Batch member</th>
+<th>From</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>profileVersion</code></td>
+<td>fixed <code>BIFROST-BASKET-v1</code></td>
+</tr>
+<tr>
+<td><code>schemaVersion</code></td>
+<td>fixed <code>1</code></td>
+</tr>
+<tr>
+<td><code>sourceInstanceId</code></td>
+<td>the event's <code>source.instance_id</code></td>
+</tr>
+<tr>
+<td><code>journalId</code></td>
+<td>the wizard field "Retailhero journal ID" plus <code>-Z</code></td>
+</tr>
+<tr>
+<td><code>entries[0].operationId</code></td>
+<td><code>bifrost-day-close-&lt;event_id&gt;</code></td>
+</tr>
+<tr>
+<td><code>entries[0].journalPosition</code></td>
+<td>the event's <code>data.z_number</code> as a decimal string (<code>"1"</code>); required</td>
+</tr>
+<tr>
+<td><code>entries[0].event</code></td>
+<td>the whole Basket event</td>
+</tr>
+</tbody>
+</table>
+<p>The operation ID is a <code>template</code> mapping, since the branch carries one event
+type. A day close without <code>data.z_number</code> is retried and dead-lettered with
+the field named, as a sale without <code>journal_sequence</code> is. The fixture
+<code>src/test/fixtures/bifrost/basket-day-closed.v1.json</code> is copied unchanged
+from Bifrost's <code>basket/docs/events/basket-day-closed.v1.json</code>.</p>
 <h2 id="one-event-one-operation-id">One event, one operation ID<a class="headerlink" href="#one-event-one-operation-id" title="Permanent link">&para;</a></h2>
 <p>The operation ID is <code>bifrost-sale-&lt;event_id&gt;-r1</code> for a sale and
 <code>bifrost-return-&lt;event_id&gt;-r1</code> for a return. <code>event_id</code> is the Basket event's
 ID, which stays the same on every delivery and is also the JetStream
 <code>Nats-Msg-Id</code>. The <code>r1</code> is the source revision. It is always 1: Bifrost never
 sends an amendment or a void, because a paid sale is corrected only by a
-return (kassasystemforskrifta § 2-7). So:</p>
+return (kassasystemforskrifta § 2-7). A day close is
+<code>bifrost-day-close-&lt;event_id&gt;</code>, without a revision, the form Retailhero expects
+(Retailhero#3535). So:</p>
 <ul>
 <li>Basket publishing the event again, a redelivery from <code>VRSKY_DATA</code>, or a
   retry of the HTTP call all send the same ID;</li>
@@ -2897,7 +2982,7 @@ operation ID is what holds after that.</p>
 <tbody>
 <tr>
 <td>Retailhero journal ID</td>
-<td>the journal Retailhero registered for this till source</td>
+<td>the journal Retailhero registered for this till source. Day closes go on the same ID with <code>-Z</code> appended</td>
 </tr>
 <tr>
 <td>Retailhero intake URL</td>
@@ -2909,6 +2994,10 @@ operation ID is what holds after that.</p>
 </tr>
 </tbody>
 </table>
+<p>Each value is asked once and written into both branches. The credential is
+stored as two secrets, one per destination. After deploy the two journal IDs,
+URLs and credentials are separate settings: to change one in the builder,
+change it on both branches.</p>
 <p>After deploy the wizard shows the connection id, the workspace id and the
 subject. On Basket's side:</p>
 <ul>
@@ -2932,6 +3021,14 @@ guessed in the template; each one is a place where it will change.</p>
    (Retailhero#2678) has not fixed the route or whether it folds both into one
    call. Retailhero's profile accepts <code>operationId</code> as a member of an entry,
    as this template sends it.</li>
+<li><strong>The day close on Retailhero's side.</strong> Retailhero's day-close intake
+   (ValueRetail/Retailhero#3535, PR #3536) was still open when the
+   day-close branch was added (#880). The branch sends what #880 specifies:
+   the event unchanged, on <code>&lt;journal&gt;-Z</code>, at <code>z_number</code>. Check the result
+   against Retailhero once that PR lands, in particular whether it reads the
+   event's fields as Bifrost names them (<code>journal_series</code>, <code>z_number</code>) and
+   whether it requires the journal ID to be the till's series (<code>T07</code>), in
+   which case the wizard's journal field must hold the series.</li>
 <li><strong>Fields Bifrost events do not carry</strong>, as the profile lists them (and asks
    Bifrost#248 for): the stock location apart from the store; the currency
    scale and the currencies a store sells in (NOK only is accepted); the unit
@@ -2939,6 +3036,8 @@ guessed in the template; each one is a place where it will change.</p>
    what a <code>basket.cancelled</code> means for a sale already recorded. The template
    invents none of them.</li>
 </ol>
+<p>Pipelines deployed from this template before #880 have no day-close branch
+and do not send day closes. Deploy the template again to get it.</p>
 <p>Pipelines deployed from this template before #851/#852 keep their old filter
 and converter: they send sales only, without <code>journalPosition</code>. Deploy the
 template again to get the new nodes.</p>
@@ -2957,7 +3056,7 @@ sees the event. Deploy the template again to get the <code>direct</code> source.
   paid sale is corrected only by a return (kassasystemforskrifta § 2-7).</li>
 <li><strong>Returns</strong> (#852): <code>basket.return-recorded</code> passes the filter and goes out
   with <code>bifrost-return-&lt;event_id&gt;-r1</code>.</li>
-<li><strong>What arrives</strong> (was open question 2): Basket publishes the VRSky
+<li><strong>What arrives</strong> (once an open question): Basket publishes the VRSky
   envelope into <code>VRSKY_DATA</code> itself (Bifrost ADR 0002), with the event as the
   payload, <code>tenant_id</code> the workspace id and <code>integration_id</code> the connection
   id. The template's source is <code>direct</code>, so the payload the filter sees is
