@@ -212,7 +212,15 @@ guessed in the template; each one is a place where it will change.
    (Retailhero#2678) has not fixed the route or whether it folds both into one
    call. Retailhero's profile accepts `operationId` as a member of an entry,
    as this template sends it.
-2. **Fields Bifrost events do not carry**, as the profile lists them (and asks
+2. **The day close on Retailhero's side.** Retailhero's day-close intake
+   (ValueRetail/Retailhero#3535, PR #3536) was still open when the
+   day-close branch was added (#880). The branch sends what #880 specifies:
+   the event unchanged, on `<journal>-Z`, at `z_number`. Check the result
+   against Retailhero once that PR lands, in particular whether it reads the
+   event's fields as Bifrost names them (`journal_series`, `z_number`) and
+   whether it requires the journal ID to be the till's series (`T07`), in
+   which case the wizard's journal field must hold the series.
+3. **Fields Bifrost events do not carry**, as the profile lists them (and asks
    Bifrost#248 for): the stock location apart from the store; the currency
    scale and the currencies a store sells in (NOK only is accepted); the unit
    of `quantity`; one time for the whole sale instead of one per line; and
@@ -242,7 +250,7 @@ Settled, with the contract pinned for this path on 2026-11-11:
   paid sale is corrected only by a return (kassasystemforskrifta § 2-7).
 - **Returns** (#852): `basket.return-recorded` passes the filter and goes out
   with `bifrost-return-<event_id>-r1`.
-- **What arrives** (was open question 2): Basket publishes the VRSky
+- **What arrives** (once an open question): Basket publishes the VRSky
   envelope into `VRSKY_DATA` itself (Bifrost ADR 0002), with the event as the
   payload, `tenant_id` the workspace id and `integration_id` the connection
   id. The template's source is `direct`, so the payload the filter sees is
