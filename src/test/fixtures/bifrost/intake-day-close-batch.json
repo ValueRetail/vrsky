@@ -1,0 +1,55 @@
+{
+  "profileVersion": "BIFROST-BASKET-v1",
+  "schemaVersion": "1",
+  "sourceInstanceId": "till-07",
+  "journalId": "T07-Z",
+  "entries": [
+    {
+      "operationId": "bifrost-day-close-6d0c5954-79ad-572e-806b-31625e8b6b0a",
+      "journalPosition": "1",
+      "event": {
+        "event_id": "6d0c5954-79ad-572e-806b-31625e8b6b0a",
+        "event_type": "basket.day-closed",
+        "schema_version": 1,
+        "tenant_id": "demo",
+        "source": {
+          "instance_id": "till-07",
+          "kind": "pos",
+          "location_id": "store-01",
+          "provider": "bifrost-till"
+        },
+        "occurred_at": "2026-09-23T19:02:05Z",
+        "correlation_id": "day-closed-T07-1",
+        "causation_id": "day-closed-T07-1",
+        "actor": {
+          "kind": "service",
+          "id": "basket-sales-01"
+        },
+        "data": {
+          "business_date": "2026-09-23",
+          "closed_at": "2026-09-23T19:02:00Z",
+          "first_sequence": 1,
+          "journal_series": "T07",
+          "last_sequence": 3,
+          "opened_at": "2026-09-23T06:58:00Z",
+          "register_id": "T07",
+          "returns": {
+            "count": 1,
+            "total_inc_vat": {
+              "amount": "21.90",
+              "currency": "NOK"
+            }
+          },
+          "sales": {
+            "count": 2,
+            "total_inc_vat": {
+              "amount": "371.30",
+              "currency": "NOK"
+            }
+          },
+          "z_number": 1
+        }
+      }
+    }
+  ]
+}

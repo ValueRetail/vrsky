@@ -176,3 +176,40 @@ func TestBifrostSales_AReturnBatchReachesTheIntakeUnchanged(t *testing.T) {
 		t.Errorf("journalPosition = %+v (%v), want \"43\"", batch.Entries, err)
 	}
 }
+
+// A day-close batch (#880) goes out the same way, unchanged, with the day
+// close's operation ID, on the -Z journal at the Z number.
+func TestBifrostSales_ADayCloseBatchReachesTheIntakeUnchanged(t *testing.T) {
+	stub := &retailheroIntake{ops: map[string]int{}}
+	srv := httptest.NewServer(stub)
+	defer srv.Close()
+	h := startBifrostProducer(t, srv.URL)
+
+	golden, err := os.ReadFile(filepath.Join("..", "..", "test", "fixtures", "bifrost", "intake-day-close-batch.json"))
+	if err != nil {
+		t.Fatalf("read golden day-close batch: %v", err)
+	}
+	h.Publish(t, batchEnvelope("bifrost-env-z1", golden))
+
+	harness.Eventually(t, 5*time.Second, "intake received the day close", func() bool { return stub.requests() == 1 })
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if string(stub.bodies[0]) != string(golden) {
+		t.Errorf("body changed on the way:\n got: %s\nwant: %s", stub.bodies[0], golden)
+	}
+	if n := stub.ops["bifrost-day-close-6d0c5954-79ad-572e-806b-31625e8b6b0a"]; n != 1 {
+		t.Errorf("day-close operation seen %d times, want 1 (%v)", n, stub.ops)
+	}
+	var batch struct {
+		JournalID string `json:"journalId"`
+		Entries   []struct {
+			JournalPosition string `json:"journalPosition"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(stub.bodies[0], &batch); err != nil {
+		t.Fatalf("the intake got a body that is not a batch: %v", err)
+	}
+	if batch.JournalID != "T07-Z" || len(batch.Entries) != 1 || batch.Entries[0].JournalPosition != "1" {
+		t.Errorf("journal %q at %+v, want T07-Z at position \"1\"", batch.JournalID, batch.Entries)
+	}
+}
