@@ -180,9 +180,50 @@ describe('deploying', () => {
     await waitFor(() => expect(post).toHaveBeenCalled())
 
     const nodes = post.mock.calls[0][1].nodes as { id: string; type: string; config: { type?: string; mappings: { value: unknown }[] } }[]
-    expect(nodes.map((n) => n.type)).toEqual(['consumer', 'filter', 'converter', 'producer'])
+    expect(nodes.map((n) => n.type)).toEqual(['consumer', 'filter', 'converter', 'producer', 'filter', 'converter', 'producer'])
     expect(nodes[0].config).toEqual({ type: 'direct' })
     expect(nodes[2].config.mappings[3].value).not.toBe('')
+  })
+
+  it('writes one journal ID, URL and credential into both Bifrost branches, the day close on the -Z journal (#880)', async () => {
+    const { container } = render(<OnboardingWizard />)
+    pick('Bifrost Basket')
+    fillEveryField(container)
+    const journal = screen.getByPlaceholderText('J-BIFROST-01')
+    fireEvent.change(journal, { target: { value: 'T07' } })
+    fireEvent.change(screen.getByPlaceholderText(/pos-reconciliation/), { target: { value: 'https://rh.test/intake' } })
+    fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'tok-1' } })
+
+    await waitFor(() => expect(deployButton()).toBeEnabled())
+    fireEvent.click(deployButton())
+    await waitFor(() => expect(post).toHaveBeenCalled())
+
+    type Sent = { id: string; config: { mappings?: { value: unknown }[]; http?: Record<string, unknown> } }
+    const nodes = post.mock.calls[0][1].nodes as Sent[]
+    const byId = (id: string) => nodes.find((n) => n.id === id)!
+    expect(byId('conv').config.mappings![3].value, 'the sales journal').toBe('T07')
+    expect(byId('conv-z').config.mappings![3].value, 'the day-close journal').toBe('T07-Z')
+    expect(byId('dst').config.http!.url).toBe('https://rh.test/intake')
+    expect(byId('dst-z').config.http!.url, 'day closes go to the same intake').toBe('https://rh.test/intake')
+    // Both destinations hand the credential to materializeSecrets, which
+    // stores it as a secret; neither ships without one.
+    const handed = (id: string) => (materialize.mock.calls.find((c) => c[1] === id)![0] as Sent['config']).http!.token
+    expect(handed('dst')).toBe('tok-1')
+    expect(handed('dst-z'), 'the day-close destination got no credential').toBe('tok-1')
+  })
+
+  it('derives the day-close journal from what the field holds now, not from earlier input', async () => {
+    const { container } = render(<OnboardingWizard />)
+    pick('Bifrost Basket')
+    fillEveryField(container)
+    const journal = screen.getByPlaceholderText('J-BIFROST-01')
+    for (const v of ['T0', '', 'T08']) fireEvent.change(journal, { target: { value: v } })
+
+    await waitFor(() => expect(deployButton()).toBeEnabled())
+    fireEvent.click(deployButton())
+    await waitFor(() => expect(post).toHaveBeenCalled())
+    const nodes = post.mock.calls[0][1].nodes as { id: string; config: { mappings?: { value: unknown }[] } }[]
+    expect(nodes.find((n) => n.id === 'conv-z')!.config.mappings![3].value).toBe('T08-Z')
   })
 
   it('keeps deploy disabled while a numeric field holds text', async () => {

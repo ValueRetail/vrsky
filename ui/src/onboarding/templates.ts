@@ -48,6 +48,11 @@ export type TemplateField = {
   /** Store the value as a number (ports, intervals): the connector reads an int. */
   numeric?: boolean
   placeholder?: string
+  /** More places the wizard writes the same value, under the same `key`: a
+   *  second branch of the graph that needs it too (#880). `suffix` is
+   *  appended to a non-empty value; not allowed on a secret or numeric
+   *  field. */
+  copies?: { nodeId: string; objectPath: string; suffix?: string }[]
 }
 
 export type PipelineTemplate = {
@@ -470,7 +475,7 @@ export const TEMPLATES: PipelineTemplate[] = [
     id: 'bifrost-sales-to-retailhero',
     name: 'POS sales → Retailhero (Bifrost Basket → Retailhero)',
     summary:
-      "Beta: against a Proposed Retailhero contract. Bifrost's Basket service publishes each till sale and return into this pipeline, which sends it to Retailhero POS reconciliation, one batch per event, with an operation ID derived from the Basket event and the till journal position.",
+      "Beta: against a Proposed Retailhero contract. Bifrost's Basket service publishes each till sale, return and day close into this pipeline, which sends it to Retailhero POS reconciliation, one batch per event, with an operation ID derived from the Basket event and the till journal position. Day closes go on the journal's -Z twin.",
     icon: '🧾',
     sourceLabel: 'Bifrost Basket (published into VRSky)',
     destLabel: 'Retailhero (HTTP intake)',
@@ -555,11 +560,67 @@ export const TEMPLATES: PipelineTemplate[] = [
           http: { url: '', method: 'POST', headers: { 'Content-Type': 'application/json' }, auth_type: 'bearer', token: '' },
         },
       },
+      // The till's day close (Z report, #880), on a branch of its own: every
+      // node takes one predecessor, so the converters cannot share a
+      // producer. Retailhero keeps day closes on the sales journal's -Z twin
+      // (Retailhero#3535); the wizard writes the journal field there with the
+      // suffix (fields below).
+      {
+        id: 'flt-z',
+        type: 'filter',
+        config: {
+          logic: 'and',
+          rules: [
+            { field: 'event_type', operator: 'equals', value: 'basket.day-closed' },
+            { field: 'source.kind', operator: 'equals', value: 'pos' },
+            { field: 'event_id', operator: 'is_not_empty', value: '' },
+          ],
+        },
+      },
+      {
+        id: 'conv-z',
+        type: 'converter',
+        // The same wrapper as conv. One event type here, so the operation ID
+        // is a plain template; journalPosition is the Z number, required.
+        // The wizard fills mappings.3 (journalId) with the journal plus -Z.
+        config: {
+          drop_unmapped: true,
+          mappings: [
+            { type: 'static', source: '', target: 'profileVersion', value: 'BIFROST-BASKET-v1' },
+            { type: 'static', source: '', target: 'schemaVersion', value: '1' },
+            { type: 'copy', source: 'source.instance_id', target: 'sourceInstanceId' },
+            { type: 'static', source: '', target: 'journalId', value: '' },
+            {
+              type: 'each',
+              source: '.',
+              target: 'entries',
+              drop_unmapped: true,
+              mappings: [
+                { type: 'template', source: '', target: 'operationId', expression: 'bifrost-day-close-{event_id}' },
+                { type: 'to_string', source: 'data.z_number', target: 'journalPosition', required: true },
+                { type: 'copy', source: '.', target: 'event' },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'dst-z',
+        type: 'producer',
+        // Same intake and credential as dst; the wizard writes both.
+        config: {
+          type: 'http',
+          http: { url: '', method: 'POST', headers: { 'Content-Type': 'application/json' }, auth_type: 'bearer', token: '' },
+        },
+      },
     ],
     edges: [
       { source: 'src', target: 'flt' },
       { source: 'flt', target: 'conv' },
       { source: 'conv', target: 'dst' },
+      { source: 'src', target: 'flt-z' },
+      { source: 'flt-z', target: 'conv-z' },
+      { source: 'conv-z', target: 'dst-z' },
     ],
     directSource: {
       publisherSetup:
@@ -569,20 +630,23 @@ export const TEMPLATES: PipelineTemplate[] = [
       {
         nodeId: 'conv', objectPath: 'mappings.3', key: 'value',
         label: 'Retailhero journal ID',
-        help: 'The journal Retailhero registered for this till source. Every batch names it. Ask the Retailhero operator; VRSky does not make one up.',
+        help: 'The journal Retailhero registered for this till source. Every sale and return batch names it; day closes go on the same journal with -Z appended (T07 gives T07-Z). Ask the Retailhero operator; VRSky does not make one up.',
         placeholder: 'J-BIFROST-01',
+        copies: [{ nodeId: 'conv-z', objectPath: 'mappings.3', suffix: '-Z' }],
       },
       {
         nodeId: 'dst', objectPath: 'http', key: 'url',
         label: 'Retailhero intake URL',
-        help: 'The POS reconciliation batch route of Retailhero, reachable from VRSky over the internet (the HTTP producer will not call a private address).',
+        help: 'The POS reconciliation batch route of Retailhero, reachable from VRSky over the internet (the HTTP producer will not call a private address). Sales, returns and day closes all go here.',
         placeholder: 'https://retailhero.example/api/v1/pos-reconciliation/batches',
+        copies: [{ nodeId: 'dst-z', objectPath: 'http' }],
       },
       {
         nodeId: 'dst', objectPath: 'http', key: 'token',
         label: 'Retailhero intake credential',
         help: 'The bearer credential Retailhero issued for this tenant and the POS intake. Sent as Authorization: Bearer. Stored encrypted, never saved in plain text.',
         secret: true, placeholder: 'bearer token',
+        copies: [{ nodeId: 'dst-z', objectPath: 'http' }],
       },
     ],
   },

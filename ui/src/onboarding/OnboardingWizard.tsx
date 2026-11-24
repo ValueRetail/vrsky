@@ -99,11 +99,17 @@ export default function OnboardingWizard() {
   // connectors unmarshal those keys into ints and reject a JSON string. An
   // empty or non-numeric entry is kept as the raw string so the field reads
   // as missing and deploy stays disabled.
+  // A field's copies (#880) get the same value, with their suffix appended
+  // to a non-empty one; an emptied field empties them too.
   const setFieldValue = (f: TemplateField, value: string) => {
     setConfigs((prev) => {
       const next = JSON.parse(JSON.stringify(prev)) as Record<string, Record<string, unknown>>
       const n = Number(value)
-      getObj(next[f.nodeId], f.objectPath)[f.key] = f.numeric && value.trim() !== '' && Number.isFinite(n) ? n : value
+      const stored = f.numeric && value.trim() !== '' && Number.isFinite(n) ? n : value
+      getObj(next[f.nodeId], f.objectPath)[f.key] = stored
+      for (const c of f.copies ?? []) {
+        getObj(next[c.nodeId], c.objectPath)[f.key] = typeof stored === 'string' && stored !== '' ? stored + (c.suffix ?? '') : stored
+      }
       return next
     })
   }
@@ -112,6 +118,7 @@ export default function OnboardingWizard() {
     setConfigs((prev) => {
       const next = JSON.parse(JSON.stringify(prev)) as Record<string, Record<string, unknown>>
       Object.assign(getObj(next[f.nodeId], f.objectPath), patch)
+      for (const c of f.copies ?? []) Object.assign(getObj(next[c.nodeId], c.objectPath), patch)
       return next
     })
   }
